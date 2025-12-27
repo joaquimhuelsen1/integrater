@@ -751,7 +751,7 @@ export function DealModal({
                     <div className="mt-1">
                       <ContactSelector
                         selectedContactId={contactId}
-                        selectedContact={selectedContact}
+                        selectedContact={selectedContact ?? null}
                         onSelect={(contact) => {
                           if (contact) {
                             setContactId(contact.id)
