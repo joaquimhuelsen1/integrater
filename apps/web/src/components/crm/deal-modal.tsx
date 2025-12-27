@@ -408,7 +408,9 @@ export function DealModal({
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!dealId || !e.target.files?.length) return
 
-    const file = e.target.files[0]
+    const file = e.target.files?.[0]
+    if (!file) return
+
     setIsUploadingFile(true)
 
     try {
