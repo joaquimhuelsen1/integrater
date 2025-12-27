@@ -1,6 +1,9 @@
 # Dockerfile para Workers (Telegram + Email)
 FROM python:3.11-slim
 
+# Logs em tempo real (sem buffering)
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
 # Instala FFmpeg (necessario para conversao de audio no Telegram)
