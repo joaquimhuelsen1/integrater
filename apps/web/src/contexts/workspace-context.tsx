@@ -70,9 +70,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setCurrentWorkspaceState(savedWorkspace)
       } else if (data.length > 0) {
         // Usa o default ou o primeiro
-        const defaultWs = data.find((ws) => ws.is_default) || data[0]
-        setCurrentWorkspaceState(defaultWs)
-        localStorage.setItem(STORAGE_KEY, defaultWs.id)
+        const defaultWs = data.find((ws) => ws.is_default) ?? data[0]
+        if (defaultWs) {
+          setCurrentWorkspaceState(defaultWs)
+          localStorage.setItem(STORAGE_KEY, defaultWs.id)
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro desconhecido")
