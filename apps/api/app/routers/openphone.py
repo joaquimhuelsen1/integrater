@@ -416,9 +416,11 @@ async def webhook_status(
     Atualiza status da mensagem no banco.
     """
     data = await request.json()
+    print(f"[OpenPhone] Status webhook: {data}")
 
     event_type = data.get("type")
     if event_type != "message.delivered":
+        print(f"[OpenPhone] Status ignorado: {event_type}")
         return {"status": "ignored", "reason": f"event type: {event_type}"}
 
     msg = data.get("data", {}).get("object", {})
@@ -428,9 +430,10 @@ async def webhook_status(
     if not external_id:
         return {"status": "ignored", "reason": "no message id"}
 
-    # Atualiza status da mensagem
+    # Atualiza status da mensagem (coluna correta: external_message_id)
+    print(f"[OpenPhone] Atualizando status: {external_id} -> {status}")
     db.table("messages").update({
         "metadata": {"openphone_status": status},
-    }).eq("external_id", external_id).execute()
+    }).eq("external_message_id", external_id).execute()
 
     return {"status": "updated", "message_status": status}
