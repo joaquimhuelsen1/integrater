@@ -430,10 +430,21 @@ async def webhook_status(
     if not external_id:
         return {"status": "ignored", "reason": "no message id"}
 
-    # Atualiza status da mensagem (coluna correta: external_message_id)
+    # Atualiza status da mensagem no payload
     print(f"[OpenPhone] Atualizando status: {external_id} -> {status}")
-    db.table("messages").update({
-        "metadata": {"openphone_status": status},
-    }).eq("external_message_id", external_id).execute()
 
-    return {"status": "updated", "message_status": status}
+    # Busca mensagem atual para preservar payload existente
+    msg_result = db.table("messages").select("payload").eq(
+        "external_message_id", external_id
+    ).execute()
+
+    if msg_result.data:
+        current_payload = msg_result.data[0].get("payload") or {}
+        current_payload["openphone_status"] = status
+        db.table("messages").update({
+            "payload": current_payload,
+        }).eq("external_message_id", external_id).execute()
+        return {"status": "updated", "message_status": status}
+
+    print(f"[OpenPhone] Mensagem não encontrada: {external_id}")
+    return {"status": "ignored", "reason": "message not found"}
