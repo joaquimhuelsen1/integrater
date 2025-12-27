@@ -82,6 +82,8 @@ async def send_message(
     external_id = None
 
     if channel == "openphone_sms":
+        print(f"[OpenPhone] Enviando SMS para conversa {data.conversation_id}")
+
         # Buscar conta de integração (da request ou primeira ativa)
         account_id = data.integration_account_id
         if not account_id:
@@ -98,15 +100,30 @@ async def send_message(
 
             if acc_result.data:
                 account = acc_result.data
-                # Buscar telefone do contato via contact_identities
-                identity_result = db.table("contact_identities").select("value").eq(
-                    "contact_id", conv["contact_id"]
-                ).eq("type", "phone").limit(1).execute()
+                to_phone = None
 
-                if identity_result.data and identity_result.data[0].get("value"):
-                    to_phone = identity_result.data[0]["value"]
+                # Primeiro tenta pelo primary_identity_id
+                if conv.get("primary_identity_id"):
+                    identity_result = db.table("contact_identities").select("value, type").eq(
+                        "id", conv["primary_identity_id"]
+                    ).single().execute()
+                    if identity_result.data and identity_result.data.get("type") == "phone":
+                        to_phone = identity_result.data.get("value")
+                        print(f"[OpenPhone] Telefone via primary_identity: {to_phone}")
+
+                # Fallback: busca pelo contact_id
+                if not to_phone and conv.get("contact_id"):
+                    identity_result = db.table("contact_identities").select("value").eq(
+                        "contact_id", conv["contact_id"]
+                    ).eq("type", "phone").limit(1).execute()
+                    if identity_result.data:
+                        to_phone = identity_result.data[0].get("value")
+                        print(f"[OpenPhone] Telefone via contact_id: {to_phone}")
+
+                if to_phone:
                     api_key = decrypt(account["secrets_encrypted"])
                     from_number = account["config"]["phone_number"]
+                    print(f"[OpenPhone] Enviando de {from_number} para {to_phone}")
 
                     # Enviar via OpenPhone API
                     try:
@@ -128,10 +145,15 @@ async def send_message(
                             resp_data = response.json().get("data", {})
                             external_id = resp_data.get("id")
                             send_status = "sent"
+                            print(f"[OpenPhone] Enviado com sucesso: {external_id}")
                         else:
                             send_status = "failed"
-                    except Exception:
+                            print(f"[OpenPhone] Erro ao enviar: {response.status_code} {response.text}")
+                    except Exception as e:
                         send_status = "failed"
+                        print(f"[OpenPhone] Exceção ao enviar: {e}")
+                else:
+                    print(f"[OpenPhone] Telefone não encontrado para conversa")
 
     # Atualizar external_message_id se enviou com sucesso
     if external_id:
