@@ -413,7 +413,7 @@ async def webhook_status(
 ):
     """
     Webhook para status de entrega (message.delivered).
-    Atualiza status da mensagem no banco.
+    Cria conversa/mensagem para outgoing e atualiza status.
     """
     try:
         data = await request.json()
@@ -426,14 +426,86 @@ async def webhook_status(
         msg = data.get("data", {}).get("object", {})
         external_id = msg.get("id")
         status = msg.get("status", "delivered")
+        direction = msg.get("direction")
+        from_phone = msg.get("from")
+        to_phone = msg.get("to")
+        body = msg.get("body", "")
+        phone_number_id = msg.get("phoneNumberId")
 
         if not external_id:
             return {"status": "ignored", "reason": "no message id"}
 
-        print(f"[OpenPhone] Status recebido: {external_id} -> {status}")
-        # Status update é opcional - não crítico se falhar
+        print(f"[OpenPhone] Status: {external_id} -> {status}, direction={direction}")
+
+        # Se é outgoing, cria conversa e mensagem
+        if direction == "outgoing":
+            # Busca conta OpenPhone pelo phoneNumberId ou from
+            account = await _get_openphone_account(db, phone_number_id)
+            if not account:
+                result = db.table("integration_accounts").select("*").eq(
+                    "type", "openphone"
+                ).execute()
+                for acc in result.data or []:
+                    if acc.get("config", {}).get("phone_number") == from_phone:
+                        account = acc
+                        break
+
+            if not account:
+                print(f"[OpenPhone] Conta não encontrada para {from_phone}")
+                return {"status": "ignored", "reason": "account not found"}
+
+            owner_id = account["owner_id"]
+            account_id = account["id"]
+            workspace_id = account.get("workspace_id")
+
+            # Verifica se mensagem já existe
+            existing = db.table("messages").select("id").eq(
+                "external_message_id", external_id
+            ).execute()
+            if existing.data:
+                print(f"[OpenPhone] Mensagem já existe: {external_id}")
+                return {"status": "ok", "message_status": status}
+
+            # Cria identity para o destinatário (to_phone)
+            identity = await _get_or_create_identity(db, owner_id, to_phone, workspace_id)
+            if not identity:
+                return {"status": "error", "reason": "failed to create identity"}
+
+            identity_id = identity["id"]
+
+            # Cria/busca conversa
+            conversation_id = await _get_or_create_conversation(
+                db, owner_id, identity_id, workspace_id
+            )
+            if not conversation_id:
+                return {"status": "error", "reason": "failed to create conversation"}
+
+            # Salva mensagem outgoing
+            message_data = {
+                "conversation_id": conversation_id,
+                "identity_id": identity_id,
+                "direction": "outbound",
+                "channel": "openphone_sms",
+                "text": body,
+                "external_message_id": external_id,
+                "integration_account_id": account_id,
+                "owner_id": owner_id,
+                "sent_at": msg.get("createdAt"),
+            }
+            db.table("messages").insert(message_data).execute()
+
+            # Atualiza conversa
+            db.table("conversations").update({
+                "last_message_at": msg.get("createdAt"),
+            }).eq("id", conversation_id).execute()
+
+            print(f"[OpenPhone] Mensagem outgoing criada: {conversation_id}")
+            return {"status": "created", "conversation_id": conversation_id}
+
         return {"status": "ok", "message_status": status}
 
     except Exception as e:
         print(f"[OpenPhone] Erro no status webhook: {e}")
+        import traceback
+        traceback.print_exc()
         return {"status": "ok"}
