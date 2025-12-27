@@ -312,12 +312,19 @@ async def webhook_inbound(
     payload = await request.body()
     data = await request.json()
 
+    # DEBUG: Log completo do payload
+    print(f"[OpenPhone] Webhook recebido: {data}")
+
     event_type = data.get("type")
+    print(f"[OpenPhone] Event type: {event_type}")
+
     if event_type != "message.received":
+        print(f"[OpenPhone] Ignorando evento: {event_type}")
         return {"status": "ignored", "reason": f"event type: {event_type}"}
 
     msg = data.get("data", {}).get("object", {})
     if not msg:
+        print(f"[OpenPhone] Sem dados de mensagem no payload")
         return {"status": "ignored", "reason": "no message data"}
 
     phone_number_id = msg.get("phoneNumberId")
@@ -325,21 +332,32 @@ async def webhook_inbound(
     body = msg.get("body", "")
     external_id = msg.get("id")
     media = msg.get("media", [])
+    to_phone = msg.get("to")
+
+    print(f"[OpenPhone] Mensagem: from={from_phone}, to={to_phone}, body={body[:50] if body else 'vazio'}")
+    print(f"[OpenPhone] phone_number_id={phone_number_id}, external_id={external_id}")
 
     # Busca conta OpenPhone
     account = await _get_openphone_account(db, phone_number_id)
+    print(f"[OpenPhone] Conta por phone_number_id: {account}")
     if not account:
         # Tenta buscar por número
+        print(f"[OpenPhone] Buscando por phone_number: {to_phone}")
         result = db.table("integration_accounts").select("*").eq(
             "type", "openphone"
         ).execute()
 
+        print(f"[OpenPhone] Contas encontradas: {len(result.data or [])} ")
         for acc in result.data or []:
-            if acc.get("config", {}).get("phone_number") == msg.get("to"):
+            acc_phone = acc.get("config", {}).get("phone_number")
+            print(f"[OpenPhone] Comparando: {acc_phone} == {to_phone}")
+            if acc_phone == to_phone:
                 account = acc
+                print(f"[OpenPhone] Match encontrado!")
                 break
 
     if not account:
+        print(f"[OpenPhone] ERRO: Conta não encontrada para {to_phone}")
         return {"status": "ignored", "reason": "account not found"}
 
     owner_id = account["owner_id"]
