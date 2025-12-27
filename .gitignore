@@ -1,0 +1,35 @@
+# Environment
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build
+.next/
+dist/
+build/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (nunca commitar!)
+*.pem
+*.key

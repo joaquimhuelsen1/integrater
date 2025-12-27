@@ -1,0 +1,918 @@
+"""
+Worker Telegram - Recebe e envia mensagens via Telethon
+
+Uso:
+    python worker.py
+
+Env vars necessárias:
+    SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+    ENCRYPTION_KEY
+    TELEGRAM_API_ID, TELEGRAM_API_HASH
+"""
+
+import asyncio
+import os
+import sys
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
+
+from dotenv import load_dotenv
+from telethon import TelegramClient, events
+from telethon.sessions import StringSession
+from telethon.tl.types import User, PeerUser
+
+# Adiciona shared ao path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from shared.db import get_supabase
+from shared.crypto import decrypt
+from shared.heartbeat import Heartbeat
+from supabase import create_client as create_supabase_client
+
+load_dotenv()
+
+
+class TelegramWorker:
+    def __init__(self):
+        self.api_id = int(os.environ["TELEGRAM_API_ID"])
+        self.api_hash = os.environ["TELEGRAM_API_HASH"]
+        self.clients: dict[str, TelegramClient] = {}
+        self.client_tasks: dict[str, asyncio.Task] = {}  # Tasks para run_until_disconnected
+        self.heartbeats: dict[str, Heartbeat] = {}
+        self.account_info: dict[str, dict] = {}  # acc_id -> {owner_id, ...}
+
+    async def start(self):
+        print("Telegram Worker iniciando...")
+
+        # Inicia loop de sincronização, envio e sync histórico em paralelo
+        await asyncio.gather(
+            self._sync_loop(),
+            self._outbound_loop(),
+            self._history_sync_loop(),
+        )
+
+    async def _sync_loop(self):
+        """Loop de sincronização de contas."""
+        while True:
+            try:
+                await self._sync_accounts()
+                await asyncio.sleep(60)
+            except Exception as e:
+                print(f"Erro no sync loop: {e}")
+                await asyncio.sleep(10)
+
+    async def _outbound_loop(self):
+        """Loop de envio de mensagens outbound."""
+        while True:
+            try:
+                await self._process_outbound_messages()
+                await asyncio.sleep(2)  # Verifica a cada 2s
+            except Exception as e:
+                print(f"Erro no outbound loop: {e}")
+                await asyncio.sleep(5)
+
+    async def _sync_accounts(self):
+        """Sincroniza contas ativas do banco."""
+        db = get_supabase()
+
+        result = db.table("integration_accounts").select(
+            "id, owner_id, secrets_encrypted, config"
+        ).eq("type", "telegram_user").eq("is_active", True).execute()
+
+        active_ids = set()
+
+        for acc in result.data:
+            acc_id = acc["id"]
+            active_ids.add(acc_id)
+
+            if acc_id not in self.clients:
+                await self._connect_account(acc)
+
+        # Desconecta contas removidas/desativadas
+        for acc_id in list(self.clients.keys()):
+            if acc_id not in active_ids:
+                await self._disconnect_account(acc_id)
+
+    async def _connect_account(self, account: dict):
+        """Conecta uma conta Telegram."""
+        acc_id = account["id"]
+        owner_id = account["owner_id"]
+
+        try:
+            # Descriptografa sessão
+            session_string = decrypt(account["secrets_encrypted"])
+
+            client = TelegramClient(
+                StringSession(session_string),
+                self.api_id,
+                self.api_hash,
+            )
+
+            await client.connect()
+
+            if not await client.is_user_authorized():
+                print(f"Conta {acc_id} não autorizada, removendo...")
+                self._mark_account_error(acc_id, "Sessão expirada")
+                await client.disconnect()
+                return
+
+            # Registra handlers (usa default args para capturar valores)
+            @client.on(events.NewMessage(incoming=True))
+            async def handler_incoming(event, _acc_id=acc_id, _owner_id=owner_id):
+                print(f"[DEBUG] Mensagem recebida para conta {_acc_id}")
+                await self._handle_incoming_message(_acc_id, _owner_id, event)
+
+            # Handler para mensagens enviadas pelo próprio usuário (em outros apps)
+            @client.on(events.NewMessage(outgoing=True))
+            async def handler_outgoing(event, _acc_id=acc_id, _owner_id=owner_id):
+                print(f"[DEBUG] Mensagem enviada pelo usuário para conta {_acc_id}")
+                await self._handle_outgoing_message(_acc_id, _owner_id, event)
+
+            # Inicia heartbeat
+            hb = Heartbeat(
+                owner_id=UUID(owner_id),
+                integration_account_id=UUID(acc_id),
+                worker_type="telegram",
+            )
+            await hb.start()
+
+            self.clients[acc_id] = client
+            self.heartbeats[acc_id] = hb
+            self.account_info[acc_id] = {
+                "owner_id": owner_id,
+                "config": account.get("config", {}),
+            }
+
+            # Inicia task para receber eventos
+            self.client_tasks[acc_id] = asyncio.create_task(
+                self._run_client(acc_id, client)
+            )
+
+            print(f"Conta {acc_id} conectada")
+
+            # Atualiza last_sync_at
+            db = get_supabase()
+            db.table("integration_accounts").update({
+                "last_sync_at": datetime.now(timezone.utc).isoformat(),
+                "last_error": None,
+            }).eq("id", acc_id).execute()
+
+        except Exception as e:
+            print(f"Erro ao conectar conta {acc_id}: {e}")
+            self._mark_account_error(acc_id, str(e))
+
+    async def _run_client(self, acc_id: str, client: TelegramClient):
+        """Mantém cliente rodando para receber eventos."""
+        try:
+            await client.run_until_disconnected()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"Erro no client loop {acc_id}: {e}")
+
+    async def _disconnect_account(self, acc_id: str):
+        """Desconecta uma conta."""
+        # Cancela task do cliente
+        if acc_id in self.client_tasks:
+            self.client_tasks[acc_id].cancel()
+            try:
+                await self.client_tasks[acc_id]
+            except asyncio.CancelledError:
+                pass
+            del self.client_tasks[acc_id]
+
+        if acc_id in self.heartbeats:
+            await self.heartbeats[acc_id].stop()
+            del self.heartbeats[acc_id]
+
+        if acc_id in self.clients:
+            await self.clients[acc_id].disconnect()
+            del self.clients[acc_id]
+
+        if acc_id in self.account_info:
+            del self.account_info[acc_id]
+
+        print(f"Conta {acc_id} desconectada")
+
+    async def _process_outbound_messages(self):
+        """Processa mensagens outbound pendentes."""
+        db = get_supabase()
+
+        # Busca mensagens outbound não enviadas (sem external_message_id real)
+        # Mensagens do frontend têm external_message_id começando com "local-"
+        result = db.table("messages").select(
+            "id, conversation_id, integration_account_id, identity_id, text, channel, sent_at"
+        ).eq("direction", "outbound").eq(
+            "channel", "telegram"
+        ).like("external_message_id", "local-%").limit(10).execute()
+
+        for msg in result.data:
+            await self._send_telegram_message(msg)
+
+    async def _send_telegram_message(self, message: dict):
+        """Envia uma mensagem via Telegram (com suporte a mídia)."""
+        acc_id = message.get("integration_account_id")
+
+        if not acc_id or acc_id not in self.clients:
+            return  # Conta não conectada ainda, tenta novamente depois
+
+        client = self.clients[acc_id]
+        db = get_supabase()
+
+        text = message.get("text") or ""
+        message_id = message["id"]
+
+        # Busca attachments da mensagem
+        att_result = db.table("attachments").select(
+            "id, storage_bucket, storage_path, file_name, mime_type"
+        ).eq("message_id", message_id).execute()
+
+        attachments = att_result.data or []
+
+        # Se não tem texto nem attachments
+        if not text.strip() and not attachments:
+            # Verifica se mensagem é recente (< 10s) - pode estar aguardando upload de attachments
+            sent_at_str = message.get("sent_at")
+            if sent_at_str:
+                from datetime import datetime
+                try:
+                    # Parse ISO format
+                    sent_at = datetime.fromisoformat(sent_at_str.replace("Z", "+00:00"))
+                    now = datetime.now(timezone.utc)
+                    age_seconds = (now - sent_at).total_seconds()
+                    if age_seconds < 10:
+                        print(f"Mensagem {message_id} sem conteúdo, aguardando attachments ({age_seconds:.1f}s)")
+                        return  # Pula, tenta novamente no próximo ciclo
+                except Exception:
+                    pass
+
+            print(f"Mensagem {message_id} sem texto nem mídia, marcando como erro")
+            db.table("messages").update({
+                "external_message_id": f"error-empty-{message_id}",
+            }).eq("id", message_id).execute()
+            return
+
+        try:
+            # Busca telegram_user_id do destinatário
+            identity_result = db.table("contact_identities").select(
+                "value"
+            ).eq("id", message["identity_id"]).execute()
+
+            if not identity_result.data:
+                print(f"Identity {message['identity_id']} não encontrada")
+                return
+
+            telegram_user_id = int(identity_result.data[0]["value"])
+
+            sent = None
+
+            # Se tem attachments, envia com mídia
+            if attachments:
+                sent = await self._send_with_attachments(
+                    client, telegram_user_id, text, attachments, db
+                )
+            else:
+                # Apenas texto
+                sent = await client.send_message(telegram_user_id, text)
+
+            if sent:
+                # Atualiza external_message_id com ID real
+                db.table("messages").update({
+                    "external_message_id": str(sent.id),
+                }).eq("id", message_id).execute()
+                print(f"Mensagem enviada para {telegram_user_id}")
+            else:
+                raise Exception("Falha ao enviar mensagem")
+
+        except Exception as e:
+            print(f"Erro ao enviar mensagem {message_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            # Marca erro na mensagem
+            db.table("messages").update({
+                "external_message_id": f"error-{message_id}",
+            }).eq("id", message_id).execute()
+
+    def _convert_webm_to_ogg(self, webm_bytes: bytes) -> bytes | None:
+        """Converte WebM para OGG Opus usando FFmpeg (requerido para voice notes Telegram)."""
+        import subprocess
+        import tempfile
+        import platform
+
+        try:
+            # Cria arquivos temporários
+            with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as webm_file:
+                webm_file.write(webm_bytes)
+                webm_path = webm_file.name
+
+            ogg_path = webm_path.replace(".webm", ".ogg")
+
+            # Determina caminho do FFmpeg (Windows vs Linux)
+            if platform.system() == "Windows":
+                ffmpeg_path = os.environ.get("FFMPEG_PATH", r"C:\ffmpeg\bin\ffmpeg.exe")
+            else:
+                ffmpeg_path = "ffmpeg"
+
+            # Converte com FFmpeg
+            result = subprocess.run([
+                ffmpeg_path, "-y",
+                "-i", webm_path,
+                "-c:a", "libopus",
+                "-b:a", "64k",
+                ogg_path
+            ], capture_output=True, timeout=30)
+
+            if result.returncode != 0:
+                print(f"FFmpeg erro: {result.stderr.decode()}")
+                return None
+
+            # Lê resultado
+            with open(ogg_path, "rb") as f:
+                ogg_bytes = f.read()
+
+            # Limpa arquivos temporários
+            os.unlink(webm_path)
+            os.unlink(ogg_path)
+
+            return ogg_bytes
+
+        except FileNotFoundError:
+            print("FFmpeg não encontrado - enviando WebM diretamente")
+            return None
+        except Exception as e:
+            print(f"Erro na conversão: {e}")
+            return None
+
+    async def _send_with_attachments(self, client, telegram_user_id: int, text: str, attachments: list, db):
+        """Envia mensagem com attachments (incluindo áudios como voice notes)."""
+        from supabase import create_client
+        import io
+
+        supabase_url = os.environ["SUPABASE_URL"]
+        supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+        storage_client = create_client(supabase_url, supabase_key)
+
+        sent = None
+        for i, att in enumerate(attachments):
+            try:
+                # Download do storage
+                file_bytes = storage_client.storage.from_(
+                    att["storage_bucket"]
+                ).download(att["storage_path"])
+
+                # Prepara caption (texto apenas no primeiro arquivo)
+                caption = text if i == 0 and text.strip() else None
+
+                mime_type = att.get("mime_type", "")
+                file_name = att["file_name"]
+                is_audio = mime_type.startswith("audio/") or mime_type == "application/ogg"
+                is_image = mime_type.startswith("image/")
+
+                # Se for WebM, converte para OGG (Telegram requer OGG Opus para voice notes)
+                if is_audio and (mime_type == "audio/webm" or file_name.endswith(".webm")):
+                    print(f"Convertendo {file_name} de WebM para OGG...")
+                    ogg_bytes = self._convert_webm_to_ogg(file_bytes)
+                    if ogg_bytes:
+                        file_bytes = ogg_bytes
+                        file_name = file_name.replace(".webm", ".ogg")
+                        mime_type = "audio/ogg"
+                        print(f"Conversão bem-sucedida: {file_name}")
+
+                # Envia arquivo
+                file_like = io.BytesIO(file_bytes)
+                file_like.name = file_name
+
+                if is_audio:
+                    # Envia como voice note
+                    sent = await client.send_file(
+                        telegram_user_id,
+                        file_like,
+                        caption=caption,
+                        voice_note=True,  # Envia como voice note
+                    )
+                    print(f"Áudio {file_name} enviado como voice note")
+                elif is_image:
+                    # Envia como foto
+                    sent = await client.send_file(
+                        telegram_user_id,
+                        file_like,
+                        caption=caption,
+                        force_document=False,
+                    )
+                    print(f"Imagem {att['file_name']} enviada")
+                else:
+                    # Envia como documento
+                    sent = await client.send_file(
+                        telegram_user_id,
+                        file_like,
+                        caption=caption,
+                        force_document=True,
+                    )
+                    print(f"Documento {att['file_name']} enviado")
+
+            except Exception as e:
+                print(f"Erro ao enviar attachment {att['id']}: {e}")
+
+        # Se tinha texto mas não conseguiu enviar com mídia, envia só texto
+        if not sent and text.strip():
+            sent = await client.send_message(telegram_user_id, text)
+
+        return sent
+
+    def _mark_account_error(self, acc_id: str, error: str):
+        """Marca erro na conta."""
+        db = get_supabase()
+        db.table("integration_accounts").update({
+            "last_error": error,
+        }).eq("id", acc_id).execute()
+
+    async def _handle_incoming_message(self, acc_id: str, owner_id: str, event):
+        """Processa mensagem recebida."""
+        try:
+            msg = event.message
+            text = msg.text or ""
+            has_media = msg.media is not None
+
+            print(f"[DEBUG] Processando mensagem: {text[:50] if text else '(mídia)'}, has_media={has_media}")
+            sender = await event.get_sender()
+            print(f"[DEBUG] Sender: {sender}")
+            if not isinstance(sender, User):
+                print(f"[DEBUG] Sender não é User, ignorando")
+                return  # Ignora mensagens de grupos/canais por enquanto
+
+            db = get_supabase()
+            client = self.clients[acc_id]
+
+            # Busca ou cria contact_identity (com avatar se novo)
+            telegram_user_id = str(sender.id)
+            identity = await self._get_or_create_identity(
+                db, owner_id, telegram_user_id, sender, client
+            )
+
+            # Busca ou cria conversa
+            conversation = await self._get_or_create_conversation(
+                db, owner_id, identity["id"], identity["contact_id"]
+            )
+
+            # Cria mensagem
+            now = datetime.now(timezone.utc).isoformat()
+            message_id = str(uuid4())
+
+            db.table("messages").insert({
+                "id": message_id,
+                "owner_id": owner_id,
+                "conversation_id": conversation["id"],
+                "integration_account_id": acc_id,
+                "identity_id": identity["id"],
+                "channel": "telegram",
+                "direction": "inbound",
+                "text": text if text else None,
+                "sent_at": msg.date.isoformat(),
+                "external_message_id": str(msg.id),
+                "raw_payload": {},
+            }).execute()
+
+            # Processa mídia se houver
+            if has_media:
+                await self._process_incoming_media(client, db, owner_id, message_id, msg)
+
+            # Atualiza conversa e incrementa unread_count
+            # Usa RPC para incrementar atomicamente
+            db.rpc("increment_unread", {"conv_id": conversation["id"]}).execute()
+            db.table("conversations").update({
+                "last_message_at": now,
+                "last_channel": "telegram",
+            }).eq("id", conversation["id"]).execute()
+
+            display_text = text[:50] if text else "(mídia)"
+            print(f"Mensagem recebida de {sender.first_name}: {display_text}...")
+
+        except Exception as e:
+            import traceback
+            print(f"Erro ao processar mensagem: {e}")
+            traceback.print_exc()
+
+    async def _handle_outgoing_message(self, acc_id: str, owner_id: str, event):
+        """Processa mensagem enviada pelo próprio usuário (em outros apps)."""
+        try:
+            msg = event.message
+            text = msg.text or ""
+            has_media = msg.media is not None
+
+            # Ignora se for mensagem de grupo/canal
+            if not event.is_private:
+                return
+
+            # Verifica se já foi processada pela ferramenta (tem external_message_id real)
+            db = get_supabase()
+            existing = db.table("messages").select("id").eq(
+                "external_message_id", str(msg.id)
+            ).execute()
+
+            if existing.data:
+                print(f"[DEBUG] Mensagem outgoing {msg.id} já existe, ignorando")
+                return
+
+            client = self.clients[acc_id]
+
+            # O destinatário é o chat
+            chat = await event.get_chat()
+            if not isinstance(chat, User):
+                return
+
+            # Busca ou cria identity para o destinatário (com avatar se novo)
+            telegram_user_id = str(chat.id)
+            identity = await self._get_or_create_identity(
+                db, owner_id, telegram_user_id, chat, client
+            )
+
+            # Busca ou cria conversa
+            conversation = await self._get_or_create_conversation(
+                db, owner_id, identity["id"], identity["contact_id"]
+            )
+
+            # Cria mensagem como outbound
+            now = datetime.now(timezone.utc).isoformat()
+            message_id = str(uuid4())
+
+            db.table("messages").insert({
+                "id": message_id,
+                "owner_id": owner_id,
+                "conversation_id": conversation["id"],
+                "integration_account_id": acc_id,
+                "identity_id": identity["id"],
+                "channel": "telegram",
+                "direction": "outbound",
+                "text": text if text else None,
+                "sent_at": msg.date.isoformat(),
+                "external_message_id": str(msg.id),
+                "raw_payload": {},
+            }).execute()
+
+            # Processa mídia se houver
+            if has_media:
+                await self._process_incoming_media(client, db, owner_id, message_id, msg)
+
+            # Atualiza conversa (sem incrementar unread - é outbound)
+            db.table("conversations").update({
+                "last_message_at": now,
+                "last_channel": "telegram",
+            }).eq("id", conversation["id"]).execute()
+
+            display_text = text[:50] if text else "(mídia)"
+            print(f"Mensagem enviada para {chat.first_name}: {display_text}...")
+
+        except Exception as e:
+            import traceback
+            print(f"Erro ao processar mensagem outgoing: {e}")
+            traceback.print_exc()
+
+    async def _process_incoming_media(self, client, db, owner_id: str, message_id: str, msg):
+        """Baixa e salva mídia de mensagem recebida."""
+        try:
+            from telethon.tl.types import DocumentAttributeAudio, DocumentAttributeFilename
+
+            # Baixa mídia para bytes
+            media_bytes = await client.download_media(msg, file=bytes)
+            if not media_bytes:
+                return
+
+            # Determina nome e tipo do arquivo
+            file_name = "media"
+            mime_type = "application/octet-stream"
+            is_voice = False
+
+            if hasattr(msg.media, "photo"):
+                file_name = f"photo_{msg.id}.jpg"
+                mime_type = "image/jpeg"
+            elif hasattr(msg.media, "document"):
+                doc = msg.media.document
+                mime_type = doc.mime_type or "application/octet-stream"
+
+                # Verifica se é voice note ou áudio
+                for attr in doc.attributes:
+                    if isinstance(attr, DocumentAttributeAudio):
+                        is_voice = getattr(attr, "voice", False)
+                        if is_voice:
+                            # Voice note - geralmente .ogg
+                            file_name = f"voice_{msg.id}.ogg"
+                            mime_type = "audio/ogg"
+                        else:
+                            # Áudio normal
+                            duration = getattr(attr, "duration", 0)
+                            title = getattr(attr, "title", None)
+                            if title:
+                                file_name = f"{title}.ogg"
+                            else:
+                                ext = mime_type.split("/")[-1] if "/" in mime_type else "ogg"
+                                file_name = f"audio_{msg.id}.{ext}"
+                        break
+                    elif isinstance(attr, DocumentAttributeFilename):
+                        file_name = attr.file_name
+                else:
+                    # Não encontrou atributos específicos
+                    ext = mime_type.split("/")[-1] if "/" in mime_type else "bin"
+                    file_name = f"file_{msg.id}.{ext}"
+
+            # Upload para Supabase Storage
+            storage_path = f"telegram/{owner_id}/{message_id}/{file_name}"
+
+            # Usa service role para upload
+            from supabase import create_client
+            supabase_url = os.environ["SUPABASE_URL"]
+            supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+            storage_client = create_client(supabase_url, supabase_key)
+
+            storage_client.storage.from_("attachments").upload(
+                storage_path,
+                media_bytes,
+                {"content-type": mime_type}
+            )
+
+            # Salva attachment no banco
+            attachment_id = str(uuid4())
+            db.table("attachments").insert({
+                "id": attachment_id,
+                "owner_id": owner_id,
+                "message_id": message_id,
+                "storage_bucket": "attachments",
+                "storage_path": storage_path,
+                "file_name": file_name,
+                "mime_type": mime_type,
+                "byte_size": len(media_bytes),
+            }).execute()
+
+            print(f"Mídia salva: {file_name} ({len(media_bytes)} bytes)")
+
+        except Exception as e:
+            print(f"Erro ao processar mídia: {e}")
+
+    async def _download_and_store_avatar(self, client: TelegramClient, owner_id: str, entity) -> str | None:
+        """Baixa foto de perfil do Telegram e salva no Supabase Storage."""
+        try:
+            photo_bytes = await client.download_profile_photo(entity, file=bytes)
+            if not photo_bytes:
+                return None
+
+            supabase_url = os.environ["SUPABASE_URL"]
+            supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+            storage_client = create_supabase_client(supabase_url, supabase_key)
+
+            telegram_id = entity.id
+            storage_path = f"telegram/{owner_id}/telegram_{telegram_id}.jpg"
+
+            # Remove foto antiga se existir
+            try:
+                storage_client.storage.from_("avatars").remove([storage_path])
+            except Exception:
+                pass
+
+            # Upload nova foto
+            storage_client.storage.from_("avatars").upload(
+                storage_path,
+                photo_bytes,
+                {"content-type": "image/jpeg"}
+            )
+
+            return f"{supabase_url}/storage/v1/object/public/avatars/{storage_path}"
+
+        except Exception as e:
+            print(f"[AVATAR] Erro ao baixar avatar para {entity.id}: {e}")
+            return None
+
+    async def _get_or_create_identity(self, db, owner_id: str, telegram_user_id: str, sender: User, client: TelegramClient = None) -> dict:
+        """Busca ou cria identity para o usuário Telegram (com avatar para novos)."""
+        # Busca identity existente
+        result = db.table("contact_identities").select(
+            "id, contact_id"
+        ).eq("owner_id", owner_id).eq(
+            "type", "telegram_user"
+        ).eq("value", telegram_user_id).execute()
+
+        if result.data:
+            return result.data[0]
+
+        # Baixa avatar apenas para identity NOVA
+        avatar_url = None
+        if client:
+            avatar_url = await self._download_and_store_avatar(client, owner_id, sender)
+
+        # Cria apenas identity (sem contato - PRD 5.4)
+        identity_id = str(uuid4())
+        db.table("contact_identities").insert({
+            "id": identity_id,
+            "owner_id": owner_id,
+            "contact_id": None,
+            "type": "telegram_user",
+            "value": telegram_user_id,
+            "metadata": {
+                "first_name": sender.first_name,
+                "last_name": sender.last_name,
+                "username": sender.username,
+                "avatar_url": avatar_url,
+            },
+        }).execute()
+
+        return {"id": identity_id, "contact_id": None}
+
+    async def _get_or_create_conversation(self, db, owner_id: str, identity_id: str, contact_id: str | None) -> dict:
+        """Busca ou cria conversa. Se contact_id existe, busca por contato. Senão, busca por identity."""
+        # Se tem contact_id, busca conversa do contato
+        if contact_id:
+            result = db.table("conversations").select(
+                "id"
+            ).eq("owner_id", owner_id).eq("contact_id", contact_id).execute()
+            if result.data:
+                return result.data[0]
+
+        # Busca conversa não vinculada pela identity
+        result = db.table("conversations").select(
+            "id"
+        ).eq("owner_id", owner_id).eq("primary_identity_id", identity_id).is_("contact_id", "null").execute()
+
+        if result.data:
+            return result.data[0]
+
+        # Cria conversa não vinculada (apenas com identity)
+        conv_id = str(uuid4())
+        db.table("conversations").insert({
+            "id": conv_id,
+            "owner_id": owner_id,
+            "contact_id": contact_id,  # None para não vinculadas
+            "primary_identity_id": identity_id,
+            "status": "open",
+            "last_channel": "telegram",
+            "last_message_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+
+        return {"id": conv_id}
+
+    async def _history_sync_loop(self):
+        """Loop para processar jobs de sincronização de histórico."""
+        while True:
+            try:
+                await self._process_history_sync_jobs()
+                await asyncio.sleep(2)  # Verifica a cada 2s
+            except Exception as e:
+                print(f"Erro no history sync loop: {e}")
+                await asyncio.sleep(10)
+
+    async def _process_history_sync_jobs(self):
+        """Processa jobs de sincronização de histórico pendentes."""
+        db = get_supabase()
+
+        # Busca jobs pendentes
+        result = db.table("sync_history_jobs").select(
+            "id, owner_id, conversation_id, integration_account_id, limit_messages"
+        ).eq("status", "pending").order("created_at").limit(5).execute()
+
+        for job in result.data:
+            await self._process_single_history_job(db, job)
+
+    async def _process_single_history_job(self, db, job: dict):
+        """Processa um job de sincronização de histórico."""
+        job_id = job["id"]
+        owner_id = job["owner_id"]
+        conversation_id = job["conversation_id"]
+        acc_id = job["integration_account_id"]
+        limit = job.get("limit_messages", 100)
+
+        print(f"[SYNC] Processando job {job_id} para conversa {conversation_id}")
+
+        # Marca como processing
+        db.table("sync_history_jobs").update({
+            "status": "processing",
+        }).eq("id", job_id).execute()
+
+        try:
+            # Verifica se temos cliente conectado para esta conta
+            if acc_id not in self.clients:
+                raise Exception(f"Conta {acc_id} não conectada")
+
+            client = self.clients[acc_id]
+
+            # Busca primary_identity_id da conversa para pegar telegram_user_id
+            conv_result = db.table("conversations").select(
+                "primary_identity_id"
+            ).eq("id", conversation_id).single().execute()
+
+            if not conv_result.data:
+                raise Exception("Conversa não encontrada")
+
+            identity_id = conv_result.data["primary_identity_id"]
+
+            # Busca telegram_user_id da identity
+            identity_result = db.table("contact_identities").select(
+                "value"
+            ).eq("id", identity_id).single().execute()
+
+            if not identity_result.data:
+                raise Exception("Identity não encontrada")
+
+            telegram_user_id = int(identity_result.data["value"])
+
+            # Resolve a entidade primeiro (necessário para usuários não-cacheados)
+            entity = None
+            try:
+                entity = await client.get_entity(telegram_user_id)
+            except ValueError:
+                # Tenta buscar pelo username se tiver nos metadados
+                identity_meta = db.table("contact_identities").select(
+                    "metadata"
+                ).eq("id", identity_id).single().execute()
+
+                username = identity_meta.data.get("metadata", {}).get("username") if identity_meta.data else None
+                if username:
+                    try:
+                        entity = await client.get_entity(f"@{username}")
+                    except Exception:
+                        pass
+
+            # Se ainda não encontrou, carrega todos os diálogos para popular cache
+            if not entity:
+                print(f"[SYNC] Carregando diálogos para popular cache...")
+                async for dialog in client.iter_dialogs():
+                    if dialog.entity and hasattr(dialog.entity, 'id') and dialog.entity.id == telegram_user_id:
+                        entity = dialog.entity
+                        print(f"[SYNC] Encontrado nos diálogos: {entity.id}")
+                        break
+
+            if not entity:
+                raise Exception(f"Usuário {telegram_user_id} não encontrado nos diálogos")
+
+            # Busca mensagens existentes para evitar duplicatas
+            existing_result = db.table("messages").select(
+                "external_message_id"
+            ).eq("conversation_id", conversation_id).execute()
+
+            existing_msg_ids = {m["external_message_id"] for m in existing_result.data}
+
+            # Busca histórico do Telegram
+            messages_synced = 0
+
+            async for msg in client.iter_messages(entity, limit=limit):
+                # Pula se já existe
+                if str(msg.id) in existing_msg_ids:
+                    continue
+
+                # Só processa mensagens com texto ou mídia
+                if not msg.text and not msg.media:
+                    continue
+
+                # Determina direção
+                direction = "outbound" if msg.out else "inbound"
+
+                # Cria mensagem
+                message_id = str(uuid4())
+                text = msg.text or ""
+                has_media = msg.media is not None
+
+                db.table("messages").insert({
+                    "id": message_id,
+                    "owner_id": owner_id,
+                    "conversation_id": conversation_id,
+                    "integration_account_id": acc_id,
+                    "identity_id": identity_id,
+                    "channel": "telegram",
+                    "direction": direction,
+                    "text": text if text else None,
+                    "sent_at": msg.date.isoformat(),
+                    "external_message_id": str(msg.id),
+                    "raw_payload": {},
+                }).execute()
+
+                # Processa mídia se houver
+                if has_media:
+                    await self._process_incoming_media(client, db, owner_id, message_id, msg)
+
+                messages_synced += 1
+
+            # Marca como completed
+            db.table("sync_history_jobs").update({
+                "status": "completed",
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+                "messages_synced": messages_synced,
+            }).eq("id", job_id).execute()
+
+            print(f"[SYNC] Job {job_id} concluído: {messages_synced} mensagens sincronizadas")
+
+        except Exception as e:
+            import traceback
+            print(f"[SYNC] Erro no job {job_id}: {e}")
+            traceback.print_exc()
+
+            # Marca como failed
+            db.table("sync_history_jobs").update({
+                "status": "failed",
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+                "error_message": str(e),
+            }).eq("id", job_id).execute()
+
+
+async def main():
+    worker = TelegramWorker()
+    await worker.start()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

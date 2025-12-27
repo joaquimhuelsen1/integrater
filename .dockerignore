@@ -1,0 +1,41 @@
+# Git
+.git
+.gitignore
+
+# Environment (nunca incluir no build!)
+.env
+.env.local
+*.env
+
+# Documentacao
+*.md
+docs/
+plans/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+.next/
+
+# IDEs
+.vscode/
+.idea/
+
+# Testes
+tests/
+*.test.*
+*.spec.*
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

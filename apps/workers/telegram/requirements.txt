@@ -1,0 +1,11 @@
+# Telegram MTProto
+telethon>=1.38.0
+
+# Database
+supabase>=2.10.0
+
+# Utils
+python-dotenv>=1.0.0
+
+# Security
+cryptography>=44.0.0

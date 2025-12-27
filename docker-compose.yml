@@ -1,0 +1,45 @@
+# Docker Compose - Inbox Multicanal
+# Uso: docker-compose up -d
+
+version: '3.8'
+
+services:
+  # API FastAPI
+  api:
+    build: ./apps/api
+    container_name: inbox-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./apps/api/.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Worker Telegram
+  telegram-worker:
+    build: ./apps/workers
+    container_name: inbox-telegram-worker
+    command: python telegram/worker.py
+    env_file:
+      - ./apps/workers/.env
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Worker Email
+  email-worker:
+    build: ./apps/workers
+    container_name: inbox-email-worker
+    command: python email/worker.py
+    env_file:
+      - ./apps/workers/.env
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
