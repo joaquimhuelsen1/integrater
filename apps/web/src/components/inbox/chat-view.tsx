@@ -1,0 +1,615 @@
+"use client"
+
+import { useRef, useEffect, useState, useCallback } from "react"
+import { Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw } from "lucide-react"
+import { MessageItem } from "./message-item"
+import { Composer } from "./composer"
+import { TagManager } from "./tag-manager"
+import { ContactManager } from "./contact-manager"
+import { DealQuickView } from "../crm/deal-quick-view"
+import type { Tag } from "./conversation-list"
+
+export interface Message {
+  id: string
+  conversation_id: string
+  direction: "inbound" | "outbound"
+  text: string | null
+  channel: "telegram" | "email" | "openphone_sms"
+  sent_at: string
+  attachments?: { id: string; file_name: string; mime_type: string; storage_path: string; storage_bucket?: string }[]
+}
+
+export interface Translation {
+  message_id: string
+  translated_text: string
+  source_lang: string | null
+}
+
+export interface Template {
+  id: string
+  title: string
+  body: string
+  shortcut: string | null
+}
+
+export interface AISuggestion {
+  id: string
+  content: string
+}
+
+interface ChatViewProps {
+  conversationId: string | null
+  messages: Message[]
+  displayName: string | null
+  onSendMessage: (text: string, attachments?: File[]) => void
+  onDownloadAttachment?: (attachmentId: string, filename: string) => void
+  templates?: Template[]
+  tags?: Tag[]
+  onTagsChange?: () => void
+  isLoading?: boolean
+  apiUrl?: string
+  draft?: string
+  onDraftChange?: (text: string) => void
+  suggestion?: AISuggestion | null
+  onSuggestionChange?: (suggestion: AISuggestion | null) => void
+  summary?: string | null
+  onSummaryChange?: (summary: string | null) => void
+  contactId?: string | null
+  identityId?: string | null
+  identityValue?: string | null
+  onContactLinked?: () => void
+  unreadCount?: number
+  onMarkAsRead?: () => void
+  onMarkAsUnread?: () => void
+  onSyncHistory?: () => Promise<void>
+}
+
+export function ChatView({
+  conversationId,
+  messages,
+  displayName,
+  onSendMessage,
+  onDownloadAttachment,
+  templates = [],
+  tags = [],
+  onTagsChange,
+  isLoading,
+  apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
+  draft = "",
+  onDraftChange,
+  suggestion = null,
+  onSuggestionChange,
+  summary = null,
+  onSummaryChange,
+  contactId = null,
+  identityId = null,
+  identityValue = null,
+  onContactLinked,
+  unreadCount = 0,
+  onMarkAsRead,
+  onMarkAsUnread,
+  onSyncHistory,
+}: ChatViewProps) {
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [showTranslation, setShowTranslation] = useState(false)
+  const [translations, setTranslations] = useState<Record<string, Translation>>({})
+  const [isTranslating, setIsTranslating] = useState(false)
+
+  // IA States (loading only - suggestion/summary from props)
+  const [isSuggesting, setIsSuggesting] = useState(false)
+  const [isSummarizing, setIsSummarizing] = useState(false)
+  const [isSyncing, setIsSyncing] = useState(false)
+
+  // Drag and drop state
+  const [isDragging, setIsDragging] = useState(false)
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const dragCounterRef = useRef(0)
+
+  // Track messages being translated to avoid duplicates
+  const translatingRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [messages])
+
+  // Drag and drop handlers
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current++
+    if (e.dataTransfer.types.includes("Files")) {
+      setIsDragging(true)
+    }
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current--
+    if (dragCounterRef.current === 0) {
+      setIsDragging(false)
+    }
+  }, [])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+    dragCounterRef.current = 0
+
+    const files = Array.from(e.dataTransfer.files)
+    if (files.length > 0) {
+      setPendingFiles(files)
+    }
+  }, [])
+
+  // Clear translation states when conversation changes
+  useEffect(() => {
+    setTranslations({})
+    setShowTranslation(false)
+  }, [conversationId])
+
+  // Load cached translations when conversation changes (1 request batch)
+  useEffect(() => {
+    if (!conversationId || messages.length === 0) return
+
+    const loadCachedTranslations = async () => {
+      try {
+        const resp = await fetch(
+          `${apiUrl}/translate/conversation/${conversationId}/cache?target_lang=pt-BR`
+        )
+        if (resp.ok) {
+          const data = await resp.json()
+          const cached: Record<string, Translation> = {}
+          for (const t of data.translations || []) {
+            cached[t.message_id] = {
+              message_id: t.message_id,
+              translated_text: t.translated_text,
+              source_lang: t.source_lang,
+            }
+          }
+          if (Object.keys(cached).length > 0) {
+            setTranslations(cached)
+          }
+        }
+      } catch {
+        // Ignora erros
+      }
+    }
+
+    loadCachedTranslations()
+  }, [conversationId, messages.length, apiUrl])
+
+  // Auto-translate new messages when in Portuguese mode (only inbound)
+  useEffect(() => {
+    if (!conversationId || !showTranslation || messages.length === 0) return
+
+    const translateNewMessages = async () => {
+      // Find inbound messages without translations and not being translated
+      const untranslated = messages.filter(
+        (m) =>
+          m.direction === "inbound" &&
+          m.text &&
+          m.text.length >= 2 &&
+          !translations[m.id] &&
+          !translatingRef.current.has(m.id)
+      )
+
+      if (untranslated.length === 0) return
+
+      // Mark as being translated
+      for (const msg of untranslated) {
+        translatingRef.current.add(msg.id)
+      }
+
+      // Translate each new message
+      for (const msg of untranslated) {
+        try {
+          const resp = await fetch(`${apiUrl}/translate/message/${msg.id}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ target_lang: "pt-BR" }),
+          })
+          if (resp.ok) {
+            const data = await resp.json()
+            setTranslations((prev) => ({
+              ...prev,
+              [msg.id]: {
+                message_id: msg.id,
+                translated_text: data.translated_text,
+                source_lang: data.source_lang,
+              },
+            }))
+          }
+        } catch {
+          // Ignora erros de tradução individual
+        } finally {
+          translatingRef.current.delete(msg.id)
+        }
+      }
+    }
+
+    translateNewMessages()
+  }, [conversationId, showTranslation, messages, translations, apiUrl])
+
+  const translateConversation = useCallback(async () => {
+    if (!conversationId || isTranslating) return
+
+    setIsTranslating(true)
+    try {
+      // Traduz conversa inteira e recebe todas traduções de volta
+      const response = await fetch(`${apiUrl}/translate/conversation/${conversationId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target_lang: "pt-BR" }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        const newTranslations: Record<string, Translation> = {}
+
+        // Usa traduções retornadas diretamente (sem requests adicionais)
+        for (const t of data.translations || []) {
+          newTranslations[t.message_id] = {
+            message_id: t.message_id,
+            translated_text: t.translated_text,
+            source_lang: t.source_lang,
+          }
+        }
+
+        setTranslations(newTranslations)
+        setShowTranslation(true)
+      }
+    } catch (error) {
+      console.error("Erro ao traduzir conversa:", error)
+    } finally {
+      setIsTranslating(false)
+    }
+  }, [conversationId, apiUrl, isTranslating])
+
+  // Sugestão de resposta (em inglês)
+  const suggestReply = useCallback(async () => {
+    if (!conversationId || isSuggesting) return
+
+    setIsSuggesting(true)
+    onSuggestionChange?.(null)
+    try {
+      const response = await fetch(`${apiUrl}/ai/conversation/${conversationId}/suggest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        onSuggestionChange?.({ id: data.suggestion_id, content: data.content })
+      }
+    } catch (error) {
+      console.error("Erro ao gerar sugestão:", error)
+    } finally {
+      setIsSuggesting(false)
+    }
+  }, [conversationId, apiUrl, isSuggesting, onSuggestionChange])
+
+  // Resumo da conversa (em português)
+  const summarizeConversation = useCallback(async () => {
+    if (!conversationId || isSummarizing) return
+
+    setIsSummarizing(true)
+    onSummaryChange?.(null)
+    try {
+      const response = await fetch(`${apiUrl}/ai/conversation/${conversationId}/summarize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        onSummaryChange?.(data.content)
+      }
+    } catch (error) {
+      console.error("Erro ao gerar resumo:", error)
+    } finally {
+      setIsSummarizing(false)
+    }
+  }, [conversationId, apiUrl, isSummarizing, onSummaryChange])
+
+  // Inserir sugestão no composer
+  const useSuggestion = useCallback(() => {
+    if (suggestion) {
+      onDraftChange?.(suggestion.content)
+      // Registrar feedback
+      fetch(`${apiUrl}/ai/suggestion/${suggestion.id}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "accepted" }),
+      }).catch(() => {})
+      onSuggestionChange?.(null)
+    }
+  }, [suggestion, apiUrl, onDraftChange, onSuggestionChange])
+
+  // Rejeitar sugestão
+  const rejectSuggestion = useCallback(() => {
+    if (suggestion) {
+      fetch(`${apiUrl}/ai/suggestion/${suggestion.id}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "rejected" }),
+      }).catch(() => {})
+      onSuggestionChange?.(null)
+    }
+  }, [suggestion, apiUrl, onSuggestionChange])
+
+  // Enviar mensagem e limpar draft
+  const handleSendMessage = useCallback((text: string, attachments?: File[]) => {
+    onSendMessage(text, attachments)
+    onDraftChange?.("")
+  }, [onSendMessage, onDraftChange])
+
+  // Sincronizar histórico
+  const handleSyncHistory = useCallback(async () => {
+    if (!onSyncHistory || isSyncing) return
+    setIsSyncing(true)
+    try {
+      await onSyncHistory()
+    } finally {
+      setIsSyncing(false)
+    }
+  }, [onSyncHistory, isSyncing])
+
+  if (!conversationId) {
+    return (
+      <div className="flex h-full items-center justify-center text-zinc-500">
+        Selecione uma conversa
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="relative flex h-full flex-col"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {/* Drag overlay */}
+      {isDragging && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-blue-500/20 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-blue-500 bg-white/90 px-12 py-8 dark:bg-zinc-900/90">
+            <Upload className="h-12 w-12 text-blue-500" />
+            <span className="text-lg font-medium text-blue-600 dark:text-blue-400">
+              Solte arquivos aqui
+            </span>
+            <span className="text-sm text-zinc-500">
+              Imagens, PDFs, documentos...
+            </span>
+          </div>
+        </div>
+      )}
+      {/* Header */}
+      <div className="flex flex-shrink-0 items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
+          {displayName || "Conversa"}
+        </h2>
+        <div className="flex items-center gap-2">
+          {/* Toggle tradução */}
+          {Object.keys(translations).length > 0 && (
+            <div className="flex items-center rounded-md border border-zinc-200 dark:border-zinc-700">
+              <button
+                onClick={() => setShowTranslation(false)}
+                className={`px-2 py-1 text-xs transition-colors ${
+                  !showTranslation
+                    ? "bg-zinc-200 dark:bg-zinc-700"
+                    : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                }`}
+              >
+                Original
+              </button>
+              <button
+                onClick={() => setShowTranslation(true)}
+                className={`px-2 py-1 text-xs transition-colors ${
+                  showTranslation
+                    ? "bg-zinc-200 dark:bg-zinc-700"
+                    : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                }`}
+              >
+                Português
+              </button>
+            </div>
+          )}
+          {/* Botão traduzir */}
+          <button
+            onClick={translateConversation}
+            disabled={isTranslating}
+            className="flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            title="Traduzir conversa"
+          >
+            {isTranslating ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Languages className="h-3.5 w-3.5" />
+            )}
+            <span>{isTranslating ? "Traduzindo..." : "Traduzir"}</span>
+          </button>
+          {/* Botão sugerir resposta */}
+          <button
+            onClick={suggestReply}
+            disabled={isSuggesting || messages.length === 0}
+            className="flex items-center gap-1 rounded-md border border-purple-200 bg-purple-50 px-2 py-1 text-xs text-purple-600 hover:bg-purple-100 disabled:opacity-50 dark:border-purple-800 dark:bg-purple-900/20 dark:text-purple-400 dark:hover:bg-purple-900/30"
+            title="Sugerir resposta (inglês)"
+          >
+            {isSuggesting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5" />
+            )}
+            <span>{isSuggesting ? "Gerando..." : "Sugerir"}</span>
+          </button>
+          {/* Botão resumir */}
+          <button
+            onClick={summarizeConversation}
+            disabled={isSummarizing || messages.length === 0}
+            className="flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-600 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/30"
+            title="Resumir conversa (português)"
+          >
+            {isSummarizing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <FileText className="h-3.5 w-3.5" />
+            )}
+            <span>{isSummarizing ? "Resumindo..." : "Resumir"}</span>
+          </button>
+          {onTagsChange && (
+            <TagManager
+              conversationId={conversationId}
+              currentTags={tags}
+              onTagsChange={onTagsChange}
+            />
+          )}
+          {/* CRM Quick View */}
+          <DealQuickView
+            conversationId={conversationId}
+            contactId={contactId}
+            contactName={displayName}
+          />
+          {/* Botão marcar como lida/não lida */}
+          {(onMarkAsRead || onMarkAsUnread) && (
+            <button
+              onClick={unreadCount > 0 ? onMarkAsRead : onMarkAsUnread}
+              className="flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              title={unreadCount > 0 ? "Marcar como lida" : "Marcar como não lida"}
+            >
+              {unreadCount > 0 ? (
+                <>
+                  <MailOpen className="h-3.5 w-3.5" />
+                  <span>Marcar lida</span>
+                </>
+              ) : (
+                <>
+                  <Mail className="h-3.5 w-3.5" />
+                  <span>Não lida</span>
+                </>
+              )}
+            </button>
+          )}
+          {/* Botão sincronizar histórico */}
+          {onSyncHistory && (
+            <button
+              onClick={handleSyncHistory}
+              disabled={isSyncing}
+              className="flex items-center gap-1 rounded-md border border-green-200 bg-green-50 px-2 py-1 text-xs text-green-600 hover:bg-green-100 disabled:opacity-50 dark:border-green-800 dark:bg-green-900/20 dark:text-green-400 dark:hover:bg-green-900/30"
+              title="Sincronizar histórico de mensagens"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? "animate-spin" : ""}`} />
+              <span>{isSyncing ? "Sincronizando..." : "Sync histórico"}</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Banner contato não vinculado */}
+      {!contactId && identityId && onContactLinked && (
+        <ContactManager
+          conversationId={conversationId}
+          identityId={identityId}
+          identityValue={identityValue}
+          onContactLinked={onContactLinked}
+          apiUrl={apiUrl}
+        />
+      )}
+
+      {/* Sugestão de IA */}
+      {suggestion && (
+        <div className="mx-4 mt-3 flex-shrink-0 rounded-lg border border-purple-200 bg-purple-50 p-3 dark:border-purple-800 dark:bg-purple-900/20">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+              <span className="text-sm font-medium text-purple-700 dark:text-purple-300">
+                Sugestão de resposta (inglês)
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={useSuggestion}
+                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-green-600 hover:bg-green-100 dark:text-green-400 dark:hover:bg-green-900/30"
+                title="Usar sugestão"
+              >
+                <Check className="h-3.5 w-3.5" />
+                Usar
+              </button>
+              <button
+                onClick={rejectSuggestion}
+                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-red-600 hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-900/30"
+                title="Descartar"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+          <p className="text-sm text-purple-800 dark:text-purple-200">{suggestion.content}</p>
+        </div>
+      )}
+
+      {/* Resumo da conversa */}
+      {summary && (
+        <div className="mx-4 mt-3 flex-shrink-0 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                Resumo (português)
+              </span>
+            </div>
+            <button
+              onClick={() => onSummaryChange?.(null)}
+              className="rounded p-1 text-blue-600 hover:bg-blue-100 dark:text-blue-400 dark:hover:bg-blue-900/30"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <p className="text-sm text-blue-800 dark:text-blue-200">{summary}</p>
+        </div>
+      )}
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {isLoading ? (
+          <div className="flex h-full items-center justify-center">
+            <span className="text-zinc-500">Carregando...</span>
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="flex h-full items-center justify-center">
+            <span className="text-zinc-500">Nenhuma mensagem</span>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {messages.map((msg) => (
+              <MessageItem
+                key={msg.id}
+                message={msg}
+                onDownload={onDownloadAttachment}
+                translation={showTranslation && msg.direction === "inbound" ? translations[msg.id] : undefined}
+              />
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
+        )}
+      </div>
+
+      {/* Composer */}
+      <Composer
+        onSend={handleSendMessage}
+        templates={templates}
+        initialText={draft}
+        onTextChange={onDraftChange}
+        externalFiles={pendingFiles}
+        onExternalFilesProcessed={() => setPendingFiles([])}
+      />
+    </div>
+  )
+}

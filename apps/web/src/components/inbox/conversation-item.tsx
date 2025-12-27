@@ -1,0 +1,191 @@
+"use client"
+
+import { MessageSquare, Mail, Phone } from "lucide-react"
+import Image from "next/image"
+import type { Conversation, Tag } from "./conversation-list"
+
+interface ConversationItemProps {
+  conversation: Conversation
+  isSelected: boolean
+  onClick: () => void
+}
+
+const channelIcons = {
+  telegram: MessageSquare,
+  email: Mail,
+  openphone_sms: Phone,
+}
+
+const statusColors = {
+  open: "bg-green-500",
+  pending: "bg-yellow-500",
+  resolved: "bg-zinc-400",
+}
+
+const avatarColors = [
+  "bg-blue-500",
+  "bg-green-500",
+  "bg-purple-500",
+  "bg-orange-500",
+  "bg-pink-500",
+  "bg-teal-500",
+  "bg-indigo-500",
+  "bg-rose-500",
+]
+
+export function ConversationItem({
+  conversation,
+  isSelected,
+  onClick,
+}: ConversationItemProps) {
+  const channel = conversation.last_channel || "telegram"
+  const Icon = channelIcons[channel]
+  const timeAgo = conversation.last_message_at
+    ? formatTimeAgo(new Date(conversation.last_message_at))
+    : ""
+
+  // Nome: contato > identity metadata > desconhecido
+  const getDisplayName = () => {
+    if (conversation.contact?.display_name) {
+      return conversation.contact.display_name
+    }
+    const meta = conversation.primary_identity?.metadata
+    // Email: display_name
+    if (meta?.display_name) {
+      return meta.display_name
+    }
+    // Telegram: first_name + last_name
+    if (meta?.first_name) {
+      return meta.last_name
+        ? `${meta.first_name} ${meta.last_name}`
+        : meta.first_name
+    }
+    if (meta?.title) {
+      return meta.title
+    }
+    if (meta?.username) {
+      return `@${meta.username}`
+    }
+    // Email fallback: mostrar o email como nome
+    if (conversation.primary_identity?.value && conversation.last_channel === "email") {
+      return conversation.primary_identity.value
+    }
+    return "Desconhecido"
+  }
+  const displayName = getDisplayName()
+  const isUnlinked = !conversation.contact_id
+  const tags = conversation.conversation_tags?.map(ct => ct.tag) || []
+  const unreadCount = conversation.unread_count || 0
+  const hasUnread = unreadCount > 0
+
+  // Avatar
+  const avatarUrl = conversation.primary_identity?.metadata?.avatar_url
+  const getInitials = () => {
+    if (displayName === "Desconhecido") return "?"
+    return displayName
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2)
+  }
+  const getAvatarColor = () => {
+    const index = conversation.id.charCodeAt(0) % avatarColors.length
+    return avatarColors[index]
+  }
+
+  return (
+    <button
+      onClick={onClick}
+      className={`flex w-full items-start gap-4 border-b border-zinc-100 p-4 text-left transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50 ${
+        isSelected ? "bg-zinc-100 dark:bg-zinc-800" : ""
+      } ${hasUnread ? "bg-blue-50/50 dark:bg-blue-900/10" : ""}`}
+    >
+      <div className="relative flex-shrink-0">
+        {avatarUrl ? (
+          <div className="relative h-12 w-12 overflow-hidden rounded-full">
+            <Image
+              src={avatarUrl}
+              alt={displayName}
+              fill
+              className="object-cover"
+              sizes="48px"
+            />
+          </div>
+        ) : (
+          <div className={`flex h-12 w-12 items-center justify-center rounded-full text-base font-medium text-white ${getAvatarColor()}`}>
+            {getInitials()}
+          </div>
+        )}
+        {/* Channel icon badge */}
+        <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-zinc-100 dark:border-zinc-900 dark:bg-zinc-700">
+          <Icon className="h-3 w-3 text-zinc-600 dark:text-zinc-400" />
+        </span>
+        {/* Status indicator */}
+        <span
+          className={`absolute -top-0.5 -left-0.5 h-3.5 w-3.5 rounded-full border-2 border-white dark:border-zinc-900 ${
+            statusColors[conversation.status]
+          }`}
+        />
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="truncate text-base font-medium text-zinc-900 dark:text-zinc-100">
+              {displayName}
+            </span>
+            {isUnlinked && (
+              <span className="flex-shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                Novo
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {hasUnread && (
+              <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-blue-500 px-2 text-sm font-medium text-white">
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
+            )}
+            <span className="flex-shrink-0 text-sm text-zinc-500">{timeAgo}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 mt-1">
+          <span className="truncate text-sm text-zinc-500 dark:text-zinc-400">
+            {conversation.last_message_preview || ""}
+          </span>
+        </div>
+        {tags.length > 0 && (
+          <div className="flex gap-1 mt-1">
+            {tags.slice(0, 3).map(tag => (
+              <span
+                key={tag.id}
+                className="rounded px-2 py-0.5 text-sm font-medium"
+                style={{ backgroundColor: tag.color + "20", color: tag.color }}
+              >
+                {tag.name}
+              </span>
+            ))}
+            {tags.length > 3 && (
+              <span className="text-sm text-zinc-400">+{tags.length - 3}</span>
+            )}
+          </div>
+        )}
+      </div>
+    </button>
+  )
+}
+
+function formatTimeAgo(date: Date): string {
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+
+  if (diffMins < 1) return "agora"
+  if (diffMins < 60) return `${diffMins}m`
+  if (diffHours < 24) return `${diffHours}h`
+  if (diffDays < 7) return `${diffDays}d`
+  return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })
+}
