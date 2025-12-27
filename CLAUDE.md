@@ -114,12 +114,23 @@ Se porta ocupada: **MATAR O PROCESSO** antes de iniciar. Nunca usar porta altern
 
 ## 2. Arquitetura e Decisões Chave
 
+### Deploy (Produção)
+- **Frontend:** Vercel - https://integrater.vercel.app
+- **Backend/API:** Digital Ocean Droplet - https://api.thereconquestmap.com
+- **Workers:** Docker containers no mesmo Droplet
+- **Banco:** Supabase (rzdqsvvkzfirvgimmzpr)
+
 ### Stack
 - **Frontend:** Next.js 14 + TypeScript + Tailwind + shadcn/ui (Vercel)
-- **Backend:** Python 3.11+ + FastAPI (Digital Ocean Droplet)
-- **Workers:** Python (Telethon para Telegram, imapclient para Email)
+- **Backend:** Python 3.11+ + FastAPI + Docker (Digital Ocean Droplet)
+- **Workers:** Python (Telethon para Telegram, imapclient para Email) em Docker
 - **DB/Realtime/Storage/Auth:** Supabase
 - **IA:** Gemini 3 Flash (tradução) + Gemini 3 Pro (sugestão/resumo)
+- **SMS:** OpenPhone API (webhooks inbound/status)
+
+### Webhooks OpenPhone
+- `message.received` → `/openphone/webhook/inbound` (SMS recebido)
+- `message.delivered` → `/openphone/webhook/status` (SMS enviado)
 
 ### Estrutura Monorepo
 ```
@@ -165,6 +176,22 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r telegram/requirements.txt -r email/requirements.txt
 python telegram/worker.py  # ou email/worker.py
+```
+
+### Deploy no Servidor (Digital Ocean)
+```bash
+ssh root@<IP_DROPLET>
+cd /opt/integrater
+git pull
+docker compose up --build -d
+docker compose logs -f api  # verificar logs
+```
+
+### Docker Local (para debug)
+```bash
+cd apps/workers
+docker compose up --build
+docker compose logs -f
 ```
 
 ## 4. Convenções de Código
