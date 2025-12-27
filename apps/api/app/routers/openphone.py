@@ -95,44 +95,56 @@ async def _get_openphone_account(db: Client, phone_number_id: str):
     return None
 
 
-async def _get_or_create_contact(db: Client, owner_id: str, phone: str):
-    """Busca ou cria contato pelo telefone."""
-    result = db.table("contacts").select("id").eq(
-        "owner_id", owner_id
-    ).eq("phone", phone).limit(1).execute()
+async def _get_or_create_identity(db: Client, owner_id: str, phone: str, workspace_id: str = None):
+    """Busca ou cria identity pelo telefone."""
+    # Busca identity existente
+    result = db.table("contact_identities").select(
+        "id, contact_id"
+    ).eq("owner_id", owner_id).eq(
+        "type", "phone"
+    ).eq("value", phone).execute()
 
     if result.data:
-        return result.data[0]["id"]
+        return result.data[0]
 
-    # Cria contato
-    new_contact = db.table("contacts").insert({
+    # Cria apenas identity (sem contato - igual ao Telegram)
+    identity_id = str(uuid4())
+    db.table("contact_identities").insert({
+        "id": identity_id,
         "owner_id": owner_id,
-        "phone": phone,
-        "name": phone,  # Nome = telefone por padrão
+        "contact_id": None,
+        "type": "phone",
+        "value": phone,
+        "metadata": {
+            "display_name": phone,
+        },
     }).execute()
 
-    return new_contact.data[0]["id"] if new_contact.data else None
+    return {"id": identity_id, "contact_id": None}
 
 
 async def _get_or_create_conversation(
-    db: Client, owner_id: str, contact_id: str, account_id: str, channel: str = "sms"
+    db: Client, owner_id: str, identity_id: str, workspace_id: str = None
 ):
-    """Busca ou cria conversa para o contato/canal."""
+    """Busca ou cria conversa para a identity."""
     result = db.table("conversations").select("id").eq(
         "owner_id", owner_id
-    ).eq("contact_id", contact_id).eq("channel", channel).limit(1).execute()
+    ).eq("primary_identity_id", identity_id).limit(1).execute()
 
     if result.data:
         return result.data[0]["id"]
 
     # Cria conversa
-    new_conv = db.table("conversations").insert({
+    conv_data = {
         "owner_id": owner_id,
-        "contact_id": contact_id,
-        "channel": channel,
+        "primary_identity_id": identity_id,
         "status": "open",
-        "integration_account_id": account_id,
-    }).execute()
+        "last_channel": "openphone_sms",
+    }
+    if workspace_id:
+        conv_data["workspace_id"] = workspace_id
+
+    new_conv = db.table("conversations").insert(conv_data).execute()
 
     return new_conv.data[0]["id"] if new_conv.data else None
 
@@ -332,15 +344,18 @@ async def webhook_inbound(
 
     owner_id = account["owner_id"]
     account_id = account["id"]
+    workspace_id = account.get("workspace_id")
 
-    # Busca/cria contato
-    contact_id = await _get_or_create_contact(db, owner_id, from_phone)
-    if not contact_id:
-        raise HTTPException(status_code=500, detail="Erro ao criar contato")
+    # Busca/cria identity
+    identity = await _get_or_create_identity(db, owner_id, from_phone, workspace_id)
+    if not identity:
+        raise HTTPException(status_code=500, detail="Erro ao criar identity")
+
+    identity_id = identity["id"]
 
     # Busca/cria conversa
     conversation_id = await _get_or_create_conversation(
-        db, owner_id, contact_id, account_id, "sms"
+        db, owner_id, identity_id, workspace_id
     )
     if not conversation_id:
         raise HTTPException(status_code=500, detail="Erro ao criar conversa")
@@ -348,19 +363,19 @@ async def webhook_inbound(
     # Salva mensagem
     message_data = {
         "conversation_id": conversation_id,
+        "identity_id": identity_id,
         "direction": "inbound",
-        "channel": "sms",
+        "channel": "openphone_sms",
         "text": body,
-        "external_id": external_id,
+        "external_message_id": external_id,
         "integration_account_id": account_id,
-        "metadata": {
-            "openphone_conversation_id": msg.get("conversationId"),
-        },
+        "owner_id": owner_id,
+        "sent_at": msg.get("createdAt"),
     }
 
-    # Se tem mídia, salva como anexo
+    # Se tem mídia, adiciona no payload
     if media:
-        message_data["metadata"]["media"] = media
+        message_data["payload"] = {"media": media}
 
     db.table("messages").insert(message_data).execute()
 
