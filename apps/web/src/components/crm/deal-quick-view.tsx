@@ -137,8 +137,9 @@ export function DealQuickView({
   // Update stages when pipeline changes
   useEffect(() => {
     const pipeline = pipelines.find((p) => p.id === selectedPipeline)
-    if (pipeline && pipeline.stages.length > 0) {
-      setSelectedStage(pipeline.stages[0].id)
+    const firstStage = pipeline?.stages?.[0]
+    if (firstStage) {
+      setSelectedStage(firstStage.id)
     }
   }, [selectedPipeline, pipelines])
 
