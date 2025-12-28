@@ -14,6 +14,7 @@ interface ContactChannel {
 import { WorkspaceSelector } from "@/components/workspace-selector"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { SidebarMenu } from "@/components/sidebar-menu"
+import { CRMPanel } from "@/components/crm/crm-panel"
 import { Menu, Search, X } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useWorkspace } from "@/contexts/workspace-context"
@@ -86,6 +87,8 @@ export function InboxView({ userEmail }: InboxViewProps) {
   // Canais disponíveis do contato selecionado e canal escolhido para envio
   const [contactChannels, setContactChannels] = useState<ContactChannel[]>([])
   const [selectedSendChannel, setSelectedSendChannel] = useState<string | null>(null)
+  // Painel CRM lateral
+  const [isCRMPanelOpen, setIsCRMPanelOpen] = useState(false)
 
   const supabase = createClient()
   const router = useRouter()
@@ -1156,9 +1159,24 @@ I'll be waiting.`
             welcomeTemplate={welcomeTemplate}
             workspaceId={currentWorkspace?.id}
             channel={selectedConversation?.last_channel}
+            onOpenCRMPanel={() => setIsCRMPanelOpen(true)}
           />
         </div>
       </div>
+
+      {/* CRM Panel */}
+      {isCRMPanelOpen && selectedId && (
+        <CRMPanel
+          conversationId={selectedId}
+          contactId={selectedConversation?.contact_id || null}
+          contactName={getDisplayName(selectedConversation)}
+          identityId={selectedConversation?.primary_identity_id}
+          identityValue={selectedConversation?.primary_identity?.value}
+          onClose={() => setIsCRMPanelOpen(false)}
+          onContactLinked={loadConversations}
+          workspaceId={currentWorkspace?.id}
+        />
+      )}
     </div>
   )
 }

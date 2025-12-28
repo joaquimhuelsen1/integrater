@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useEffect, useState, useCallback, useMemo } from "react"
-import { Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical, Unlink, MessageSquare, Phone } from "lucide-react"
+import { Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical, Unlink, MessageSquare, Phone, Briefcase } from "lucide-react"
 import { MessageItem } from "./message-item"
 import { DateDivider } from "./date-divider"
 import { ServiceMessage } from "./service-message"
@@ -9,7 +9,6 @@ import { Composer } from "./composer"
 import { PinnedBar } from "./pinned-bar"
 import { TagManager } from "./tag-manager"
 import { ContactManager } from "./contact-manager"
-import { DealQuickView } from "../crm/deal-quick-view"
 import { groupMessagesByDate } from "@/lib/group-messages-by-date"
 import type { Tag } from "./conversation-list"
 
@@ -97,6 +96,8 @@ interface ChatViewProps {
   workspaceId?: string
   // Canal da conversa para mostrar ícone no header
   channel?: "telegram" | "email" | "openphone_sms" | null
+  // Abrir painel CRM
+  onOpenCRMPanel?: () => void
 }
 
 export function ChatView({
@@ -135,6 +136,7 @@ export function ChatView({
   welcomeTemplate,
   workspaceId,
   channel = null,
+  onOpenCRMPanel,
 }: ChatViewProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -639,6 +641,17 @@ export function ChatView({
             )}
             <span>{isTranslating ? "Traduzindo..." : "Traduzir"}</span>
           </button>
+          {/* Botão CRM */}
+          {onOpenCRMPanel && (
+            <button
+              onClick={onOpenCRMPanel}
+              className="flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              title="Abrir painel CRM"
+            >
+              <Briefcase className="h-3.5 w-3.5" />
+              <span>CRM</span>
+            </button>
+          )}
           {/* Menu de opções */}
           <div ref={menuRef} className="relative">
             <button
@@ -679,13 +692,6 @@ export function ChatView({
                     variant="menu-item"
                   />
                 )}
-                {/* CRM */}
-                <DealQuickView
-                  conversationId={conversationId}
-                  contactId={contactId}
-                  contactName={displayName}
-                  variant="menu-item"
-                />
                 {/* Desvincular do contato */}
                 {contactId && onUnlinkContact && (
                   <button
