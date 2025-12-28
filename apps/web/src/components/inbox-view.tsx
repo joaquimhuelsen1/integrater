@@ -236,6 +236,25 @@ export function InboxView({ userEmail }: InboxViewProps) {
     }
   }, [supabase, selectedId])
 
+  // Desarquivar conversa
+  const handleUnarchiveConversation = useCallback(async (id: string) => {
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) return
+
+    await fetch(`${API_URL}/conversations/${id}/unarchive`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.access_token}` }
+    })
+
+    // Remove da lista de arquivadas e recarrega
+    setConversations(prev => prev.filter(c => c.id !== id))
+    if (selectedId === id) {
+      setSelectedId(null)
+      setMessages([])
+    }
+  }, [supabase, selectedId])
+
   // Excluir conversa
   const handleDeleteConversation = useCallback(async (id: string) => {
     if (!confirm("Tem certeza que deseja excluir esta conversa? Esta ação não pode ser desfeita.")) {
@@ -280,7 +299,12 @@ export function InboxView({ userEmail }: InboxViewProps) {
   // Conversas filtradas por tags e ordenadas (fixadas no topo)
   const filteredConversations = useMemo(() => {
     const filtered = conversations.filter(c => {
-      // Filtro de arquivadas (não mostrar arquivadas)
+      // Aba "Arquivadas" - mostrar apenas arquivadas
+      if (selectedChannel === "archived") {
+        return !!c.archived_at
+      }
+
+      // Outras abas - esconder arquivadas
       if (c.archived_at) return false
 
       // Filtro por canal (já feito no banco, mas mantém para segurança)
@@ -1042,6 +1066,7 @@ I'll be waiting.`
               onMarkRead={markAsRead}
               onMarkUnread={markAsUnread}
               onArchive={handleArchiveConversation}
+              onUnarchive={handleUnarchiveConversation}
               onDelete={handleDeleteConversation}
             />
           )}

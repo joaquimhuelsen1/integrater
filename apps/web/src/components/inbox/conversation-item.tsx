@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { MessageSquare, Mail, Phone, Pin, Eye, EyeOff, Archive, Trash2 } from "lucide-react"
+import { MessageSquare, Mail, Phone, Pin, Eye, EyeOff, Archive, ArchiveRestore, Trash2 } from "lucide-react"
 import Image from "next/image"
 import type { Conversation, Tag } from "./conversation-list"
 
@@ -15,6 +15,7 @@ interface ConversationItemProps {
   onMarkRead?: (id: string) => void
   onMarkUnread?: (id: string) => void
   onArchive?: (id: string) => void
+  onUnarchive?: (id: string) => void
   onDelete?: (id: string) => void
 }
 
@@ -51,6 +52,7 @@ export function ConversationItem({
   onMarkRead,
   onMarkUnread,
   onArchive,
+  onUnarchive,
   onDelete,
 }: ConversationItemProps) {
   const [showContextMenu, setShowContextMenu] = useState(false)
@@ -267,14 +269,24 @@ export function ConversationItem({
         {/* Separador */}
         <div className="my-1 h-px bg-zinc-200 dark:bg-zinc-700" />
 
-        {/* Arquivar */}
-        <button
-          onClick={() => { onArchive?.(conversation.id); setShowContextMenu(false) }}
-          className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
-        >
-          <Archive className="h-4 w-4 text-zinc-500" />
-          <span>Arquivar</span>
-        </button>
+        {/* Arquivar/Desarquivar */}
+        {conversation.archived_at ? (
+          <button
+            onClick={() => { onUnarchive?.(conversation.id); setShowContextMenu(false) }}
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+          >
+            <ArchiveRestore className="h-4 w-4 text-zinc-500" />
+            <span>Desarquivar</span>
+          </button>
+        ) : (
+          <button
+            onClick={() => { onArchive?.(conversation.id); setShowContextMenu(false) }}
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+          >
+            <Archive className="h-4 w-4 text-zinc-500" />
+            <span>Arquivar</span>
+          </button>
+        )}
 
         {/* Excluir */}
         <button

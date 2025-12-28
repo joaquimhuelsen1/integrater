@@ -44,6 +44,7 @@ interface ConversationListProps {
   onMarkRead?: (id: string) => void
   onMarkUnread?: (id: string) => void
   onArchive?: (id: string) => void
+  onUnarchive?: (id: string) => void
   onDelete?: (id: string) => void
 }
 
@@ -56,6 +57,7 @@ export function ConversationList({
   onMarkRead,
   onMarkUnread,
   onArchive,
+  onUnarchive,
   onDelete,
 }: ConversationListProps) {
   if (conversations.length === 0) {
@@ -80,6 +82,7 @@ export function ConversationList({
           onMarkRead={onMarkRead}
           onMarkUnread={onMarkUnread}
           onArchive={onArchive}
+          onUnarchive={onUnarchive}
           onDelete={onDelete}
         />
       ))}
