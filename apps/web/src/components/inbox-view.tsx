@@ -287,6 +287,16 @@ export function InboxView({ userEmail }: InboxViewProps) {
     }
   }, [selectedId])
 
+  // Limpar seleção quando mudar de canal
+  useEffect(() => {
+    setSelectedId(null)
+    setMessages([])
+    setSelectedContactId(null)
+    setContactChannels([])
+    setSelectedSendChannel(null)
+    localStorage.removeItem("selectedConversationId")
+  }, [selectedChannel])
+
   // Busca com debounce no banco de dados
   useEffect(() => {
     const timer = setTimeout(() => {
