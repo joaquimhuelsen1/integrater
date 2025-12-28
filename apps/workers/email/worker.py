@@ -341,10 +341,18 @@ class EmailWorker:
                 "raw_payload": {"references": references},
             }).execute()
 
-            # Atualiza conversa
+            # Atualiza conversa com preview
+            if body:
+                preview = (body[:100] + "...") if len(body) > 100 else body
+            elif subject:
+                preview = (subject[:50] + "...") if len(subject) > 50 else subject
+            else:
+                preview = "[Sem conteúdo]"
+
             db.table("conversations").update({
                 "last_message_at": now,
                 "last_channel": "email",
+                "last_message_preview": preview,
             }).eq("id", conversation["id"]).execute()
 
             # Processa attachments

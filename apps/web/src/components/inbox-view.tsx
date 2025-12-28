@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { createClient } from "@/lib/supabase"
 import { ConversationList, type Conversation, ChannelTabs, type ChannelId } from "@/components/inbox"
 import { ChatView, type Message, type Template, type AISuggestion } from "@/components/inbox"
@@ -225,6 +225,24 @@ export function InboxView({ userEmail }: InboxViewProps) {
       localStorage.removeItem("selectedConversationId")
     }
   }, [selectedId])
+
+  // Restaurar mensagens quando conversa selecionada é restaurada do localStorage
+  const hasLoadedRef = useRef(false)
+  useEffect(() => {
+    if (selectedId && conversations.length > 0 && !hasLoadedRef.current) {
+      const conv = conversations.find(c => c.id === selectedId)
+      if (conv) {
+        hasLoadedRef.current = true
+        if (conv.contact_id) {
+          setSelectedContactId(conv.contact_id)
+          loadContactMessages(conv.contact_id)
+        } else {
+          setSelectedContactId(null)
+          loadMessages(selectedId)
+        }
+      }
+    }
+  }, [selectedId, conversations, loadMessages, loadContactMessages])
 
   // Busca com debounce no banco de dados
   useEffect(() => {

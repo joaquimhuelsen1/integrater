@@ -489,9 +489,14 @@ class TelegramWorker:
             # Atualiza conversa e incrementa unread_count
             # Usa RPC para incrementar atomicamente
             db.rpc("increment_unread", {"conv_id": conversation["id"]}).execute()
+
+            # Preview da mensagem (trunca em 100 chars)
+            preview = (text[:100] + "...") if text and len(text) > 100 else (text or "[Mídia]")
+
             db.table("conversations").update({
                 "last_message_at": now,
                 "last_channel": "telegram",
+                "last_message_preview": preview,
             }).eq("id", conversation["id"]).execute()
 
             display_text = text[:50] if text else "(mídia)"
