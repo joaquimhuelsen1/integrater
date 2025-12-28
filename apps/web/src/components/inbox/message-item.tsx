@@ -51,6 +51,7 @@ export function MessageItem({
   const [expandedImage, setExpandedImage] = useState<string | null>(null)
   const [zoomLevel, setZoomLevel] = useState(1)
   const [transcriptions, setTranscriptions] = useState<Record<string, string>>({})
+  const [translatedTranscriptions, setTranslatedTranscriptions] = useState<Record<string, string>>({})
   const [transcribing, setTranscribing] = useState<Record<string, boolean>>({})
   const [audioDurations, setAudioDurations] = useState<Record<string, number>>({})
   const [audioCurrentTime, setAudioCurrentTime] = useState<Record<string, number>>({})
@@ -206,6 +207,9 @@ export function MessageItem({
               if (data?.transcription) {
                 setTranscriptions(prev => ({ ...prev, [att.id]: data.transcription }))
               }
+              if (data?.translated_transcription) {
+                setTranslatedTranscriptions(prev => ({ ...prev, [att.id]: data.translated_transcription }))
+              }
             }
           } catch {
             // Ignora
@@ -229,6 +233,9 @@ export function MessageItem({
       if (resp.ok) {
         const data = await resp.json()
         setTranscriptions(prev => ({ ...prev, [attachmentId]: data.transcription }))
+        if (data.translated_transcription) {
+          setTranslatedTranscriptions(prev => ({ ...prev, [attachmentId]: data.translated_transcription }))
+        }
         onTranscriptionComplete?.(message.id, data.transcription)
       }
     } catch (err) {
@@ -434,7 +441,7 @@ export function MessageItem({
                     )}
                   </div>
 
-                  {/* Transcrição */}
+                  {/* Transcrição (traduzida se inbound e disponível) */}
                   {transcriptions[att.id] && (
                     <div
                       className={`mt-1 rounded-lg px-3 py-2 text-xs ${
@@ -443,7 +450,13 @@ export function MessageItem({
                           : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
                       }`}
                     >
-                      <span className="font-medium">Transcrição:</span> {transcriptions[att.id]}
+                      <span className="font-medium">Transcrição:</span>{" "}
+                      {!isOutbound && translatedTranscriptions[att.id]
+                        ? translatedTranscriptions[att.id]
+                        : transcriptions[att.id]}
+                      {!isOutbound && translatedTranscriptions[att.id] && (
+                        <span className="ml-1 opacity-60">(traduzido)</span>
+                      )}
                     </div>
                   )}
                 </div>

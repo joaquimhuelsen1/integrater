@@ -67,7 +67,12 @@ export function InboxView({ userEmail }: InboxViewProps) {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [messages, setMessages] = useState<Message[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("selectedConversationId")
+    }
+    return null
+  })
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
@@ -92,7 +97,10 @@ export function InboxView({ userEmail }: InboxViewProps) {
 
   // Carregar conversas com tags e identity
   const loadConversations = useCallback(async (search?: string) => {
-    if (!currentWorkspace) return
+    if (!currentWorkspace) {
+      setIsLoading(false)
+      return
+    }
 
     const searchTerm = search?.trim().toLowerCase()
 
@@ -194,6 +202,15 @@ export function InboxView({ userEmail }: InboxViewProps) {
       .eq("id", id)
     loadConversations(searchQuery)
   }, [supabase, loadConversations, searchQuery])
+
+  // Persistir conversa selecionada no localStorage
+  useEffect(() => {
+    if (selectedId) {
+      localStorage.setItem("selectedConversationId", selectedId)
+    } else {
+      localStorage.removeItem("selectedConversationId")
+    }
+  }, [selectedId])
 
   // Busca com debounce no banco de dados
   useEffect(() => {

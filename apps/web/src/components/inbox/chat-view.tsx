@@ -286,6 +286,8 @@ export function ChatView({
           }
           if (Object.keys(cached).length > 0) {
             setTranslations(cached)
+            // Auto-ativar tradução se há traduções em cache
+            setShowTranslation(true)
           }
         }
       } catch {

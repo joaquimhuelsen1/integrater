@@ -5,9 +5,11 @@ Router de transcrição de áudio.
 from uuid import UUID
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+from typing import Optional
 
 from ..deps import get_supabase, get_owner_id
 from ..services.transcriber import transcribe_audio
+from ..services.translator import translate_text
 
 router = APIRouter(prefix="/transcribe", tags=["transcribe"])
 
@@ -16,6 +18,7 @@ class TranscriptionResponse(BaseModel):
     attachment_id: str
     transcription: str
     message_id: str
+    translated_transcription: Optional[str] = None
 
 
 @router.post("/attachment/{attachment_id}", response_model=TranscriptionResponse)
@@ -47,6 +50,7 @@ async def transcribe_attachment(
             attachment_id=str(attachment_id),
             transcription=metadata["transcription"],
             message_id=attachment["message_id"],
+            translated_transcription=metadata.get("translated_transcription"),
         )
 
     # Gera URL assinada para download
@@ -65,8 +69,19 @@ async def transcribe_attachment(
     except Exception as e:
         raise HTTPException(500, f"Erro na transcrição: {str(e)}")
 
+    # Traduz a transcrição para pt-BR
+    translated = None
+    try:
+        result = await translate_text(transcription, "pt-BR")
+        if result and result.get("translated_text"):
+            translated = result["translated_text"]
+    except Exception:
+        pass  # Ignora erros de tradução
+
     # Salva no metadata do anexo
     metadata["transcription"] = transcription
+    if translated:
+        metadata["translated_transcription"] = translated
     db.table("attachments").update({"metadata": metadata}).eq(
         "id", str(attachment_id)
     ).execute()
@@ -87,6 +102,7 @@ async def transcribe_attachment(
         attachment_id=str(attachment_id),
         transcription=transcription,
         message_id=attachment["message_id"],
+        translated_transcription=translated,
     )
 
 
@@ -114,4 +130,5 @@ async def get_transcription(
         attachment_id=str(attachment_id),
         transcription=metadata["transcription"],
         message_id=attachment["message_id"],
+        translated_transcription=metadata.get("translated_transcription"),
     )
