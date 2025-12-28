@@ -135,6 +135,20 @@ export function InboxView({ userEmail }: InboxViewProps) {
         const identityContactIds = matchingIdentities.map(i => i.contact_id).filter(Boolean) as string[]
         matchingContactIds = [...new Set([...matchingContactIds, ...identityContactIds])]
       }
+
+      // Busca também em metadata (nome de grupos, first_name, username)
+      const { data: metadataMatches } = await supabase
+        .from("contact_identities")
+        .select("id, contact_id")
+        .or(`metadata->>title.ilike.%${searchTerm}%,metadata->>first_name.ilike.%${searchTerm}%,metadata->>username.ilike.%${searchTerm}%`)
+        .limit(100)
+
+      if (metadataMatches) {
+        const metaIdentityIds = metadataMatches.map(i => i.id)
+        matchingIdentityIds = [...new Set([...matchingIdentityIds, ...metaIdentityIds])]
+        const metaContactIds = metadataMatches.map(i => i.contact_id).filter(Boolean) as string[]
+        matchingContactIds = [...new Set([...matchingContactIds, ...metaContactIds])]
+      }
     }
 
     let query = supabase
