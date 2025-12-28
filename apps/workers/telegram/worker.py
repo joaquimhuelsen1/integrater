@@ -724,10 +724,10 @@ class TelegramWorker:
 
     async def _get_or_create_group_identity(self, db, owner_id: str, chat_id: str, chat, client):
         """Busca ou cria identity para um grupo do Telegram."""
-        # Verifica se já existe
+        # Verifica se já existe (usa telegram_user com is_group no metadata)
         existing = db.table("contact_identities").select(
             "id, contact_id"
-        ).eq("type", "telegram").eq("value", chat_id).eq("owner_id", owner_id).execute()
+        ).eq("type", "telegram_user").eq("value", chat_id).eq("owner_id", owner_id).execute()
 
         if existing.data:
             return existing.data[0]
@@ -744,13 +744,13 @@ class TelegramWorker:
             "metadata": {"is_group": True},
         }).execute()
 
-        # Cria identity
+        # Cria identity (sempre telegram_user, is_group no metadata)
         identity_id = str(uuid4())
         db.table("contact_identities").insert({
             "id": identity_id,
             "owner_id": owner_id,
             "contact_id": contact_id,
-            "type": "telegram",
+            "type": "telegram_user",
             "value": chat_id,
             "metadata": {
                 "display_name": title,
@@ -986,13 +986,14 @@ class TelegramWorker:
     async def _get_or_create_sync_identity(self, db, owner_id: str, telegram_id: int, entity, is_group: bool, client):
         """Busca ou cria identity para sync (função unificada)."""
         telegram_id_str = str(telegram_id)
-        identity_type = "telegram" if is_group else "telegram_user"
+        # Sempre usa telegram_user, distingue por metadata.is_group
+        identity_type = "telegram_user"
 
-        # Busca existente (tenta ambos os tipos para compatibilidade)
+        # Busca existente
         existing = db.table("contact_identities").select(
             "id, metadata, type"
-        ).eq("owner_id", owner_id).eq("value", telegram_id_str).in_(
-            "type", ["telegram", "telegram_user"]
+        ).eq("owner_id", owner_id).eq("value", telegram_id_str).eq(
+            "type", "telegram_user"
         ).execute()
 
         if existing.data:
