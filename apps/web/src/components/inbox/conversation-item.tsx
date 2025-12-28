@@ -136,8 +136,8 @@ export function ConversationItem({
       onClick={onClick}
       onContextMenu={handleContextMenu}
       className={`flex w-full cursor-pointer items-start gap-4 border-b border-zinc-100 p-4 text-left transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50 ${
-        isSelected ? "bg-zinc-100 dark:bg-zinc-800" : ""
-      } ${hasUnread ? "bg-blue-50/50 dark:bg-blue-900/10" : ""} ${isPinned ? "bg-violet-50/50 dark:bg-violet-900/10" : ""}`}
+        isSelected ? "bg-[#8200DB]/50 dark:bg-[#8200DB]/50" : ""
+      } ${hasUnread ? "bg-blue-50/50 dark:bg-blue-900/10" : ""}`}
     >
       <div className="relative flex-shrink-0">
         {avatarUrl ? (
