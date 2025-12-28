@@ -19,7 +19,11 @@ from uuid import UUID, uuid4
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.tl.types import User, PeerUser
+from telethon.tl.types import (
+    User, PeerUser, MessageService,
+    MessageActionChatJoinedByLink, MessageActionChatAddUser,
+    MessageActionChatDeleteUser, MessageActionChatJoinedByRequest,
+)
 
 # Adiciona shared ao path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -658,6 +662,39 @@ class TelegramWorker:
             print(f"Erro ao processar chat action: {e}")
             traceback.print_exc()
 
+    def _parse_service_message(self, msg: MessageService) -> tuple[str | None, str | None]:
+        """Parse MessageService e retorna (texto, message_type) ou (None, None)."""
+        action = msg.action
+
+        if isinstance(action, MessageActionChatJoinedByLink):
+            # Alguém entrou via link
+            return "joined the group via invite link", "service_join"
+
+        elif isinstance(action, MessageActionChatJoinedByRequest):
+            # Alguém entrou via pedido de adesão
+            return "joined the group via request", "service_join"
+
+        elif isinstance(action, MessageActionChatAddUser):
+            # Usuário(s) adicionado(s) por alguém
+            user_ids = action.users if action.users else []
+            count = len(user_ids)
+            if count == 1:
+                return "was added to the group", "service_add"
+            elif count > 1:
+                return f"{count} members were added to the group", "service_add"
+            return None, None
+
+        elif isinstance(action, MessageActionChatDeleteUser):
+            # Usuário removido/saiu
+            # Se o user_id == from_id, ele saiu. Senão, foi removido
+            if msg.from_id and hasattr(msg.from_id, 'user_id'):
+                if action.user_id == msg.from_id.user_id:
+                    return "left the group", "service_leave"
+            return "was removed from the group", "service_kick"
+
+        # Ação não suportada
+        return None, None
+
     async def _get_or_create_group_identity(self, db, owner_id: str, chat_id: str, chat, client):
         """Busca ou cria identity para um grupo do Telegram."""
         # Verifica se já existe
@@ -931,15 +968,17 @@ class TelegramWorker:
 
             identity_id = conv_result.data["primary_identity_id"]
 
-            # Busca telegram_user_id da identity
+            # Busca telegram_user_id e metadata da identity
             identity_result = db.table("contact_identities").select(
-                "value"
+                "value, metadata"
             ).eq("id", identity_id).single().execute()
 
             if not identity_result.data:
                 raise Exception("Identity não encontrada")
 
             telegram_user_id = int(identity_result.data["value"])
+            identity_metadata = identity_result.data.get("metadata") or {}
+            is_group = identity_metadata.get("is_group", False)
 
             # Resolve a entidade primeiro (necessário para usuários não-cacheados)
             entity = None
@@ -983,6 +1022,28 @@ class TelegramWorker:
             async for msg in client.iter_messages(entity, limit=limit):
                 # Pula se já existe
                 if str(msg.id) in existing_msg_ids:
+                    continue
+
+                # Verifica se é mensagem de serviço (join/leave) - só para grupos
+                if is_group and isinstance(msg, MessageService):
+                    service_text, message_type = self._parse_service_message(msg)
+                    if service_text and message_type:
+                        message_id = str(uuid4())
+                        db.table("messages").insert({
+                            "id": message_id,
+                            "owner_id": owner_id,
+                            "conversation_id": conversation_id,
+                            "integration_account_id": acc_id,
+                            "identity_id": identity_id,
+                            "channel": "telegram",
+                            "direction": "inbound",
+                            "text": service_text,
+                            "message_type": message_type,
+                            "sent_at": msg.date.isoformat(),
+                            "external_message_id": str(msg.id),
+                            "raw_payload": {},
+                        }).execute()
+                        messages_synced += 1
                     continue
 
                 # Só processa mensagens com texto ou mídia
