@@ -52,6 +52,8 @@ export function MessageItem({
   const [zoomLevel, setZoomLevel] = useState(1)
   const [transcriptions, setTranscriptions] = useState<Record<string, string>>({})
   const [transcribing, setTranscribing] = useState<Record<string, boolean>>({})
+  const [audioDurations, setAudioDurations] = useState<Record<string, number>>({})
+  const [audioCurrentTime, setAudioCurrentTime] = useState<Record<string, number>>({})
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 })
   const menuRef = useRef<HTMLDivElement>(null)
@@ -169,11 +171,25 @@ export function MessageItem({
     const audio = e.currentTarget
     const progress = (audio.currentTime / audio.duration) * 100
     setAudioProgress(prev => ({ ...prev, [attId]: progress }))
+    setAudioCurrentTime(prev => ({ ...prev, [attId]: audio.currentTime }))
+  }
+
+  const handleAudioLoadedMetadata = (attId: string, e: React.SyntheticEvent<HTMLAudioElement>) => {
+    const audio = e.currentTarget
+    setAudioDurations(prev => ({ ...prev, [attId]: audio.duration }))
   }
 
   const handleAudioEnded = (attId: string) => {
     setPlayingAudio(null)
     setAudioProgress(prev => ({ ...prev, [attId]: 0 }))
+    setAudioCurrentTime(prev => ({ ...prev, [attId]: 0 }))
+  }
+
+  const formatDuration = (seconds: number) => {
+    if (!seconds || isNaN(seconds)) return "0:00"
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins}:${secs.toString().padStart(2, "0")}`
   }
 
   // Carrega transcrições em cache
@@ -334,55 +350,69 @@ export function MessageItem({
             </div>
           )}
 
-          {/* Áudios */}
+          {/* Áudios - Estilo Telegram */}
           {message.attachments && message.attachments.filter(att => isAudio(att.mime_type)).length > 0 && (
             <div className="space-y-2">
               {message.attachments.filter(att => isAudio(att.mime_type)).map((att) => (
                 <div key={att.id} className="space-y-1">
-                  <div
-                    className={`flex items-center gap-3 rounded-lg p-2 ${
-                      isOutbound
-                        ? "bg-purple-700 dark:bg-purple-800"
-                        : "bg-zinc-100 dark:bg-zinc-700"
-                    }`}
-                  >
+                  <div className="flex items-center gap-3">
+                    {/* Botão Play circular estilo Telegram */}
                     <button
                       onClick={() => audioUrls[att.id] && toggleAudio(att.id)}
-                      className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full ${
+                      className={`flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full transition-colors ${
                         isOutbound
                           ? "bg-white/20 hover:bg-white/30"
-                          : "bg-zinc-300 hover:bg-zinc-400 dark:bg-zinc-600 dark:hover:bg-zinc-500"
+                          : "bg-purple-500 hover:bg-purple-600 text-white"
                       }`}
                     >
                       {playingAudio === att.id ? (
-                        <Pause className="h-5 w-5" />
+                        <Pause className="h-6 w-6" />
                       ) : (
-                        <Play className="ml-0.5 h-5 w-5" />
+                        <Play className="ml-1 h-6 w-6" />
                       )}
                     </button>
-                    <div className="flex-1">
-                      <div className="relative h-1 w-full overflow-hidden rounded-full bg-black/20">
-                        <div
-                          className={`absolute left-0 top-0 h-full rounded-full transition-all ${
-                            isOutbound ? "bg-white" : "bg-purple-500"
-                          }`}
-                          style={{ width: `${audioProgress[att.id] || 0}%` }}
-                        />
+
+                    {/* Waveform / Progress */}
+                    <div className="flex flex-1 flex-col gap-1">
+                      {/* Barra de progresso estilo waveform */}
+                      <div className="relative h-6 w-full flex items-center">
+                        <div className="absolute inset-0 flex items-center gap-[2px]">
+                          {Array.from({ length: 30 }).map((_, i) => {
+                            const heights = [40, 60, 80, 50, 90, 70, 45, 85, 55, 75, 65, 95, 50, 70, 80, 60, 90, 45, 75, 85, 55, 65, 95, 70, 50, 80, 60, 90, 75, 85]
+                            const progress = audioProgress[att.id] || 0
+                            const isActive = (i / 30) * 100 <= progress
+                            return (
+                              <div
+                                key={i}
+                                className={`w-[3px] rounded-full transition-colors ${
+                                  isActive
+                                    ? isOutbound ? "bg-white" : "bg-purple-500"
+                                    : isOutbound ? "bg-white/30" : "bg-zinc-300 dark:bg-zinc-600"
+                                }`}
+                                style={{ height: `${heights[i % heights.length]}%` }}
+                              />
+                            )
+                          })}
+                        </div>
                       </div>
-                      <div className="mt-1 flex items-center gap-1">
-                        <Mic className="h-3 w-3 opacity-60" />
-                        <span className="text-xs opacity-60">Áudio</span>
-                      </div>
+
+                      {/* Duração */}
+                      <span className={`text-xs ${isOutbound ? "text-white/70" : "text-zinc-500 dark:text-zinc-400"}`}>
+                        {playingAudio === att.id
+                          ? formatDuration(audioCurrentTime[att.id] || 0)
+                          : formatDuration(audioDurations[att.id] || 0)}
+                      </span>
                     </div>
+
                     {/* Botão Transcrever */}
                     {!transcriptions[att.id] && (
                       <button
                         onClick={() => transcribeAudio(att.id)}
                         disabled={transcribing[att.id]}
-                        className={`flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors ${
+                        className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs transition-colors ${
                           isOutbound
                             ? "bg-white/20 hover:bg-white/30 disabled:opacity-50"
-                            : "bg-zinc-300 hover:bg-zinc-400 dark:bg-zinc-600 dark:hover:bg-zinc-500 disabled:opacity-50"
+                            : "bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-700 dark:hover:bg-zinc-600 disabled:opacity-50"
                         }`}
                         title="Transcrever áudio"
                       >
@@ -391,23 +421,25 @@ export function MessageItem({
                         ) : (
                           <FileAudio className="h-3 w-3" />
                         )}
-                        <span>{transcribing[att.id] ? "..." : "Transcrever"}</span>
                       </button>
                     )}
+
                     {audioUrls[att.id] && (
                       <audio
                         id={`audio-${att.id}`}
                         src={audioUrls[att.id]}
                         onTimeUpdate={(e) => handleAudioTimeUpdate(att.id, e)}
+                        onLoadedMetadata={(e) => handleAudioLoadedMetadata(att.id, e)}
                         onEnded={() => handleAudioEnded(att.id)}
                         preload="metadata"
                       />
                     )}
                   </div>
+
                   {/* Transcrição */}
                   {transcriptions[att.id] && (
                     <div
-                      className={`rounded px-2 py-1 text-xs italic ${
+                      className={`mt-1 rounded-lg px-3 py-2 text-xs ${
                         isOutbound
                           ? "bg-purple-700/50 text-purple-100"
                           : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
