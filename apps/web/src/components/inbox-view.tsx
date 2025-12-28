@@ -1004,7 +1004,7 @@ I'll be waiting.`
   }, [conversationFromList])
 
   // Determina display name para ChatView
-  const getDisplayName = (conv: Conversation | undefined) => {
+  const getDisplayName = (conv: Conversation | null | undefined) => {
     if (!conv) return null
     if (conv.contact?.display_name) return conv.contact.display_name
     const meta = conv.primary_identity?.metadata
