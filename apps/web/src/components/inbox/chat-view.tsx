@@ -17,6 +17,7 @@ export interface Message {
   conversation_id: string
   direction: "inbound" | "outbound"
   text: string | null
+  subject: string | null  // Assunto do email
   channel: "telegram" | "email" | "openphone_sms"
   sent_at: string
   message_type?: string // text, service_join, service_leave, service_kick, service_add

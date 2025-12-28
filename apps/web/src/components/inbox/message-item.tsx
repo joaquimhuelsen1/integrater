@@ -464,8 +464,30 @@ export function MessageItem({
             </div>
           )}
 
+        {/* Subject do email */}
+        {message.channel === "email" && message.subject && (
+          <div className={`${displayText ? "mb-1" : ""} ${
+            message.attachments?.some(a => isImage(a.mime_type)) ? "mt-2" : ""
+          }`}>
+            <div className={`flex items-center gap-1 text-xs ${
+              isOutbound ? "text-purple-200" : "text-zinc-500 dark:text-zinc-400"
+            }`}>
+              <Mail className="h-3 w-3" />
+              <span>Assunto:</span>
+            </div>
+            <div className={`text-sm font-medium ${
+              isOutbound ? "text-white" : "text-zinc-800 dark:text-zinc-200"
+            }`}>
+              {message.subject}
+            </div>
+          </div>
+        )}
+
         {displayText && (
-          <p className={`whitespace-pre-wrap break-words text-sm ${message.attachments?.some(a => isImage(a.mime_type)) ? "mt-2" : ""}`}>
+          <p className={`whitespace-pre-wrap break-words text-sm ${
+            message.channel === "email" && message.subject ? "mt-2 border-t border-dashed pt-2 " + (isOutbound ? "border-purple-400/30" : "border-zinc-300 dark:border-zinc-600") :
+            message.attachments?.some(a => isImage(a.mime_type)) ? "mt-2" : ""
+          }`}>
             {displayText}
           </p>
         )}
