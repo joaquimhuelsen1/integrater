@@ -1078,6 +1078,28 @@ class TelegramWorker:
 
                 messages_synced += 1
 
+            # Busca a última mensagem REAL da conversa (pode ser nova ou existente)
+            last_msg_result = db.table("messages").select(
+                "sent_at, text, message_type"
+            ).eq("conversation_id", conversation_id).order(
+                "sent_at", desc=True
+            ).limit(1).execute()
+
+            if last_msg_result.data:
+                last_msg = last_msg_result.data[0]
+                preview = last_msg.get("text") or ""
+                if last_msg.get("message_type", "").startswith("service_"):
+                    preview = last_msg.get("text") or "Ação no grupo"
+                elif not preview:
+                    preview = "📎 Mídia"
+                else:
+                    preview = (preview[:100] + "...") if len(preview) > 100 else preview
+
+                db.table("conversations").update({
+                    "last_message_at": last_msg["sent_at"],
+                    "last_message_preview": preview,
+                }).eq("id", conversation_id).execute()
+
             # Marca como completed
             db.table("sync_history_jobs").update({
                 "status": "completed",
