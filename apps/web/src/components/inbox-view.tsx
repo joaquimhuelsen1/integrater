@@ -284,16 +284,18 @@ export function InboxView({ userEmail }: InboxViewProps) {
 
   // Carregar mensagens da conversa selecionada
   const loadMessages = useCallback(async (conversationId: string) => {
+    // Busca as 500 mais recentes (desc) e depois inverte para ordem cronológica
     const { data, error } = await supabase
       .from("messages")
       .select("*, attachments(*)")
       .eq("conversation_id", conversationId)
       .is("deleted_at", null)
-      .order("sent_at", { ascending: true })
+      .order("sent_at", { ascending: false })
       .limit(500)
 
     if (!error && data) {
-      setMessages(data as Message[])
+      // Inverte para mostrar em ordem cronológica (antigas primeiro, novas embaixo)
+      setMessages(data.reverse() as Message[])
     }
   }, [supabase])
 
@@ -336,18 +338,19 @@ export function InboxView({ userEmail }: InboxViewProps) {
       setSelectedSendChannel(firstChannel.type)
     }
 
-    // Buscar mensagens de TODAS as conversas do contato
+    // Buscar mensagens de TODAS as conversas do contato (500 mais recentes)
     const convIds = convs.map(c => c.id)
     const { data: msgs, error: msgError } = await supabase
       .from("messages")
       .select("*, attachments(*)")
       .in("conversation_id", convIds)
       .is("deleted_at", null)
-      .order("sent_at", { ascending: true })
+      .order("sent_at", { ascending: false })
       .limit(500)
 
     if (!msgError && msgs) {
-      setMessages(msgs as Message[])
+      // Inverte para ordem cronológica
+      setMessages(msgs.reverse() as Message[])
     }
   }, [supabase, selectedSendChannel])
 
