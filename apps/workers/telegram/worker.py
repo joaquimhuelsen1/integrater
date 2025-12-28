@@ -662,35 +662,54 @@ class TelegramWorker:
             print(f"Erro ao processar chat action: {e}")
             traceback.print_exc()
 
-    def _parse_service_message(self, msg: MessageService) -> tuple[str | None, str | None]:
+    async def _parse_service_message(self, client, msg: MessageService) -> tuple[str | None, str | None]:
         """Parse MessageService e retorna (texto, message_type) ou (None, None)."""
         action = msg.action
 
+        # Tenta pegar nome do usuário que fez a ação
+        user_name = None
+        if msg.from_id and hasattr(msg.from_id, 'user_id'):
+            try:
+                user = await client.get_entity(msg.from_id.user_id)
+                user_name = getattr(user, 'first_name', None) or getattr(user, 'username', None) or str(msg.from_id.user_id)
+            except Exception:
+                user_name = str(msg.from_id.user_id)
+
         if isinstance(action, MessageActionChatJoinedByLink):
-            # Alguém entrou via link
-            return "joined the group via invite link", "service_join"
+            name = user_name or "Alguém"
+            return f"{name} joined the group via invite link", "service_join"
 
         elif isinstance(action, MessageActionChatJoinedByRequest):
-            # Alguém entrou via pedido de adesão
-            return "joined the group via request", "service_join"
+            name = user_name or "Alguém"
+            return f"{name} joined the group via request", "service_join"
 
         elif isinstance(action, MessageActionChatAddUser):
-            # Usuário(s) adicionado(s) por alguém
             user_ids = action.users if action.users else []
             count = len(user_ids)
             if count == 1:
-                return "was added to the group", "service_add"
+                try:
+                    added_user = await client.get_entity(user_ids[0])
+                    added_name = getattr(added_user, 'first_name', None) or str(user_ids[0])
+                except Exception:
+                    added_name = str(user_ids[0])
+                return f"{added_name} was added to the group", "service_add"
             elif count > 1:
                 return f"{count} members were added to the group", "service_add"
             return None, None
 
         elif isinstance(action, MessageActionChatDeleteUser):
-            # Usuário removido/saiu
+            # Pega nome do usuário removido/que saiu
+            try:
+                removed_user = await client.get_entity(action.user_id)
+                removed_name = getattr(removed_user, 'first_name', None) or str(action.user_id)
+            except Exception:
+                removed_name = str(action.user_id)
+
             # Se o user_id == from_id, ele saiu. Senão, foi removido
             if msg.from_id and hasattr(msg.from_id, 'user_id'):
                 if action.user_id == msg.from_id.user_id:
-                    return "left the group", "service_leave"
-            return "was removed from the group", "service_kick"
+                    return f"{removed_name} left the group", "service_leave"
+            return f"{removed_name} was removed from the group", "service_kick"
 
         # Ação não suportada
         return None, None
@@ -1149,7 +1168,7 @@ class TelegramWorker:
 
                 # Verifica se é mensagem de serviço (join/leave) - só para grupos
                 if is_group and isinstance(msg, MessageService):
-                    service_text, message_type = self._parse_service_message(msg)
+                    service_text, message_type = await self._parse_service_message(client, msg)
                     if service_text and message_type:
                         message_id = str(uuid4())
                         db.table("messages").insert({
