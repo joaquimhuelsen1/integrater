@@ -17,6 +17,7 @@ export interface Conversation {
   last_message_at: string | null
   last_message_preview?: string | null
   unread_count?: number
+  is_pinned?: boolean
   contact?: { display_name: string | null } | null
   primary_identity?: {
     type: string
@@ -37,7 +38,6 @@ interface ConversationListProps {
   conversations: Conversation[]
   selectedId: string | null
   onSelect: (id: string) => void
-  pinnedIds?: string[]
   onPin?: (id: string) => void
   onUnpin?: (id: string) => void
   onMarkRead?: (id: string) => void
@@ -48,7 +48,6 @@ export function ConversationList({
   conversations,
   selectedId,
   onSelect,
-  pinnedIds = [],
   onPin,
   onUnpin,
   onMarkRead,
@@ -69,7 +68,7 @@ export function ConversationList({
           key={conv.id}
           conversation={conv}
           isSelected={conv.id === selectedId}
-          isPinned={pinnedIds.includes(conv.id)}
+          isPinned={conv.is_pinned || false}
           onClick={() => onSelect(conv.id)}
           onPin={onPin}
           onUnpin={onUnpin}

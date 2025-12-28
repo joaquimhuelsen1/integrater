@@ -80,14 +80,6 @@ export function InboxView({ userEmail }: InboxViewProps) {
   // Canais disponíveis do contato selecionado e canal escolhido para envio
   const [contactChannels, setContactChannels] = useState<ContactChannel[]>([])
   const [selectedSendChannel, setSelectedSendChannel] = useState<string | null>(null)
-  // Conversas fixadas (pinned) - salvas no localStorage
-  const [pinnedIds, setPinnedIds] = useState<string[]>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("pinnedConversations")
-      return saved ? JSON.parse(saved) : []
-    }
-    return []
-  })
 
   const supabase = createClient()
   const router = useRouter()
@@ -97,21 +89,6 @@ export function InboxView({ userEmail }: InboxViewProps) {
     await supabase.auth.signOut()
     router.push("/login")
   }
-
-  // Salvar pinnedIds no localStorage
-  useEffect(() => {
-    localStorage.setItem("pinnedConversations", JSON.stringify(pinnedIds))
-  }, [pinnedIds])
-
-  // Fixar conversa
-  const handlePinConversation = useCallback((id: string) => {
-    setPinnedIds(prev => prev.includes(id) ? prev : [...prev, id])
-  }, [])
-
-  // Desafixar conversa
-  const handleUnpinConversation = useCallback((id: string) => {
-    setPinnedIds(prev => prev.filter(p => p !== id))
-  }, [])
 
   // Carregar conversas com tags e identity
   const loadConversations = useCallback(async (search?: string) => {
@@ -154,7 +131,7 @@ export function InboxView({ userEmail }: InboxViewProps) {
 
     let query = supabase
       .from("conversations")
-      .select("*, contact:contacts(display_name), contact_identities!primary_identity_id(type, value, metadata), conversation_tags(tag:tags(id, name, color))")
+      .select("*, contact:contacts(display_name), contact_identities!primary_identity_id(type, value, metadata), conversation_tags(tag:tags(id, name, color)), is_pinned")
       .eq("workspace_id", currentWorkspace.id)
 
     // Filtra por canal no banco se selecionado
@@ -200,6 +177,24 @@ export function InboxView({ userEmail }: InboxViewProps) {
     setIsLoading(false)
   }, [supabase, currentWorkspace, selectedChannel])
 
+  // Fixar conversa no banco de dados
+  const handlePinConversation = useCallback(async (id: string) => {
+    await supabase
+      .from("conversations")
+      .update({ is_pinned: true })
+      .eq("id", id)
+    loadConversations(searchQuery)
+  }, [supabase, loadConversations, searchQuery])
+
+  // Desafixar conversa no banco de dados
+  const handleUnpinConversation = useCallback(async (id: string) => {
+    await supabase
+      .from("conversations")
+      .update({ is_pinned: false })
+      .eq("id", id)
+    loadConversations(searchQuery)
+  }, [supabase, loadConversations, searchQuery])
+
   // Busca com debounce no banco de dados
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -227,8 +222,8 @@ export function InboxView({ userEmail }: InboxViewProps) {
 
     // Ordenar: fixadas primeiro, depois por data
     return filtered.sort((a, b) => {
-      const aIsPinned = pinnedIds.includes(a.id)
-      const bIsPinned = pinnedIds.includes(b.id)
+      const aIsPinned = a.is_pinned
+      const bIsPinned = b.is_pinned
 
       // Se ambos são fixados ou ambos não são, mantém ordem por data (já ordenada do banco)
       if (aIsPinned === bIsPinned) return 0
@@ -236,7 +231,7 @@ export function InboxView({ userEmail }: InboxViewProps) {
       // Fixados vêm primeiro
       return aIsPinned ? -1 : 1
     })
-  }, [conversations, selectedChannel, filterTags, pinnedIds])
+  }, [conversations, selectedChannel, filterTags])
 
   // Marcar conversa como lida
   const markAsRead = useCallback(async (conversationId: string) => {
@@ -805,7 +800,6 @@ export function InboxView({ userEmail }: InboxViewProps) {
               conversations={filteredConversations}
               selectedId={selectedId}
               onSelect={handleSelectConversation}
-              pinnedIds={pinnedIds}
               onPin={handlePinConversation}
               onUnpin={handleUnpinConversation}
               onMarkRead={markAsRead}

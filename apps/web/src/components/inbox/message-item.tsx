@@ -354,7 +354,7 @@ export function MessageItem({
           {message.attachments && message.attachments.filter(att => isAudio(att.mime_type)).length > 0 && (
             <div className="space-y-2">
               {message.attachments.filter(att => isAudio(att.mime_type)).map((att) => (
-                <div key={att.id} className="space-y-1">
+                <div key={att.id} className="min-w-[280px] space-y-1">
                   <div className="flex items-center gap-3">
                     {/* Botão Play circular estilo Telegram */}
                     <button
@@ -373,27 +373,25 @@ export function MessageItem({
                     </button>
 
                     {/* Waveform / Progress */}
-                    <div className="flex flex-1 flex-col gap-1">
+                    <div className="flex min-w-[140px] flex-1 flex-col gap-1">
                       {/* Barra de progresso estilo waveform */}
-                      <div className="relative h-6 w-full flex items-center">
-                        <div className="absolute inset-0 flex items-center gap-[2px]">
-                          {Array.from({ length: 30 }).map((_, i) => {
-                            const heights = [40, 60, 80, 50, 90, 70, 45, 85, 55, 75, 65, 95, 50, 70, 80, 60, 90, 45, 75, 85, 55, 65, 95, 70, 50, 80, 60, 90, 75, 85]
-                            const progress = audioProgress[att.id] || 0
-                            const isActive = (i / 30) * 100 <= progress
-                            return (
-                              <div
-                                key={i}
-                                className={`w-[3px] rounded-full transition-colors ${
-                                  isActive
-                                    ? isOutbound ? "bg-white" : "bg-purple-500"
-                                    : isOutbound ? "bg-white/30" : "bg-zinc-300 dark:bg-zinc-600"
-                                }`}
-                                style={{ height: `${heights[i % heights.length]}%` }}
-                              />
-                            )
-                          })}
-                        </div>
+                      <div className="flex h-6 items-end gap-[2px]">
+                        {Array.from({ length: 30 }).map((_, i) => {
+                          const heights = [10, 14, 18, 12, 22, 16, 11, 20, 13, 17, 15, 24, 12, 16, 18, 14, 22, 11, 17, 20, 13, 15, 24, 16, 12, 18, 14, 22, 17, 20]
+                          const progress = audioProgress[att.id] || 0
+                          const isActive = (i / 30) * 100 <= progress
+                          return (
+                            <div
+                              key={i}
+                              className={`w-[3px] rounded-full transition-colors ${
+                                isActive
+                                  ? isOutbound ? "bg-white" : "bg-purple-500"
+                                  : isOutbound ? "bg-white/30" : "bg-zinc-300 dark:bg-zinc-600"
+                              }`}
+                              style={{ height: `${heights[i % heights.length]}px` }}
+                            />
+                          )
+                        })}
                       </div>
 
                       {/* Duração */}

@@ -19,6 +19,7 @@ export interface Message {
   text: string | null
   channel: "telegram" | "email" | "openphone_sms"
   sent_at: string
+  message_type?: string // text, service_join, service_leave, service_kick, service_add
   attachments?: { id: string; file_name: string; mime_type: string; storage_path: string; storage_bucket?: string }[]
   reply_to_message_id?: string | null
   is_pinned?: boolean
@@ -747,6 +748,16 @@ export function ChatView({
               {groupedMessages.map((item, index) =>
                 item.type === "date_divider" ? (
                   <DateDivider key={`date-${item.dateKey}`} date={item.date} />
+                ) : item.message.message_type?.startsWith("service_") ? (
+                  // Mensagem de serviço (join, leave, etc) - centralizada
+                  <div
+                    key={item.message.id}
+                    className="flex justify-center py-1"
+                  >
+                    <span className="rounded-full bg-zinc-800/60 px-3 py-1 text-xs text-zinc-400">
+                      {item.message.text}
+                    </span>
+                  </div>
                 ) : (
                   <div
                     key={item.message.id}

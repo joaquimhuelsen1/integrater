@@ -128,6 +128,12 @@ class TelegramWorker:
                 print(f"[DEBUG] Mensagem enviada pelo usuário para conta {_acc_id}")
                 await self._handle_outgoing_message(_acc_id, _owner_id, event)
 
+            # Handler para ações de chat (entrada/saída de membros, etc)
+            @client.on(events.ChatAction)
+            async def handler_chat_action(event, _acc_id=acc_id, _owner_id=owner_id):
+                print(f"[DEBUG] Chat action para conta {_acc_id}")
+                await self._handle_chat_action(_acc_id, _owner_id, event)
+
             # Inicia heartbeat
             hb = Heartbeat(
                 owner_id=UUID(owner_id),
@@ -566,6 +572,130 @@ class TelegramWorker:
             import traceback
             print(f"Erro ao processar mensagem outgoing: {e}")
             traceback.print_exc()
+
+    async def _handle_chat_action(self, acc_id: str, owner_id: str, event):
+        """Processa ações de chat (entrada/saída de membros, etc)."""
+        try:
+            db = get_supabase()
+            client = self.clients[acc_id]
+
+            # Pega o chat (grupo)
+            chat = await event.get_chat()
+            chat_id = str(event.chat_id)
+
+            # Determina o tipo de ação e texto
+            action_text = None
+            message_type = None
+
+            if event.user_joined:
+                user = await event.get_user()
+                if user:
+                    name = user.first_name or user.username or "Alguém"
+                    action_text = f"{name} joined the group via invite link"
+                    message_type = "service_join"
+            elif event.user_left:
+                user = await event.get_user()
+                if user:
+                    name = user.first_name or user.username or "Alguém"
+                    action_text = f"{name} left the group"
+                    message_type = "service_leave"
+            elif event.user_kicked:
+                user = await event.get_user()
+                if user:
+                    name = user.first_name or user.username or "Alguém"
+                    action_text = f"{name} was removed from the group"
+                    message_type = "service_kick"
+            elif event.user_added:
+                users = await event.get_users()
+                if users:
+                    names = [u.first_name or u.username or "?" for u in users]
+                    action_text = f"{', '.join(names)} was added to the group"
+                    message_type = "service_add"
+
+            if not action_text or not message_type:
+                print(f"[DEBUG] Chat action ignorada (tipo não suportado)")
+                return
+
+            # Busca ou cria identity para o grupo
+            identity = await self._get_or_create_group_identity(
+                db, owner_id, chat_id, chat, client
+            )
+
+            # Busca ou cria conversa
+            conversation = await self._get_or_create_conversation(
+                db, owner_id, identity["id"], identity["contact_id"]
+            )
+
+            # Cria mensagem de serviço
+            now = datetime.now(timezone.utc).isoformat()
+            message_id = str(uuid4())
+
+            db.table("messages").insert({
+                "id": message_id,
+                "owner_id": owner_id,
+                "conversation_id": conversation["id"],
+                "integration_account_id": acc_id,
+                "identity_id": identity["id"],
+                "channel": "telegram",
+                "direction": "inbound",
+                "text": action_text,
+                "message_type": message_type,
+                "sent_at": now,
+                "external_message_id": f"action-{message_id}",
+                "raw_payload": {},
+            }).execute()
+
+            # Atualiza conversa
+            db.table("conversations").update({
+                "last_message_at": now,
+                "last_channel": "telegram",
+            }).eq("id", conversation["id"]).execute()
+
+            print(f"[SERVICE] {action_text}")
+
+        except Exception as e:
+            import traceback
+            print(f"Erro ao processar chat action: {e}")
+            traceback.print_exc()
+
+    async def _get_or_create_group_identity(self, db, owner_id: str, chat_id: str, chat, client):
+        """Busca ou cria identity para um grupo do Telegram."""
+        # Verifica se já existe
+        existing = db.table("contact_identities").select(
+            "id, contact_id"
+        ).eq("type", "telegram").eq("value", chat_id).eq("owner_id", owner_id).execute()
+
+        if existing.data:
+            return existing.data[0]
+
+        # Pega título do grupo
+        title = getattr(chat, 'title', None) or f"Grupo {chat_id}"
+
+        # Cria contato para o grupo
+        contact_id = str(uuid4())
+        db.table("contacts").insert({
+            "id": contact_id,
+            "owner_id": owner_id,
+            "display_name": title,
+            "metadata": {"is_group": True},
+        }).execute()
+
+        # Cria identity
+        identity_id = str(uuid4())
+        db.table("contact_identities").insert({
+            "id": identity_id,
+            "owner_id": owner_id,
+            "contact_id": contact_id,
+            "type": "telegram",
+            "value": chat_id,
+            "metadata": {
+                "display_name": title,
+                "title": title,
+                "is_group": True,
+            },
+        }).execute()
+
+        return {"id": identity_id, "contact_id": contact_id}
 
     async def _process_incoming_media(self, client, db, owner_id: str, message_id: str, msg):
         """Baixa e salva mídia de mensagem recebida."""
