@@ -37,6 +37,7 @@ class Integration(IntegrationBase, TimestampMixin, BaseSchema):
 # ============================================
 class TelegramStartAuthRequest(BaseModel):
     phone_number: str
+    workspace_id: UUID
 
 
 class TelegramStartAuthResponse(BaseModel):
@@ -48,6 +49,7 @@ class TelegramVerifyCodeRequest(BaseModel):
     phone_number: str
     phone_code_hash: str
     code: str
+    workspace_id: UUID
 
 
 class TelegramVerifyCodeResponse(BaseModel):
@@ -59,6 +61,7 @@ class TelegramVerifyCodeResponse(BaseModel):
 class TelegramVerify2FARequest(BaseModel):
     phone_number: str
     password: str
+    workspace_id: UUID
 
 
 class TelegramVerify2FAResponse(BaseModel):

@@ -60,8 +60,11 @@ async def start_auth(
     try:
         result = await client.send_code_request(request.phone_number)
 
-        # Guarda cliente para próximo passo
-        _auth_clients[request.phone_number] = client
+        # Guarda cliente e workspace_id para próximo passo
+        _auth_clients[request.phone_number] = {
+            "client": client,
+            "workspace_id": request.workspace_id,
+        }
 
         return TelegramStartAuthResponse(
             phone_code_hash=result.phone_code_hash,
@@ -79,10 +82,13 @@ async def verify_code(
     db: Client = Depends(get_supabase),
 ):
     """Verifica código e finaliza auth (ou pede 2FA)."""
-    client = _auth_clients.get(request.phone_number)
+    auth_data = _auth_clients.get(request.phone_number)
 
-    if not client:
+    if not auth_data:
         raise HTTPException(status_code=400, detail="Sessão expirada, reinicie auth")
+
+    client = auth_data["client"]
+    workspace_id = request.workspace_id
 
     try:
         await client.sign_in(
@@ -92,7 +98,7 @@ async def verify_code(
         )
 
         # Auth completa - salvar sessão
-        integration_id = await _save_integration(client, owner_id, request.phone_number, db)
+        integration_id = await _save_integration(client, owner_id, workspace_id, request.phone_number, db)
 
         del _auth_clients[request.phone_number]
         await client.disconnect()
@@ -123,16 +129,19 @@ async def verify_2fa(
     db: Client = Depends(get_supabase),
 ):
     """Verifica senha 2FA e finaliza auth."""
-    client = _auth_clients.get(request.phone_number)
+    auth_data = _auth_clients.get(request.phone_number)
 
-    if not client:
+    if not auth_data:
         raise HTTPException(status_code=400, detail="Sessão expirada, reinicie auth")
+
+    client = auth_data["client"]
+    workspace_id = request.workspace_id
 
     try:
         await client.sign_in(password=request.password)
 
         # Auth completa - salvar sessão
-        integration_id = await _save_integration(client, owner_id, request.phone_number, db)
+        integration_id = await _save_integration(client, owner_id, workspace_id, request.phone_number, db)
 
         del _auth_clients[request.phone_number]
         await client.disconnect()
@@ -149,6 +158,7 @@ async def verify_2fa(
 async def _save_integration(
     client: TelegramClient,
     owner_id: UUID,
+    workspace_id: UUID,
     phone_number: str,
     db: Client,
 ) -> UUID:
@@ -168,6 +178,7 @@ async def _save_integration(
     db.table("integration_accounts").insert({
         "id": str(integration_id),
         "owner_id": str(owner_id),
+        "workspace_id": str(workspace_id),
         "type": "telegram_user",
         "label": label,
         "config": {

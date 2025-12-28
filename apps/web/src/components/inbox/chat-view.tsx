@@ -5,6 +5,7 @@ import { Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailO
 import { MessageItem } from "./message-item"
 import { DateDivider } from "./date-divider"
 import { Composer } from "./composer"
+import { PinnedBar } from "./pinned-bar"
 import { TagManager } from "./tag-manager"
 import { ContactManager } from "./contact-manager"
 import { DealQuickView } from "../crm/deal-quick-view"
@@ -115,6 +116,7 @@ export function ChatView({
   onUnlinkContact,
 }: ChatViewProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const [showTranslation, setShowTranslation] = useState(false)
   const [translations, setTranslations] = useState<Record<string, Translation>>({})
   const [isTranslating, setIsTranslating] = useState(false)
@@ -162,6 +164,25 @@ export function ChatView({
     }
     return map
   }, [messages])
+
+  // Filtra mensagens fixadas
+  const pinnedMessages = useMemo(() =>
+    messages.filter(m => m.is_pinned),
+    [messages]
+  )
+
+  // Navega até uma mensagem específica
+  const scrollToMessage = useCallback((messageId: string) => {
+    const element = messageRefs.current.get(messageId)
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "center" })
+      // Destaca a mensagem brevemente
+      element.classList.add("ring-2", "ring-primary", "ring-offset-2")
+      setTimeout(() => {
+        element.classList.remove("ring-2", "ring-primary", "ring-offset-2")
+      }, 2000)
+    }
+  }, [])
 
   // Handlers para reply
   const handleReply = useCallback((message: Message) => {
@@ -699,6 +720,16 @@ export function ChatView({
         </div>
       )}
 
+      {/* Mensagens fixadas */}
+      {pinnedMessages.length > 0 && (
+        <PinnedBar
+          pinnedMessages={pinnedMessages}
+          onNavigate={scrollToMessage}
+          onUnpin={handleUnpin}
+          contactName={displayName || undefined}
+        />
+      )}
+
       {/* Messages + Composer wrapper com background único */}
       <div className="chat-background flex min-h-0 flex-1 flex-col">
         {/* Messages (scroll area) */}
@@ -717,18 +748,26 @@ export function ChatView({
                 item.type === "date_divider" ? (
                   <DateDivider key={`date-${item.dateKey}`} date={item.date} />
                 ) : (
-                  <MessageItem
+                  <div
                     key={item.message.id}
-                    message={item.message}
-                    onDownload={onDownloadAttachment}
-                    translation={showTranslation && item.message.direction === "inbound" ? translations[item.message.id] : undefined}
-                    showChannelIndicator={showChannelIndicator}
-                    onReply={handleReply}
-                    onPin={handlePin}
-                    onUnpin={handleUnpin}
-                    isPinned={item.message.is_pinned}
-                    replyToMessage={item.message.reply_to_message_id ? messagesById[item.message.reply_to_message_id] : null}
-                  />
+                    ref={(el) => {
+                      if (el) messageRefs.current.set(item.message.id, el)
+                      else messageRefs.current.delete(item.message.id)
+                    }}
+                    className="transition-all duration-300"
+                  >
+                    <MessageItem
+                      message={item.message}
+                      onDownload={onDownloadAttachment}
+                      translation={showTranslation && item.message.direction === "inbound" ? translations[item.message.id] : undefined}
+                      showChannelIndicator={showChannelIndicator}
+                      onReply={handleReply}
+                      onPin={handlePin}
+                      onUnpin={handleUnpin}
+                      isPinned={item.message.is_pinned}
+                      replyToMessage={item.message.reply_to_message_id ? messagesById[item.message.reply_to_message_id] : null}
+                    />
+                  </div>
                 )
               )}
               <div ref={messagesEndRef} />

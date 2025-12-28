@@ -6,6 +6,7 @@ export { ChatView, type Message, type Template, type AISuggestion } from "./chat
 export { MessageItem } from "./message-item"
 export { DateDivider } from "./date-divider"
 export { Composer } from "./composer"
+export { PinnedBar } from "./pinned-bar"
 export { TagManager } from "./tag-manager"
 export { TagFilter } from "./tag-filter"
 export { ContactManager } from "./contact-manager"

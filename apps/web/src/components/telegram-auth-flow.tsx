@@ -6,11 +6,12 @@ import { X, Loader2, Phone, KeyRound, Lock } from "lucide-react"
 interface TelegramAuthFlowProps {
   onComplete: (integrationId: string) => void
   onCancel: () => void
+  workspaceId: string
 }
 
 type Step = "phone" | "code" | "2fa"
 
-export function TelegramAuthFlow({ onComplete, onCancel }: TelegramAuthFlowProps) {
+export function TelegramAuthFlow({ onComplete, onCancel, workspaceId }: TelegramAuthFlowProps) {
   const [step, setStep] = useState<Step>("phone")
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -32,7 +33,7 @@ export function TelegramAuthFlow({ onComplete, onCancel }: TelegramAuthFlowProps
       const res = await fetch(`${API_URL}/telegram/auth/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone_number: phoneNumber }),
+        body: JSON.stringify({ phone_number: phoneNumber, workspace_id: workspaceId }),
       })
 
       if (!res.ok) {
@@ -63,6 +64,7 @@ export function TelegramAuthFlow({ onComplete, onCancel }: TelegramAuthFlowProps
           phone_number: phoneNumber,
           phone_code_hash: phoneCodeHash,
           code,
+          workspace_id: workspaceId,
         }),
       })
 
@@ -97,6 +99,7 @@ export function TelegramAuthFlow({ onComplete, onCancel }: TelegramAuthFlowProps
         body: JSON.stringify({
           phone_number: phoneNumber,
           password,
+          workspace_id: workspaceId,
         }),
       })
 

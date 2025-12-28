@@ -1411,10 +1411,11 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
       </div>
 
       {/* Auth Flow Modal */}
-      {showAuthFlow && (
+      {showAuthFlow && currentWorkspace && (
         <TelegramAuthFlow
           onComplete={handleAuthComplete}
           onCancel={() => setShowAuthFlow(false)}
+          workspaceId={currentWorkspace.id}
         />
       )}
     </div>

@@ -169,14 +169,16 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-### Workers (apps/workers)
-```bash
-cd apps/workers
-python -m venv .venv
-source .venv/bin/activate
-pip install -r telegram/requirements.txt -r email/requirements.txt
-python telegram/worker.py  # ou email/worker.py
-```
+### Workers - ⚠️ APENAS NO SERVIDOR
+
+**NÃO RODE WORKERS LOCALMENTE!** Eles rodam apenas no servidor de produção.
+
+**Motivo:** Telegram só permite 1 sessão por API ID. Rodar local + servidor causa `AuthKeyDuplicatedError` e desconecta a produção.
+
+**Desenvolvimento local funciona sem workers:**
+- Frontend lê mensagens via Supabase (realtime)
+- Envio funciona (API no servidor processa)
+- Recebimento: workers no servidor cuidam
 
 ### Deploy no Servidor (Digital Ocean)
 ```bash
@@ -185,13 +187,6 @@ cd /opt/integrater
 git pull
 docker compose up --build -d
 docker compose logs -f api  # verificar logs
-```
-
-### Docker Local (para debug)
-```bash
-cd apps/workers
-docker compose up --build
-docker compose logs -f
 ```
 
 ## 4. Convenções de Código
