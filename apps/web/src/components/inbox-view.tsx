@@ -74,6 +74,7 @@ export function InboxView({ userEmail }: InboxViewProps) {
     return null
   })
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null)
+  const [cachedSelectedConversation, setCachedSelectedConversation] = useState<Conversation | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
@@ -286,16 +287,6 @@ export function InboxView({ userEmail }: InboxViewProps) {
       localStorage.removeItem("selectedConversationId")
     }
   }, [selectedId])
-
-  // Limpar seleção quando mudar de canal
-  useEffect(() => {
-    setSelectedId(null)
-    setMessages([])
-    setSelectedContactId(null)
-    setContactChannels([])
-    setSelectedSendChannel(null)
-    localStorage.removeItem("selectedConversationId")
-  }, [selectedChannel])
 
   // Busca com debounce no banco de dados
   useEffect(() => {
@@ -725,6 +716,11 @@ I'll be waiting.`
 
     // Buscar a conversa para verificar se tem contact_id
     const conv = conversations.find(c => c.id === id)
+
+    // Guardar no cache para manter dados quando mudar de canal
+    if (conv) {
+      setCachedSelectedConversation(conv)
+    }
     if (conv?.contact_id) {
       // Se tem contato, carregar mensagens de TODAS as conversas do contato
       setSelectedContactId(conv.contact_id)
@@ -988,7 +984,9 @@ I'll be waiting.`
     }
   }, [supabase, selectedId, selectedContactId, contactChannels, loadConversations, loadMessages, loadContactMessages, searchQuery])
 
-  const selectedConversation = conversations.find(c => c.id === selectedId)
+  // Busca conversa na lista ou usa cache (para quando muda de canal)
+  const conversationFromList = conversations.find(c => c.id === selectedId)
+  const selectedConversation = conversationFromList || cachedSelectedConversation
 
   // Determina display name para ChatView
   const getDisplayName = (conv: Conversation | undefined) => {
@@ -1142,6 +1140,7 @@ I'll be waiting.`
             onSendWelcome={handleSendWelcome}
             welcomeTemplate={welcomeTemplate}
             workspaceId={currentWorkspace?.id}
+            channel={selectedConversation?.last_channel}
           />
         </div>
       </div>

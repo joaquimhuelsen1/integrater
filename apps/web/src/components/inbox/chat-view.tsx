@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useEffect, useState, useCallback, useMemo } from "react"
-import { Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical, Unlink } from "lucide-react"
+import { Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical, Unlink, MessageSquare, Phone } from "lucide-react"
 import { MessageItem } from "./message-item"
 import { DateDivider } from "./date-divider"
 import { ServiceMessage } from "./service-message"
@@ -95,6 +95,8 @@ interface ChatViewProps {
   welcomeTemplate?: string
   // Workspace para vincular contatos
   workspaceId?: string
+  // Canal da conversa para mostrar ícone no header
+  channel?: "telegram" | "email" | "openphone_sms" | null
 }
 
 export function ChatView({
@@ -132,6 +134,7 @@ export function ChatView({
   onSendWelcome,
   welcomeTemplate,
   workspaceId,
+  channel = null,
 }: ChatViewProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -581,6 +584,20 @@ export function ChatView({
           <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
             {displayName || "Conversa"}
           </h2>
+          {/* Ícone do canal com cor */}
+          {channel && (
+            <span className="flex items-center justify-center rounded-full p-1">
+              {channel === "telegram" && (
+                <MessageSquare className="h-4 w-4 text-blue-500" />
+              )}
+              {channel === "email" && (
+                <Mail className="h-4 w-4 text-orange-500" />
+              )}
+              {channel === "openphone_sms" && (
+                <Phone className="h-4 w-4 text-purple-500" />
+              )}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {/* Toggle tradução */}

@@ -25,6 +25,12 @@ const channelIcons = {
   openphone_sms: Phone,
 }
 
+const channelColors = {
+  telegram: "text-blue-500",
+  email: "text-orange-500",
+  openphone_sms: "text-purple-500",
+}
+
 const statusColors = {
   open: "bg-green-500",
   pending: "bg-yellow-500",
@@ -61,6 +67,7 @@ export function ConversationItem({
 
   const channel = conversation.last_channel || "telegram"
   const Icon = channelIcons[channel]
+  const iconColor = channelColors[channel] || "text-zinc-600"
   const timeAgo = conversation.last_message_at
     ? formatTimeAgo(new Date(conversation.last_message_at))
     : ""
@@ -163,7 +170,7 @@ export function ConversationItem({
         )}
         {/* Channel icon badge */}
         <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-zinc-100 dark:border-zinc-900 dark:bg-zinc-700">
-          <Icon className="h-3 w-3 text-zinc-600 dark:text-zinc-400" />
+          <Icon className={`h-3 w-3 ${iconColor}`} />
         </span>
       </div>
 
