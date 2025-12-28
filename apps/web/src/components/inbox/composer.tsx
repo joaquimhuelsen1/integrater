@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useCallback, useEffect } from "react"
-import { Send, Paperclip, X, FileText, Mic, Square, Play, Pause, Image as ImageIcon, FileAudio, File as FileIcon, Smile, Reply } from "lucide-react"
+import { Send, Paperclip, X, FileText, Mic, Square, Play, Pause, Image as ImageIcon, FileAudio, File as FileIcon, Smile, Reply, Languages, Loader2, ChevronDown } from "lucide-react"
 
 interface AttachmentPreview {
   file: File
@@ -75,11 +75,12 @@ const EMOJI_CATEGORIES = [
   { name: "Objetos", emojis: ["💼", "📱", "💻", "📧", "📞", "💰", "💵", "📝", "✅", "❌", "⭐", "🌟", "💡", "🎯", "🚀", "⏰"] },
 ]
 
-export function Composer({ onSend, disabled, templates = [], initialText = "", onTextChange, externalFiles = [], onExternalFilesProcessed, replyTo, onCancelReply }: ComposerProps) {
+export function Composer({ onSend, disabled, templates = [], initialText = "", onTextChange, externalFiles = [], onExternalFilesProcessed, apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000", replyTo, onCancelReply }: ComposerProps) {
   const [text, setText] = useState(initialText)
   const [attachments, setAttachments] = useState<AttachmentPreview[]>([])
   const [showTemplates, setShowTemplates] = useState(false)
   const [showEmojis, setShowEmojis] = useState(false)
+  const [isTranslating, setIsTranslating] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
@@ -171,6 +172,36 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
     updateText(newText)
     textareaRef.current?.focus()
   }, [text, updateText])
+
+  // Traduzir rascunho para inglês
+  const translateDraft = useCallback(async () => {
+    if (!text.trim() || isTranslating) return
+
+    setIsTranslating(true)
+    try {
+      const response = await fetch(`${apiUrl}/translate/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text.trim(), target_lang: "en" }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        updateText(data.translated_text)
+        setTimeout(() => {
+          if (textareaRef.current) {
+            textareaRef.current.style.height = "auto"
+            const maxHeight = 168
+            textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, maxHeight)}px`
+          }
+        }, 0)
+      }
+    } catch (error) {
+      console.error("Erro ao traduzir:", error)
+    } finally {
+      setIsTranslating(false)
+    }
+  }, [text, isTranslating, apiUrl, updateText])
 
   // Fechar dropdowns ao clicar fora
   useEffect(() => {
@@ -417,7 +448,7 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
         /* Main composer - Telegram style */
         <div className="flex items-end gap-3">
           {/* Input container with emoji and attach inside */}
-          <div className={`relative flex flex-1 flex-col overflow-hidden border border-zinc-200 bg-zinc-100 dark:border-zinc-700 dark:bg-[#212121] ${replyTo ? "rounded-2xl" : "rounded-full"}`}>
+          <div className={`relative flex min-w-0 flex-1 flex-col border border-zinc-200 bg-zinc-100 dark:border-zinc-700 dark:bg-[#212121] ${replyTo ? "rounded-2xl" : "rounded-3xl"}`}>
             {/* Reply preview - dentro do input, estilo Telegram */}
             {replyTo && (() => {
               // Verifica se tem foto no reply
@@ -536,6 +567,55 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
             </button>
             </div>
           </div>
+
+          {/* Templates button - visible */}
+          {templates.length > 0 && (
+            <div className="relative" data-templates-dropdown>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setShowTemplates(!showTemplates) }}
+                className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                title="Templates"
+              >
+                <FileText className="h-5 w-5" />
+              </button>
+              {showTemplates && (
+                <div className="absolute bottom-14 right-0 z-50 w-64 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+                  <div className="px-3 py-1 text-xs font-medium text-zinc-500">Templates</div>
+                  {templates.map(t => (
+                    <button
+                      key={t.id}
+                      onClick={() => {
+                        insertTemplate(t)
+                        setShowTemplates(false)
+                      }}
+                      className="flex w-full flex-col items-start px-3 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                    >
+                      <span className="text-sm font-medium">{t.title}</span>
+                      {t.shortcut && <span className="text-xs text-zinc-500">/{t.shortcut}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Translate button - only show when there's text */}
+          {text.trim() && (
+            <button
+              type="button"
+              onClick={translateDraft}
+              disabled={isTranslating || disabled}
+              className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-purple-500 hover:bg-purple-100 disabled:opacity-50 dark:hover:bg-purple-900/30"
+              title="Traduzir para inglês"
+            >
+              {isTranslating ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <Languages className="h-5 w-5" />
+              )}
+            </button>
+          )}
 
           {/* Mic / Send button */}
           {hasContent ? (
