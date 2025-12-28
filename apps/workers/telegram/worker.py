@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from telethon.tl.types import (
-    User, PeerUser, MessageService,
+    User, PeerUser, MessageService, Chat, Channel,
     MessageActionChatJoinedByLink, MessageActionChatAddUser,
     MessageActionChatDeleteUser, MessageActionChatJoinedByRequest,
 )
@@ -1008,6 +1008,15 @@ class TelegramWorker:
 
             if not entity:
                 raise Exception(f"Usuário {telegram_user_id} não encontrado nos diálogos")
+
+            # Verifica se é grupo e atualiza metadata se necessário
+            if isinstance(entity, (Chat, Channel)) and not is_group:
+                print(f"[SYNC] Detectado grupo, atualizando metadata...")
+                identity_metadata["is_group"] = True
+                is_group = True
+                db.table("contact_identities").update({
+                    "metadata": identity_metadata
+                }).eq("id", identity_id).execute()
 
             # Busca mensagens existentes para evitar duplicatas
             existing_result = db.table("messages").select(
