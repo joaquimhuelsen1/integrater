@@ -12,6 +12,68 @@ Tarefas relacionadas ao frontend Next.js (apps/web).
 
 ## Concluídas
 
+#### [WEB-012] Menu hamburger estilo Telegram ✅
+**Data:** 2025-12-27
+**Resultado:** Menu lateral slide-out estilo Telegram com todas as opções
+**Funcionalidades:**
+- Botão hamburger (≡) no header da sidebar
+- Menu slide-out da esquerda com overlay escuro
+- Header roxo/azul gradiente com avatar (iniciais) e email do usuário
+- "Filtrar por Tags" com submenu expansível (lista de tags com cores)
+- Links: CRM (verde), Contatos (azul), Logs (roxo), Configurações (cinza)
+- Botão Sair (vermelho)
+- Fecha ao clicar no overlay ou no X
+- Header mais limpo: apenas ≡ Inbox, workspace selector e theme toggle
+**Arquivos:**
+- `apps/web/src/components/sidebar-menu.tsx` - novo componente do menu
+- `apps/web/src/components/inbox-view.tsx` - integração do SidebarMenu, removido footer
+
+#### [WEB-011] Exclusão de tags e filtro por tags ✅
+**Data:** 2025-12-27
+**Resultado:** Usuário pode excluir tags e filtrar conversas por tags na sidebar
+**Funcionalidades:**
+- Botão de excluir tag (lixeira vermelha) ao lado de cada tag no TagManager
+- Confirmação antes de excluir tag (remove de todas as conversas)
+- Novo componente TagFilter na sidebar
+- Dropdown com lista de tags disponíveis (cores + nomes)
+- Seleção múltipla de tags (checkbox estilo)
+- Botão X para limpar filtros
+- Estilo azul quando filtro ativo
+- Filtra conversas que têm TODAS as tags selecionadas
+**Arquivos:**
+- `apps/web/src/components/inbox/tag-manager.tsx` - função deleteTag + botão excluir
+- `apps/web/src/components/inbox/tag-filter.tsx` - novo componente de filtro
+- `apps/web/src/components/inbox/index.ts` - export TagFilter
+- `apps/web/src/components/inbox-view.tsx` - estado filterTags + filtro no useMemo
+
+#### [WEB-008] Modo escuro Telegram + Demarcações de dias ✅
+**Data:** 2025-12-27
+**Resultado:** Tema escuro estilo Telegram com roxo + separadores de data nas mensagens + UX polida
+**Funcionalidades:**
+- Tema escuro com paleta Telegram (fundo azul escuro, accent roxo)
+- Toggle de tema (sol/lua) em todas as páginas
+- Persistência em localStorage + detecção preferência do sistema
+- Demarcações de dias entre mensagens ("Hoje", "Ontem", data completa)
+- Background padrão SVG no chat (estilo Telegram)
+- Scrollbar fina 6px (estilo Telegram)
+- Message bubbles roxos para enviadas, branco/cinza para recebidas
+- Menu 3 pontos com dropdown (Sugerir, Resumir, Tags, CRM, Lida, Sync)
+- Botão Traduzir visível separado no header
+**Arquivos:**
+- `apps/web/src/contexts/theme-context.tsx` - Provider de tema
+- `apps/web/src/components/theme-toggle.tsx` - Botão toggle
+- `apps/web/src/app/globals.css` - Paleta CSS dark mode, scrollbar, chat-background
+- `apps/web/src/app/layout.tsx` - ThemeProvider wrapper
+- `apps/web/src/components/inbox/date-divider.tsx` - Divisor de datas
+- `apps/web/src/lib/group-messages-by-date.ts` - Função agrupamento
+- `apps/web/src/components/inbox/chat-view.tsx` - Divisores, menu dropdown, chat-background
+- `apps/web/src/components/inbox/message-item.tsx` - Bubbles roxos rounded-2xl
+- `apps/web/src/components/inbox-view.tsx` - Toggle na sidebar
+- `apps/web/src/components/crm/crm-view.tsx` - Toggle no header
+- `apps/web/src/components/settings-view.tsx` - Toggle no header
+- `apps/web/src/components/contacts-view.tsx` - Toggle no header
+- `apps/web/src/components/logs-view.tsx` - Toggle no header
+
 #### [WEB-005] Corrigir handleSendMessage para salvar no banco ✅
 **Data:** 2025-12-20
 **Resultado:** Mensagens agora são salvas corretamente no Supabase

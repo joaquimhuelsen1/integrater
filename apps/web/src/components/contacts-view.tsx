@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react"
 import { ArrowLeft, Search, Plus, Pencil, Trash2, X, User } from "lucide-react"
 import Link from "next/link"
+import { ThemeToggle } from "./theme-toggle"
+import { useWorkspace } from "@/contexts/workspace-context"
 
 interface Contact {
   id: string
@@ -20,6 +22,7 @@ interface Identity {
 }
 
 export function ContactsView() {
+  const { currentWorkspace } = useWorkspace()
   const [contacts, setContacts] = useState<Contact[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
@@ -31,9 +34,12 @@ export function ContactsView() {
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
   const loadContacts = useCallback(async () => {
+    if (!currentWorkspace) return
+
     setIsLoading(true)
     try {
       const params = new URLSearchParams()
+      params.set("workspace_id", currentWorkspace.id)
       if (searchQuery) params.set("search", searchQuery)
 
       const res = await fetch(`${API_URL}/contacts?${params.toString()}`)
@@ -46,17 +52,20 @@ export function ContactsView() {
     } finally {
       setIsLoading(false)
     }
-  }, [API_URL, searchQuery])
+  }, [API_URL, searchQuery, currentWorkspace])
 
   useEffect(() => {
     loadContacts()
   }, [loadContacts])
 
   const createContact = async () => {
-    if (!newName.trim()) return
+    if (!newName.trim() || !currentWorkspace) return
 
     try {
-      const res = await fetch(`${API_URL}/contacts`, {
+      const params = new URLSearchParams()
+      params.set("workspace_id", currentWorkspace.id)
+
+      const res = await fetch(`${API_URL}/contacts?${params.toString()}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ display_name: newName.trim() }),
@@ -135,13 +144,16 @@ export function ContactsView() {
             </Link>
             <h1 className="text-xl font-semibold">Contatos</h1>
           </div>
-          <button
-            onClick={() => setIsCreating(true)}
-            className="flex items-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600"
-          >
-            <Plus className="h-4 w-4" />
-            Novo Contato
-          </button>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <button
+              onClick={() => setIsCreating(true)}
+              className="flex items-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600"
+            >
+              <Plus className="h-4 w-4" />
+              Novo Contato
+            </button>
+          </div>
         </div>
       </div>
 

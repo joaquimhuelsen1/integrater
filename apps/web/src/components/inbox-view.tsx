@@ -4,10 +4,11 @@ import { useState, useEffect, useCallback, useMemo } from "react"
 import { createClient } from "@/lib/supabase"
 import { ConversationList, type Conversation, ChannelTabs } from "@/components/inbox"
 import { ChatView, type Message, type Template, type AISuggestion } from "@/components/inbox"
-import { LogoutButton } from "@/components/logout-button"
 import { WorkspaceSelector } from "@/components/workspace-selector"
-import { Menu, Search, Settings, X, FileText, Users, LayoutGrid } from "lucide-react"
-import Link from "next/link"
+import { ThemeToggle } from "@/components/theme-toggle"
+import { SidebarMenu } from "@/components/sidebar-menu"
+import { Menu, Search, X } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { useWorkspace } from "@/contexts/workspace-context"
 
 // Infere mime_type pela extensão quando file.type está vazio
@@ -64,12 +65,19 @@ export function InboxView({ userEmail }: InboxViewProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedChannel, setSelectedChannel] = useState<"telegram" | "email" | "openphone_sms" | null>(null)
+  const [filterTags, setFilterTags] = useState<string[]>([])
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [suggestions, setSuggestions] = useState<Record<string, AISuggestion | null>>({})
   const [summaries, setSummaries] = useState<Record<string, string | null>>({})
 
   const supabase = createClient()
+  const router = useRouter()
   const { currentWorkspace } = useWorkspace()
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    router.push("/login")
+  }
 
   // Carregar conversas com tags e identity
   const loadConversations = useCallback(async () => {
@@ -103,11 +111,19 @@ export function InboxView({ userEmail }: InboxViewProps) {
     setIsLoading(false)
   }, [supabase, currentWorkspace, selectedChannel])
 
-  // Conversas filtradas por canal e busca
+  // Conversas filtradas por canal, busca e tags
   const filteredConversations = useMemo(() => {
     return conversations.filter(c => {
       // Filtro por canal
       if (selectedChannel && c.last_channel !== selectedChannel) return false
+
+      // Filtro por tags
+      if (filterTags.length > 0) {
+        const conversationTagIds = c.conversation_tags?.map(ct => ct.tag?.id) || []
+        const hasAllTags = filterTags.every(tagId => conversationTagIds.includes(tagId))
+        if (!hasAllTags) return false
+      }
+
       // Filtro por busca
       if (!searchQuery) return true
       const q = searchQuery.toLowerCase()
@@ -120,7 +136,7 @@ export function InboxView({ userEmail }: InboxViewProps) {
       if (c.primary_identity?.value?.toLowerCase().includes(q)) return true
       return false
     })
-  }, [conversations, selectedChannel, searchQuery])
+  }, [conversations, selectedChannel, searchQuery, filterTags])
 
   // Marcar conversa como lida
   const markAsRead = useCallback(async (conversationId: string) => {
@@ -515,45 +531,24 @@ export function InboxView({ userEmail }: InboxViewProps) {
         }`}
       >
         {/* Header */}
-        <div className="flex h-16 flex-shrink-0 items-center justify-between border-b border-zinc-200 px-5 dark:border-zinc-800">
-          <div className="flex items-center gap-3">
+        <div className="flex h-16 flex-shrink-0 items-center justify-between border-b border-zinc-200 px-4 dark:border-zinc-800">
+          <div className="flex items-center gap-2">
+            <SidebarMenu
+              userEmail={userEmail}
+              filterTags={filterTags}
+              onFilterTagsChange={setFilterTags}
+              onLogout={handleLogout}
+            />
             <h1 className="text-lg font-semibold">Inbox</h1>
-            <WorkspaceSelector compact />
           </div>
           <div className="flex items-center gap-2">
-            <Link
-              href="/crm"
-              className="rounded p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              title="CRM"
-            >
-              <LayoutGrid className="h-6 w-6 text-zinc-500" />
-            </Link>
-            <Link
-              href="/contacts"
-              className="rounded p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              title="Contatos"
-            >
-              <Users className="h-6 w-6 text-zinc-500" />
-            </Link>
-            <Link
-              href="/logs"
-              className="rounded p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              title="Logs"
-            >
-              <FileText className="h-6 w-6 text-zinc-500" />
-            </Link>
-            <Link
-              href="/settings"
-              className="rounded p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              title="Configurações"
-            >
-              <Settings className="h-6 w-6 text-zinc-500" />
-            </Link>
+            <WorkspaceSelector compact />
+            <ThemeToggle />
             <button
               className="rounded p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 md:hidden"
               onClick={() => setIsSidebarOpen(false)}
             >
-              <X className="h-6 w-6 text-zinc-500" />
+              <X className="h-5 w-5 text-zinc-500" />
             </button>
           </div>
         </div>
@@ -593,11 +588,6 @@ export function InboxView({ userEmail }: InboxViewProps) {
           )}
         </div>
 
-        {/* User */}
-        <div className="flex flex-shrink-0 items-center justify-between border-t border-zinc-200 p-4 dark:border-zinc-800">
-          <span className="truncate text-base text-zinc-500">{userEmail}</span>
-          <LogoutButton />
-        </div>
       </div>
 
       {/* Chat */}

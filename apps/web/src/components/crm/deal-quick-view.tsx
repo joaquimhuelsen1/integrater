@@ -38,6 +38,7 @@ interface DealQuickViewProps {
   contactId: string | null
   contactName: string | null
   onDealCreated?: () => void
+  variant?: "default" | "menu-item"
 }
 
 export function DealQuickView({
@@ -45,6 +46,7 @@ export function DealQuickView({
   contactId,
   contactName,
   onDealCreated,
+  variant = "default",
 }: DealQuickViewProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
@@ -204,23 +206,30 @@ export function DealQuickView({
   const isClosed = isWon || isLost
 
   const currentPipeline = pipelines.find((p) => p.id === selectedPipeline)
+  const isMenuItem = variant === "menu-item"
 
   return (
     <div className="relative">
       {/* Toggle button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors ${
-          deal
-            ? "border-green-200 bg-green-50 text-green-600 hover:bg-green-100 dark:border-green-800 dark:bg-green-900/20 dark:text-green-400"
-            : "border-zinc-200 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
-        }`}
+        className={isMenuItem
+          ? "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
+          : `flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors ${
+              deal
+                ? "border-green-200 bg-green-50 text-green-600 hover:bg-green-100 dark:border-green-800 dark:bg-green-900/20 dark:text-green-400"
+                : "border-zinc-200 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            }`
+        }
         title={deal ? "Ver deal vinculado" : "CRM - Criar deal"}
       >
-        <Briefcase className="h-3.5 w-3.5" />
+        <Briefcase className={isMenuItem ? "h-4 w-4 text-green-500" : "h-3.5 w-3.5"} />
         <span>{deal ? "Deal" : "CRM"}</span>
         {deal && (
-          <span className="ml-1 rounded bg-green-200 px-1 text-[10px] font-medium dark:bg-green-800">
+          <span className={isMenuItem
+            ? "ml-auto rounded bg-green-200 px-1.5 text-xs font-medium dark:bg-green-800"
+            : "ml-1 rounded bg-green-200 px-1 text-[10px] font-medium dark:bg-green-800"
+          }>
             1
           </span>
         )}

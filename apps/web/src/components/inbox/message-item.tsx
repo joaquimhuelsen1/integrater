@@ -228,10 +228,10 @@ export function MessageItem({
         className={`flex ${isOutbound ? "justify-end" : "justify-start"}`}
       >
         <div
-          className={`max-w-[70%] rounded-lg px-4 py-2 ${
+          className={`max-w-[70%] rounded-2xl px-4 py-2 shadow-sm ${
             isOutbound
-              ? "bg-blue-500 text-white"
-              : "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
+              ? "bg-purple-600 text-white dark:bg-purple-700"
+              : "bg-white text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
           }`}
         >
           {/* Imagens primeiro */}
@@ -269,8 +269,8 @@ export function MessageItem({
                   <div
                     className={`flex items-center gap-3 rounded-lg p-2 ${
                       isOutbound
-                        ? "bg-blue-600"
-                        : "bg-zinc-200 dark:bg-zinc-700"
+                        ? "bg-purple-700 dark:bg-purple-800"
+                        : "bg-zinc-100 dark:bg-zinc-700"
                     }`}
                   >
                     <button
@@ -291,7 +291,7 @@ export function MessageItem({
                       <div className="relative h-1 w-full overflow-hidden rounded-full bg-black/20">
                         <div
                           className={`absolute left-0 top-0 h-full rounded-full transition-all ${
-                            isOutbound ? "bg-white" : "bg-blue-500"
+                            isOutbound ? "bg-white" : "bg-purple-500"
                           }`}
                           style={{ width: `${audioProgress[att.id] || 0}%` }}
                         />
@@ -336,7 +336,7 @@ export function MessageItem({
                     <div
                       className={`rounded px-2 py-1 text-xs italic ${
                         isOutbound
-                          ? "bg-blue-600/50 text-blue-100"
+                          ? "bg-purple-700/50 text-purple-100"
                           : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
                       }`}
                     >
@@ -368,8 +368,8 @@ export function MessageItem({
                 onClick={() => onDownload?.(att.id, att.file_name || "arquivo")}
                 className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors ${
                   isOutbound
-                    ? "bg-blue-600 hover:bg-blue-700"
-                    : "bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-700 dark:hover:bg-zinc-600"
+                    ? "bg-purple-700 hover:bg-purple-800"
+                    : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-700 dark:hover:bg-zinc-600"
                 }`}
               >
                 <FileText className="h-4 w-4 flex-shrink-0" />
@@ -382,7 +382,7 @@ export function MessageItem({
 
         <div
           className={`mt-1 flex items-center justify-end gap-1 text-xs ${
-            isOutbound ? "text-blue-100" : "text-zinc-500"
+            isOutbound ? "text-purple-200" : "text-zinc-500 dark:text-zinc-400"
           }`}
         >
           <span>{time}</span>

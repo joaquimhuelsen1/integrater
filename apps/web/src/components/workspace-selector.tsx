@@ -88,11 +88,11 @@ export function WorkspaceSelector({ compact = false }: WorkspaceSelectorProps) {
         className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700"
       >
         <span
-          className="h-3 w-3 rounded-full"
+          className="h-3 w-3 rounded-full flex-shrink-0"
           style={{ backgroundColor: currentWorkspace.color }}
         />
-        {!compact && <span className="max-w-[120px] truncate">{currentWorkspace.name}</span>}
-        <ChevronDown className="h-4 w-4 text-zinc-500" />
+        <span className="max-w-[140px] truncate">{currentWorkspace.name}</span>
+        <ChevronDown className="h-4 w-4 text-zinc-500 flex-shrink-0" />
       </button>
 
       {/* Dropdown */}

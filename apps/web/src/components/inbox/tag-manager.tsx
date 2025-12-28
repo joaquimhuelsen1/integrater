@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Tag as TagIcon, Plus, X, Check } from "lucide-react"
+import { Tag as TagIcon, Plus, X, Check, Trash2 } from "lucide-react"
 import { createClient } from "@/lib/supabase"
 
 interface Tag {
@@ -14,6 +14,7 @@ interface TagManagerProps {
   conversationId: string
   currentTags: Tag[]
   onTagsChange: () => void
+  variant?: "default" | "menu-item"
 }
 
 const PRESET_COLORS = [
@@ -27,7 +28,7 @@ const PRESET_COLORS = [
   "#ec4899", // pink
 ]
 
-export function TagManager({ conversationId, currentTags, onTagsChange }: TagManagerProps) {
+export function TagManager({ conversationId, currentTags, onTagsChange, variant = "default" }: TagManagerProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [allTags, setAllTags] = useState<Tag[]>([])
   const [newTagName, setNewTagName] = useState("")
@@ -109,16 +110,43 @@ export function TagManager({ conversationId, currentTags, onTagsChange }: TagMan
     }
   }
 
+  const deleteTag = async (tagId: string) => {
+    if (!confirm("Excluir esta tag? Ela será removida de todas as conversas.")) return
+
+    // Remove de todas as conversas primeiro
+    await supabase
+      .from("conversation_tags")
+      .delete()
+      .eq("tag_id", tagId)
+
+    // Remove a tag
+    await supabase
+      .from("tags")
+      .delete()
+      .eq("id", tagId)
+
+    loadTags()
+    onTagsChange()
+  }
+
+  const isMenuItem = variant === "menu-item"
+
   return (
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+        className={isMenuItem
+          ? "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
+          : "flex items-center gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+        }
       >
-        <TagIcon className="h-4 w-4" />
+        <TagIcon className={isMenuItem ? "h-4 w-4 text-orange-500" : "h-4 w-4"} />
         <span>Tags</span>
         {currentTags.length > 0 && (
-          <span className="ml-1 rounded-full bg-zinc-200 px-1.5 text-xs dark:bg-zinc-700">
+          <span className={isMenuItem
+            ? "ml-auto rounded-full bg-zinc-200 px-1.5 text-xs dark:bg-zinc-700"
+            : "ml-1 rounded-full bg-zinc-200 px-1.5 text-xs dark:bg-zinc-700"
+          }>
             {currentTags.length}
           </span>
         )}
@@ -169,17 +197,25 @@ export function TagManager({ conversationId, currentTags, onTagsChange }: TagMan
                   {allTags
                     .filter(t => !currentTags.some(ct => ct.id === t.id))
                     .map(tag => (
-                      <button
-                        key={tag.id}
-                        onClick={() => toggleTag(tag)}
-                        className="flex w-full items-center gap-2 rounded px-2 py-1 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
-                      >
-                        <span
-                          className="h-3 w-3 rounded-full"
-                          style={{ backgroundColor: tag.color }}
-                        />
-                        {tag.name}
-                      </button>
+                      <div key={tag.id} className="flex items-center gap-1">
+                        <button
+                          onClick={() => toggleTag(tag)}
+                          className="flex flex-1 items-center gap-2 rounded px-2 py-1 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                        >
+                          <span
+                            className="h-3 w-3 rounded-full"
+                            style={{ backgroundColor: tag.color }}
+                          />
+                          {tag.name}
+                        </button>
+                        <button
+                          onClick={() => deleteTag(tag.id)}
+                          className="rounded p-1 text-zinc-400 hover:bg-red-100 hover:text-red-500 dark:hover:bg-red-900/30"
+                          title="Excluir tag"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     ))}
                 </div>
 

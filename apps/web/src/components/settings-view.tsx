@@ -5,6 +5,7 @@ import { ArrowLeft, Plus, Trash2, Wifi, WifiOff, Sparkles, Edit2, RotateCcw, Pla
 import Link from "next/link"
 import { TelegramAuthFlow } from "./telegram-auth-flow"
 import { WorkspaceSelector } from "./workspace-selector"
+import { ThemeToggle } from "./theme-toggle"
 import { useWorkspace } from "@/contexts/workspace-context"
 import { createClient } from "@/lib/supabase"
 
@@ -594,6 +595,9 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
           </Link>
           <h1 className="text-xl font-semibold">Configurações</h1>
           <WorkspaceSelector />
+          <div className="ml-auto">
+            <ThemeToggle />
+          </div>
         </div>
       </div>
 

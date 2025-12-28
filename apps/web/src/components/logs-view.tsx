@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { ArrowLeft, Search, Filter, Download, AlertCircle, AlertTriangle, Info, RefreshCw, FileJson, FileSpreadsheet } from "lucide-react"
 import Link from "next/link"
+import { ThemeToggle } from "./theme-toggle"
 
 interface LogEntry {
   id: string
@@ -137,6 +138,7 @@ export function LogsView() {
             <h1 className="text-xl font-semibold">Logs do Sistema</h1>
           </div>
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <button
               onClick={() => { loadLogs(); loadStats() }}
               className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"

@@ -1,12 +1,14 @@
 "use client"
 
-import { useRef, useEffect, useState, useCallback } from "react"
-import { Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw } from "lucide-react"
+import { useRef, useEffect, useState, useCallback, useMemo } from "react"
+import { Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical } from "lucide-react"
 import { MessageItem } from "./message-item"
+import { DateDivider } from "./date-divider"
 import { Composer } from "./composer"
 import { TagManager } from "./tag-manager"
 import { ContactManager } from "./contact-manager"
 import { DealQuickView } from "../crm/deal-quick-view"
+import { groupMessagesByDate } from "@/lib/group-messages-by-date"
 import type { Tag } from "./conversation-list"
 
 export interface Message {
@@ -99,6 +101,19 @@ export function ChatView({
   const [isSuggesting, setIsSuggesting] = useState(false)
   const [isSummarizing, setIsSummarizing] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [showMenu, setShowMenu] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  // Fecha menu ao clicar fora
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowMenu(false)
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [])
 
   // Drag and drop state
   const [isDragging, setIsDragging] = useState(false)
@@ -107,6 +122,12 @@ export function ChatView({
 
   // Track messages being translated to avoid duplicates
   const translatingRef = useRef<Set<string>>(new Set())
+
+  // Agrupa mensagens por data para exibir divisores
+  const groupedMessages = useMemo(
+    () => groupMessagesByDate(messages),
+    [messages]
+  )
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -436,79 +457,79 @@ export function ChatView({
             )}
             <span>{isTranslating ? "Traduzindo..." : "Traduzir"}</span>
           </button>
-          {/* Botão sugerir resposta */}
-          <button
-            onClick={suggestReply}
-            disabled={isSuggesting || messages.length === 0}
-            className="flex items-center gap-1 rounded-md border border-purple-200 bg-purple-50 px-2 py-1 text-xs text-purple-600 hover:bg-purple-100 disabled:opacity-50 dark:border-purple-800 dark:bg-purple-900/20 dark:text-purple-400 dark:hover:bg-purple-900/30"
-            title="Sugerir resposta (inglês)"
-          >
-            {isSuggesting ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Sparkles className="h-3.5 w-3.5" />
-            )}
-            <span>{isSuggesting ? "Gerando..." : "Sugerir"}</span>
-          </button>
-          {/* Botão resumir */}
-          <button
-            onClick={summarizeConversation}
-            disabled={isSummarizing || messages.length === 0}
-            className="flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-xs text-blue-600 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/30"
-            title="Resumir conversa (português)"
-          >
-            {isSummarizing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <FileText className="h-3.5 w-3.5" />
-            )}
-            <span>{isSummarizing ? "Resumindo..." : "Resumir"}</span>
-          </button>
-          {onTagsChange && (
-            <TagManager
-              conversationId={conversationId}
-              currentTags={tags}
-              onTagsChange={onTagsChange}
-            />
-          )}
-          {/* CRM Quick View */}
-          <DealQuickView
-            conversationId={conversationId}
-            contactId={contactId}
-            contactName={displayName}
-          />
-          {/* Botão marcar como lida/não lida */}
-          {(onMarkAsRead || onMarkAsUnread) && (
+          {/* Menu de opções */}
+          <div ref={menuRef} className="relative">
             <button
-              onClick={unreadCount > 0 ? onMarkAsRead : onMarkAsUnread}
-              className="flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
-              title={unreadCount > 0 ? "Marcar como lida" : "Marcar como não lida"}
+              onClick={() => setShowMenu(!showMenu)}
+              className="flex items-center justify-center rounded-md border border-zinc-200 p-1.5 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              title="Mais opções"
             >
-              {unreadCount > 0 ? (
-                <>
-                  <MailOpen className="h-3.5 w-3.5" />
-                  <span>Marcar lida</span>
-                </>
-              ) : (
-                <>
-                  <Mail className="h-3.5 w-3.5" />
-                  <span>Não lida</span>
-                </>
-              )}
+              <MoreVertical className="h-4 w-4" />
             </button>
-          )}
-          {/* Botão sincronizar histórico */}
-          {onSyncHistory && (
-            <button
-              onClick={handleSyncHistory}
-              disabled={isSyncing}
-              className="flex items-center gap-1 rounded-md border border-green-200 bg-green-50 px-2 py-1 text-xs text-green-600 hover:bg-green-100 disabled:opacity-50 dark:border-green-800 dark:bg-green-900/20 dark:text-green-400 dark:hover:bg-green-900/30"
-              title="Sincronizar histórico de mensagens"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? "animate-spin" : ""}`} />
-              <span>{isSyncing ? "Sincronizando..." : "Sync histórico"}</span>
-            </button>
-          )}
+            {showMenu && (
+              <div className="absolute right-0 top-full z-50 mt-1 min-w-48 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+                {/* Sugerir */}
+                <button
+                  onClick={() => { suggestReply(); setShowMenu(false); }}
+                  disabled={isSuggesting || messages.length === 0}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                >
+                  {isSuggesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-purple-500" />}
+                  {isSuggesting ? "Gerando..." : "Sugerir resposta"}
+                </button>
+                {/* Resumir */}
+                <button
+                  onClick={() => { summarizeConversation(); setShowMenu(false); }}
+                  disabled={isSummarizing || messages.length === 0}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                >
+                  {isSummarizing ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4 text-blue-500" />}
+                  {isSummarizing ? "Resumindo..." : "Resumir conversa"}
+                </button>
+                {/* Separador */}
+                <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
+                {/* Tags */}
+                {onTagsChange && (
+                  <TagManager
+                    conversationId={conversationId}
+                    currentTags={tags}
+                    onTagsChange={onTagsChange}
+                    variant="menu-item"
+                  />
+                )}
+                {/* CRM */}
+                <DealQuickView
+                  conversationId={conversationId}
+                  contactId={contactId}
+                  contactName={displayName}
+                  variant="menu-item"
+                />
+                {/* Separador */}
+                <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
+                {/* Marcar lida/não lida */}
+                {(onMarkAsRead || onMarkAsUnread) && (
+                  <button
+                    onClick={() => { unreadCount > 0 ? onMarkAsRead?.() : onMarkAsUnread?.(); setShowMenu(false); }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                  >
+                    {unreadCount > 0 ? <MailOpen className="h-4 w-4" /> : <Mail className="h-4 w-4" />}
+                    {unreadCount > 0 ? "Marcar como lida" : "Marcar como não lida"}
+                  </button>
+                )}
+                {/* Sync histórico */}
+                {onSyncHistory && (
+                  <button
+                    onClick={() => { handleSyncHistory(); setShowMenu(false); }}
+                    disabled={isSyncing}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-green-600 hover:bg-zinc-100 disabled:opacity-50 dark:text-green-400 dark:hover:bg-zinc-700"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`} />
+                    {isSyncing ? "Sincronizando..." : "Sincronizar histórico"}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -577,7 +598,7 @@ export function ChatView({
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="chat-background flex-1 overflow-y-auto p-4">
         {isLoading ? (
           <div className="flex h-full items-center justify-center">
             <span className="text-zinc-500">Carregando...</span>
@@ -588,14 +609,18 @@ export function ChatView({
           </div>
         ) : (
           <div className="space-y-4">
-            {messages.map((msg) => (
-              <MessageItem
-                key={msg.id}
-                message={msg}
-                onDownload={onDownloadAttachment}
-                translation={showTranslation && msg.direction === "inbound" ? translations[msg.id] : undefined}
-              />
-            ))}
+            {groupedMessages.map((item, index) =>
+              item.type === "date_divider" ? (
+                <DateDivider key={`date-${item.dateKey}`} date={item.date} />
+              ) : (
+                <MessageItem
+                  key={item.message.id}
+                  message={item.message}
+                  onDownload={onDownloadAttachment}
+                  translation={showTranslation && item.message.direction === "inbound" ? translations[item.message.id] : undefined}
+                />
+              )
+            )}
             <div ref={messagesEndRef} />
           </div>
         )}

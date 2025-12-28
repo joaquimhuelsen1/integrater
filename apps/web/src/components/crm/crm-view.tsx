@@ -10,6 +10,7 @@ import { CRMDashboard } from "./crm-dashboard"
 import { LossReasonModal } from "./loss-reason-modal"
 import { DealFilters, defaultFilters, type DealFiltersState } from "./deal-filters"
 import { WorkspaceSelector } from "@/components/workspace-selector"
+import { ThemeToggle } from "@/components/theme-toggle"
 import { useWorkspace } from "@/contexts/workspace-context"
 
 interface Pipeline {
@@ -404,6 +405,8 @@ export function CRMView() {
             {" · "}
             <span className="font-medium text-zinc-900 dark:text-white">{formatCurrency(totalValue)}</span>
           </div>
+
+          <ThemeToggle />
 
           <button
             onClick={() => loadStages()}
