@@ -431,6 +431,8 @@ export function InboxView({ userEmail }: InboxViewProps) {
       const conv = conversations.find(c => c.id === selectedId)
       if (conv) {
         hasLoadedRef.current = true
+        // Cache da conversa para manter dados quando mudar de canal
+        setCachedSelectedConversation(conv)
         if (conv.contact_id) {
           setSelectedContactId(conv.contact_id)
           loadContactMessages(conv.contact_id)
@@ -986,7 +988,14 @@ I'll be waiting.`
 
   // Busca conversa na lista ou usa cache (para quando muda de canal)
   const conversationFromList = conversations.find(c => c.id === selectedId)
-  const selectedConversation = conversationFromList || cachedSelectedConversation
+  const selectedConversation = conversationFromList || (cachedSelectedConversation?.id === selectedId ? cachedSelectedConversation : null)
+
+  // Atualiza cache quando conversa está na lista (mantém dados frescos)
+  useEffect(() => {
+    if (conversationFromList && conversationFromList.id === selectedId) {
+      setCachedSelectedConversation(conversationFromList)
+    }
+  }, [conversationFromList, selectedId])
 
   // Determina display name para ChatView
   const getDisplayName = (conv: Conversation | undefined) => {
