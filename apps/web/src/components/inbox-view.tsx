@@ -268,24 +268,6 @@ export function InboxView({ userEmail }: InboxViewProps) {
     }
   }, [selectedId])
 
-  // Restaurar mensagens quando conversa selecionada é restaurada do localStorage
-  const hasLoadedRef = useRef(false)
-  useEffect(() => {
-    if (selectedId && conversations.length > 0 && !hasLoadedRef.current) {
-      const conv = conversations.find(c => c.id === selectedId)
-      if (conv) {
-        hasLoadedRef.current = true
-        if (conv.contact_id) {
-          setSelectedContactId(conv.contact_id)
-          loadContactMessages(conv.contact_id)
-        } else {
-          setSelectedContactId(null)
-          loadMessages(selectedId)
-        }
-      }
-    }
-  }, [selectedId, conversations, loadMessages, loadContactMessages])
-
   // Busca com debounce no banco de dados
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -416,6 +398,24 @@ export function InboxView({ userEmail }: InboxViewProps) {
       setMessages(msgs.reverse() as Message[])
     }
   }, [supabase, selectedSendChannel])
+
+  // Restaurar mensagens quando conversa selecionada é restaurada do localStorage
+  const hasLoadedRef = useRef(false)
+  useEffect(() => {
+    if (selectedId && conversations.length > 0 && !hasLoadedRef.current) {
+      const conv = conversations.find(c => c.id === selectedId)
+      if (conv) {
+        hasLoadedRef.current = true
+        if (conv.contact_id) {
+          setSelectedContactId(conv.contact_id)
+          loadContactMessages(conv.contact_id)
+        } else {
+          setSelectedContactId(null)
+          loadMessages(selectedId)
+        }
+      }
+    }
+  }, [selectedId, conversations, loadMessages, loadContactMessages])
 
   // Desvincular conversa do contato
   const unlinkContact = useCallback(async (conversationId: string) => {
