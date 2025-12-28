@@ -562,6 +562,100 @@ async def sync_history(
     )
 
 
+class StartChatRequest(BaseModel):
+    """Request para iniciar chat com usuário do Telegram."""
+    telegram_user_id: int
+    user_name: str
+    workspace_id: UUID
+
+
+class StartChatResponse(BaseModel):
+    """Response com dados da conversa criada/encontrada."""
+    conversation_id: str
+    identity_id: str
+    integration_account_id: str
+    created: bool
+
+
+@router.post("/start-chat", response_model=StartChatResponse)
+async def start_chat(
+    request: StartChatRequest,
+    owner_id: UUID = Depends(get_current_user_id),
+    db: Client = Depends(get_supabase),
+):
+    """Inicia ou busca chat com um usuário do Telegram."""
+    telegram_id = str(request.telegram_user_id)
+    workspace_id = str(request.workspace_id)
+
+    # Busca integration_account ativa do workspace
+    acc_result = db.table("integration_accounts").select(
+        "id"
+    ).eq("owner_id", str(owner_id)).eq(
+        "workspace_id", workspace_id
+    ).eq("type", "telegram_user").eq("is_active", True).limit(1).execute()
+
+    if not acc_result.data:
+        raise HTTPException(404, "Nenhuma conta Telegram ativa neste workspace")
+
+    integration_account_id = acc_result.data[0]["id"]
+
+    # Busca identity existente
+    identity_result = db.table("contact_identities").select(
+        "id"
+    ).eq("owner_id", str(owner_id)).eq(
+        "type", "telegram_user"
+    ).eq("value", telegram_id).execute()
+
+    created = False
+
+    if identity_result.data:
+        identity_id = identity_result.data[0]["id"]
+    else:
+        # Cria nova identity
+        identity_id = str(uuid4())
+        db.table("contact_identities").insert({
+            "id": identity_id,
+            "owner_id": str(owner_id),
+            "contact_id": None,
+            "type": "telegram_user",
+            "value": telegram_id,
+            "metadata": {
+                "first_name": request.user_name,
+            },
+        }).execute()
+        created = True
+
+    # Busca ou cria conversa
+    conv_result = db.table("conversations").select(
+        "id"
+    ).eq("owner_id", str(owner_id)).eq(
+        "primary_identity_id", identity_id
+    ).execute()
+
+    if conv_result.data:
+        conversation_id = conv_result.data[0]["id"]
+    else:
+        conversation_id = str(uuid4())
+        db.table("conversations").insert({
+            "id": conversation_id,
+            "owner_id": str(owner_id),
+            "workspace_id": workspace_id,
+            "contact_id": None,
+            "primary_identity_id": identity_id,
+            "status": "open",
+            "last_channel": "telegram",
+            "last_message_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+        created = True
+
+    return StartChatResponse(
+        conversation_id=conversation_id,
+        identity_id=identity_id,
+        integration_account_id=integration_account_id,
+        created=created,
+    )
+
+
 @router.get("/sync-history/status", response_model=List[SyncJobStatus])
 async def get_sync_status(
     account_id: Optional[UUID] = None,

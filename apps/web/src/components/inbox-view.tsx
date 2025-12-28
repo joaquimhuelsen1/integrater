@@ -359,6 +359,146 @@ export function InboxView({ userEmail }: InboxViewProps) {
     loadConversations(searchQuery)
   }, [supabase, loadMessages, loadConversations, searchQuery])
 
+  // Template de boas-vindas para novos membros
+  const welcomeTemplate = `Hi, this is Ethan.
+It's a great pleasure to have you in the relationship rebuilding program.
+
+I talk individually with each student, always in a direct and personal way, to really understand their story on a deep level.
+
+That's why I can't talk to several students throughout the day, especially since many join every day.
+
+Now it's your turn.
+
+If you've already filled out the form, let me know; I'll review it before asking specific questions.
+If you haven't filled it out yet, share your story right here: what happened, where you are now, and what your biggest questions are.
+
+The more details you share, the more precise our conversation will be.
+
+I'll be waiting.`
+
+  // Abrir chat com usuário específico do Telegram
+  const handleOpenUserChat = useCallback(async (telegramUserId: number, userName: string) => {
+    if (!currentWorkspace) return
+
+    // Buscar se já existe uma identity/conversa para esse usuário
+    const { data: existingIdentity } = await supabase
+      .from("contact_identities")
+      .select("id")
+      .eq("value", String(telegramUserId))
+      .eq("type", "telegram_user")
+      .single()
+
+    if (existingIdentity) {
+      // Buscar conversa existente
+      const { data: conv } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("primary_identity_id", existingIdentity.id)
+        .eq("workspace_id", currentWorkspace.id)
+        .single()
+
+      if (conv) {
+        // Selecionar a conversa existente
+        setSelectedId(conv.id)
+        setSelectedContactId(null)
+        setContactChannels([])
+        loadMessages(conv.id)
+        return
+      }
+    }
+
+    // Se não existe, criar via API (que vai criar identity + conversa)
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const { data: sessionData } = await supabase.auth.getSession()
+    const token = sessionData?.session?.access_token
+
+    try {
+      const response = await fetch(`${apiUrl}/telegram/start-chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          telegram_user_id: telegramUserId,
+          user_name: userName,
+          workspace_id: currentWorkspace.id,
+        }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        if (data.conversation_id) {
+          setSelectedId(data.conversation_id)
+          setSelectedContactId(null)
+          setContactChannels([])
+          loadMessages(data.conversation_id)
+          loadConversations(searchQuery)
+        }
+      }
+    } catch (error) {
+      console.error("Error starting chat:", error)
+    }
+  }, [supabase, currentWorkspace, loadMessages, loadConversations, searchQuery])
+
+  // Enviar mensagem de boas-vindas para usuário
+  const handleSendWelcome = useCallback(async (telegramUserId: number, userName: string): Promise<boolean> => {
+    if (!currentWorkspace) return false
+
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const { data: sessionData } = await supabase.auth.getSession()
+    const token = sessionData?.session?.access_token
+
+    try {
+      // Primeiro, criar/buscar a conversa
+      const response = await fetch(`${apiUrl}/telegram/start-chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          telegram_user_id: telegramUserId,
+          user_name: userName,
+          workspace_id: currentWorkspace.id,
+        }),
+      })
+
+      if (!response.ok) return false
+
+      const data = await response.json()
+      const conversationId = data.conversation_id
+      const integrationAccountId = data.integration_account_id
+
+      if (!conversationId || !integrationAccountId) return false
+
+      // Enviar a mensagem de boas-vindas
+      const sendResponse = await fetch(`${apiUrl}/messages/send`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          text: welcomeTemplate,
+          channel: "telegram",
+          integration_account_id: integrationAccountId,
+          attachments: [],
+        }),
+      })
+
+      if (sendResponse.ok) {
+        loadConversations(searchQuery)
+        return true
+      }
+      return false
+    } catch (error) {
+      console.error("Error sending welcome:", error)
+      return false
+    }
+  }, [supabase, currentWorkspace, welcomeTemplate, loadConversations, searchQuery])
+
   // Sincronizar histórico de mensagens
   const syncHistory = useCallback(async (conversationId: string) => {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
@@ -881,6 +1021,9 @@ export function InboxView({ userEmail }: InboxViewProps) {
             selectedSendChannel={selectedSendChannel}
             onSendChannelChange={setSelectedSendChannel}
             onUnlinkContact={selectedId ? () => unlinkContact(selectedId) : undefined}
+            onOpenUserChat={handleOpenUserChat}
+            onSendWelcome={handleSendWelcome}
+            welcomeTemplate={welcomeTemplate}
           />
         </div>
       </div>

@@ -662,57 +662,65 @@ class TelegramWorker:
             print(f"Erro ao processar chat action: {e}")
             traceback.print_exc()
 
-    async def _parse_service_message(self, client, msg: MessageService) -> tuple[str | None, str | None]:
-        """Parse MessageService e retorna (texto, message_type) ou (None, None)."""
+    async def _parse_service_message(self, client, msg: MessageService) -> tuple[str | None, str | None, dict | None]:
+        """Parse MessageService e retorna (texto, message_type, metadata) ou (None, None, None)."""
         action = msg.action
 
-        # Tenta pegar nome do usuário que fez a ação
+        # Tenta pegar info do usuário que fez a ação
+        user_id = None
         user_name = None
         if msg.from_id and hasattr(msg.from_id, 'user_id'):
+            user_id = msg.from_id.user_id
             try:
-                user = await client.get_entity(msg.from_id.user_id)
-                user_name = getattr(user, 'first_name', None) or getattr(user, 'username', None) or str(msg.from_id.user_id)
+                user = await client.get_entity(user_id)
+                user_name = getattr(user, 'first_name', None) or getattr(user, 'username', None) or str(user_id)
             except Exception:
-                user_name = str(msg.from_id.user_id)
+                user_name = str(user_id)
 
         if isinstance(action, MessageActionChatJoinedByLink):
             name = user_name or "Alguém"
-            return f"{name} joined the group via invite link", "service_join"
+            metadata = {"action_user_id": user_id, "action_user_name": user_name} if user_id else {}
+            return f"{name} joined the group via invite link", "service_join", metadata
 
         elif isinstance(action, MessageActionChatJoinedByRequest):
             name = user_name or "Alguém"
-            return f"{name} joined the group via request", "service_join"
+            metadata = {"action_user_id": user_id, "action_user_name": user_name} if user_id else {}
+            return f"{name} joined the group via request", "service_join", metadata
 
         elif isinstance(action, MessageActionChatAddUser):
             user_ids = action.users if action.users else []
             count = len(user_ids)
             if count == 1:
+                added_id = user_ids[0]
                 try:
-                    added_user = await client.get_entity(user_ids[0])
-                    added_name = getattr(added_user, 'first_name', None) or str(user_ids[0])
+                    added_user = await client.get_entity(added_id)
+                    added_name = getattr(added_user, 'first_name', None) or str(added_id)
                 except Exception:
-                    added_name = str(user_ids[0])
-                return f"{added_name} was added to the group", "service_add"
+                    added_name = str(added_id)
+                metadata = {"action_user_id": added_id, "action_user_name": added_name}
+                return f"{added_name} was added to the group", "service_add", metadata
             elif count > 1:
-                return f"{count} members were added to the group", "service_add"
-            return None, None
+                return f"{count} members were added to the group", "service_add", {"action_user_ids": user_ids}
+            return None, None, None
 
         elif isinstance(action, MessageActionChatDeleteUser):
-            # Pega nome do usuário removido/que saiu
+            removed_id = action.user_id
             try:
-                removed_user = await client.get_entity(action.user_id)
-                removed_name = getattr(removed_user, 'first_name', None) or str(action.user_id)
+                removed_user = await client.get_entity(removed_id)
+                removed_name = getattr(removed_user, 'first_name', None) or str(removed_id)
             except Exception:
-                removed_name = str(action.user_id)
+                removed_name = str(removed_id)
+
+            metadata = {"action_user_id": removed_id, "action_user_name": removed_name}
 
             # Se o user_id == from_id, ele saiu. Senão, foi removido
             if msg.from_id and hasattr(msg.from_id, 'user_id'):
                 if action.user_id == msg.from_id.user_id:
-                    return f"{removed_name} left the group", "service_leave"
-            return f"{removed_name} was removed from the group", "service_kick"
+                    return f"{removed_name} left the group", "service_leave", metadata
+            return f"{removed_name} was removed from the group", "service_kick", metadata
 
         # Ação não suportada
-        return None, None
+        return None, None, None
 
     async def _get_or_create_group_identity(self, db, owner_id: str, chat_id: str, chat, client):
         """Busca ou cria identity para um grupo do Telegram."""
@@ -1168,7 +1176,7 @@ class TelegramWorker:
 
                 # Verifica se é mensagem de serviço (join/leave) - só para grupos
                 if is_group and isinstance(msg, MessageService):
-                    service_text, message_type = await self._parse_service_message(client, msg)
+                    service_text, message_type, service_metadata = await self._parse_service_message(client, msg)
                     if service_text and message_type:
                         message_id = str(uuid4())
                         db.table("messages").insert({
@@ -1183,7 +1191,7 @@ class TelegramWorker:
                             "message_type": message_type,
                             "sent_at": msg.date.isoformat(),
                             "external_message_id": str(msg.id),
-                            "raw_payload": {},
+                            "raw_payload": service_metadata or {},
                         }).execute()
                         messages_synced += 1
                     continue

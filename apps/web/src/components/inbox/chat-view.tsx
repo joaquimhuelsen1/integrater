@@ -4,6 +4,7 @@ import { useRef, useEffect, useState, useCallback, useMemo } from "react"
 import { Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical, Unlink } from "lucide-react"
 import { MessageItem } from "./message-item"
 import { DateDivider } from "./date-divider"
+import { ServiceMessage } from "./service-message"
 import { Composer } from "./composer"
 import { PinnedBar } from "./pinned-bar"
 import { TagManager } from "./tag-manager"
@@ -23,6 +24,11 @@ export interface Message {
   attachments?: { id: string; file_name: string; mime_type: string; storage_path: string; storage_bucket?: string }[]
   reply_to_message_id?: string | null
   is_pinned?: boolean
+  raw_payload?: {
+    action_user_id?: number
+    action_user_name?: string
+    action_user_ids?: number[]
+  }
 }
 
 export interface Translation {
@@ -82,6 +88,11 @@ interface ChatViewProps {
   onSendChannelChange?: (channel: string) => void
   // Desvincular contato
   onUnlinkContact?: () => void
+  // Callbacks para mensagens de serviço (join/leave)
+  onOpenUserChat?: (telegramUserId: number, userName: string) => void
+  onSendWelcome?: (telegramUserId: number, userName: string) => Promise<boolean>
+  // Template de boas-vindas para novos membros
+  welcomeTemplate?: string
 }
 
 export function ChatView({
@@ -115,6 +126,9 @@ export function ChatView({
   selectedSendChannel = null,
   onSendChannelChange,
   onUnlinkContact,
+  onOpenUserChat,
+  onSendWelcome,
+  welcomeTemplate,
 }: ChatViewProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -751,15 +765,13 @@ export function ChatView({
                 item.type === "date_divider" ? (
                   <DateDivider key={`date-${item.dateKey}`} date={item.date} />
                 ) : item.message.message_type?.startsWith("service_") ? (
-                  // Mensagem de serviço (join, leave, etc) - centralizada
-                  <div
+                  // Mensagem de serviço (join, leave, etc) - interativa
+                  <ServiceMessage
                     key={item.message.id}
-                    className="flex justify-center py-1"
-                  >
-                    <span className="rounded-full bg-zinc-800/60 px-3 py-1 text-xs text-zinc-400">
-                      {item.message.text}
-                    </span>
-                  </div>
+                    message={item.message}
+                    onOpenChat={onOpenUserChat}
+                    onSendWelcome={onSendWelcome}
+                  />
                 ) : (
                   <div
                     key={item.message.id}
