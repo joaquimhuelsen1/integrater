@@ -25,6 +25,7 @@ class EmailAccountCreate(BaseModel):
     label: str
     email: str
     password: str
+    workspace_id: UUID
     imap_host: str = "imap.gmail.com"
     imap_port: int = 993
     smtp_host: str = "smtp.gmail.com"
@@ -59,6 +60,7 @@ async def create_account(
     result = db.table("integration_accounts").insert({
         "id": str(account_id),
         "owner_id": str(owner_id),
+        "workspace_id": str(request.workspace_id),
         "type": "email_imap_smtp",
         "label": request.label,
         "config": {

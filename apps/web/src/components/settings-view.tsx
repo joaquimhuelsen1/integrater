@@ -391,13 +391,13 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
   }, [API_URL, currentWorkspace])
 
   const addEmailAccount = async () => {
-    if (!newEmail.label || !newEmail.email || !newEmail.password) return
+    if (!newEmail.label || !newEmail.email || !newEmail.password || !currentWorkspace) return
     setAddingEmail(true)
     try {
       const res = await fetch(`${API_URL}/email/accounts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newEmail),
+        body: JSON.stringify({ ...newEmail, workspace_id: currentWorkspace.id }),
       })
       if (res.ok) {
         loadEmailAccounts()
