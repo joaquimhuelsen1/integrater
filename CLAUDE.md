@@ -169,6 +169,29 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
+### API Local via Docker (Recomendado)
+
+Para rodar apenas a API localmente (sem workers):
+
+```bash
+# Na raiz do projeto
+docker-compose up api -d --build
+
+# Verificar status
+docker ps -a --filter "name=inbox-api"
+
+# Ver logs
+docker logs -f inbox-api
+
+# Parar
+docker-compose down
+```
+
+Atualizar `apps/web/.env.local`:
+```
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
 ### Workers - ⚠️ APENAS NO SERVIDOR
 
 **NÃO RODE WORKERS LOCALMENTE!** Eles rodam apenas no servidor de produção.

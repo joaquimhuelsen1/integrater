@@ -231,19 +231,19 @@ async def delete_account(
     owner_id: UUID = Depends(get_current_user_id),
     db: Client = Depends(get_supabase),
 ):
-    """Remove conta Telegram."""
+    """Remove conta Telegram. Mensagens são preservadas (integration_account_id fica NULL)."""
     try:
-        # Remove mensagens que referenciam esta conta
-        db.table("messages").delete().eq(
-            "integration_account_id", str(account_id)
-        ).execute()
-
         # Remove worker heartbeats
         db.table("worker_heartbeats").delete().eq(
             "integration_account_id", str(account_id)
         ).execute()
 
-        # Remove conta
+        # Remove sync jobs pendentes
+        db.table("sync_history_jobs").delete().eq(
+            "integration_account_id", str(account_id)
+        ).eq("status", "pending").execute()
+
+        # Remove conta (FK SET NULL preserva mensagens)
         db.table("integration_accounts").delete().eq(
             "id", str(account_id)
         ).eq("owner_id", str(owner_id)).execute()

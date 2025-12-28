@@ -83,6 +83,26 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+### API Local via Docker (Recomendado)
+
+Para rodar a API localmente via Docker (sem workers):
+
+```bash
+# Na raiz do projeto
+docker-compose up api -d --build
+
+# Verificar status
+docker ps -a --filter "name=inbox-api"
+
+# Ver logs
+docker logs -f inbox-api
+```
+
+Atualizar `apps/web/.env.local`:
+```
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
 ### Workers (APENAS NO SERVIDOR)
 
 ⚠️ **IMPORTANTE:** Os workers do Telegram/Email rodam APENAS no servidor de produção (Digital Ocean). NÃO rode localmente para evitar conflito de sessão.

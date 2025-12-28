@@ -124,13 +124,13 @@ async def delete_account(
     owner_id: UUID = Depends(get_current_user_id),
     db: Client = Depends(get_supabase),
 ):
-    """Remove conta Email."""
-    # Deleta mensagens associadas primeiro
-    db.table("messages").delete().eq(
+    """Remove conta Email. Mensagens são preservadas (integration_account_id fica NULL)."""
+    # Remove worker heartbeats
+    db.table("worker_heartbeats").delete().eq(
         "integration_account_id", str(account_id)
     ).execute()
 
-    # Deleta conta
+    # Deleta conta (FK SET NULL preserva mensagens)
     db.table("integration_accounts").delete().eq(
         "id", str(account_id)
     ).eq("owner_id", str(owner_id)).execute()
@@ -138,29 +138,8 @@ async def delete_account(
     return {"success": True}
 
 
-@router.delete("/accounts/{account_id}/messages")
-async def clear_account_messages(
-    account_id: UUID,
-    owner_id: UUID = Depends(get_current_user_id),
-    db: Client = Depends(get_supabase),
-):
-    """Remove todas mensagens e conversas de uma conta Email."""
-    # Busca conversas com last_channel=email
-    convs = db.table("conversations").select("id").eq(
-        "owner_id", str(owner_id)
-    ).eq("last_channel", "email").execute()
-
-    conv_ids = [c["id"] for c in convs.data or []]
-
-    # Deleta mensagens dessas conversas
-    for conv_id in conv_ids:
-        db.table("messages").delete().eq("conversation_id", conv_id).execute()
-
-    # Deleta as conversas
-    for conv_id in conv_ids:
-        db.table("conversations").delete().eq("id", conv_id).execute()
-
-    return {"success": True, "deleted_conversations": len(conv_ids)}
+# Endpoint de delete de mensagens removido para proteger dados
+# Mensagens são valiosas e nunca devem ser deletadas em massa
 
 
 @router.post("/accounts/{account_id}/test")
