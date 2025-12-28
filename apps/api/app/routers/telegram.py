@@ -364,13 +364,24 @@ async def _get_or_create_identity(db, owner_id: str, entity, client: TelegramCli
 
     if result.data:
         existing = result.data[0]
+        current_metadata = existing.get("metadata") or {}
+        needs_update = False
+
         # Atualiza avatar se tiver novo
         if avatar_url:
-            current_metadata = existing.get("metadata") or {}
             current_metadata["avatar_url"] = avatar_url
+            needs_update = True
+
+        # Marca como grupo se for Chat/Channel e ainda não está marcado
+        if isinstance(entity, (Chat, Channel)) and not current_metadata.get("is_group"):
+            current_metadata["is_group"] = True
+            needs_update = True
+
+        if needs_update:
             db.table("contact_identities").update({
                 "metadata": current_metadata
             }).eq("id", existing["id"]).execute()
+
         return existing
 
     # Extrai metadados
@@ -385,6 +396,7 @@ async def _get_or_create_identity(db, owner_id: str, entity, client: TelegramCli
         metadata.update({
             "title": entity.title,
             "username": getattr(entity, 'username', None),
+            "is_group": True,
         })
 
     # Cria identity
