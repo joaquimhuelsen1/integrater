@@ -18,6 +18,7 @@ export interface Conversation {
   last_message_preview?: string | null
   unread_count?: number
   is_pinned?: boolean
+  archived_at?: string | null
   contact?: { display_name: string | null } | null
   primary_identity?: {
     type: string
@@ -42,6 +43,8 @@ interface ConversationListProps {
   onUnpin?: (id: string) => void
   onMarkRead?: (id: string) => void
   onMarkUnread?: (id: string) => void
+  onArchive?: (id: string) => void
+  onDelete?: (id: string) => void
 }
 
 export function ConversationList({
@@ -52,6 +55,8 @@ export function ConversationList({
   onUnpin,
   onMarkRead,
   onMarkUnread,
+  onArchive,
+  onDelete,
 }: ConversationListProps) {
   if (conversations.length === 0) {
     return (
@@ -74,6 +79,8 @@ export function ConversationList({
           onUnpin={onUnpin}
           onMarkRead={onMarkRead}
           onMarkUnread={onMarkUnread}
+          onArchive={onArchive}
+          onDelete={onDelete}
         />
       ))}
     </div>

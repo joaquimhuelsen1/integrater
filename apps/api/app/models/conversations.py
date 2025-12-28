@@ -18,6 +18,7 @@ class ConversationUpdate(BaseModel):
     status: ConversationStatus | None = None
     assigned_to_profile_id: UUID | None = None
     metadata: dict | None = None
+    archived_at: datetime | None = None
 
 
 class Conversation(ConversationBase, TimestampMixin, SoftDeleteMixin, BaseSchema):
@@ -30,6 +31,7 @@ class Conversation(ConversationBase, TimestampMixin, SoftDeleteMixin, BaseSchema
     last_inbound_at: datetime | None
     last_outbound_at: datetime | None
     last_channel: ChannelType | None
+    archived_at: datetime | None = None
 
 
 class ConversationWithDetails(Conversation):

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { MessageSquare, Mail, Phone, Pin, Eye, EyeOff } from "lucide-react"
+import { MessageSquare, Mail, Phone, Pin, Eye, EyeOff, Archive, Trash2 } from "lucide-react"
 import Image from "next/image"
 import type { Conversation, Tag } from "./conversation-list"
 
@@ -14,6 +14,8 @@ interface ConversationItemProps {
   onUnpin?: (id: string) => void
   onMarkRead?: (id: string) => void
   onMarkUnread?: (id: string) => void
+  onArchive?: (id: string) => void
+  onDelete?: (id: string) => void
 }
 
 const channelIcons = {
@@ -48,6 +50,8 @@ export function ConversationItem({
   onUnpin,
   onMarkRead,
   onMarkUnread,
+  onArchive,
+  onDelete,
 }: ConversationItemProps) {
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 })
@@ -259,6 +263,27 @@ export function ConversationItem({
             <span>Marcar como não lida</span>
           </button>
         )}
+
+        {/* Separador */}
+        <div className="my-1 h-px bg-zinc-200 dark:bg-zinc-700" />
+
+        {/* Arquivar */}
+        <button
+          onClick={() => { onArchive?.(conversation.id); setShowContextMenu(false) }}
+          className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+        >
+          <Archive className="h-4 w-4 text-zinc-500" />
+          <span>Arquivar</span>
+        </button>
+
+        {/* Excluir */}
+        <button
+          onClick={() => { onDelete?.(conversation.id); setShowContextMenu(false) }}
+          className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+        >
+          <Trash2 className="h-4 w-4" />
+          <span>Excluir</span>
+        </button>
       </div>
     )}
     </>

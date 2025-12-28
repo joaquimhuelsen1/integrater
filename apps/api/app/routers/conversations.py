@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from supabase import Client
 from uuid import UUID
+from datetime import datetime, timezone
 
 from app.deps import get_supabase, get_current_user_id
 from app.models import (
@@ -215,3 +216,70 @@ async def sync_conversation_history(
     job_id = job_result.data[0]["id"] if job_result.data else None
 
     return {"success": True, "message": "Sincronização iniciada", "job_id": job_id}
+
+
+@router.delete("/{conversation_id}", status_code=200)
+async def delete_conversation(
+    conversation_id: UUID,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Exclui conversa e suas mensagens permanentemente."""
+    # Verifica se conversa existe
+    conv = db.table("conversations").select("id").eq(
+        "id", str(conversation_id)
+    ).eq("owner_id", str(owner_id)).single().execute()
+
+    if not conv.data:
+        raise HTTPException(status_code=404, detail="Conversa não encontrada")
+
+    # Deleta mensagens da conversa
+    db.table("messages").delete().eq(
+        "conversation_id", str(conversation_id)
+    ).eq("owner_id", str(owner_id)).execute()
+
+    # Deleta tags da conversa
+    db.table("conversation_tags").delete().eq(
+        "conversation_id", str(conversation_id)
+    ).eq("owner_id", str(owner_id)).execute()
+
+    # Deleta conversa
+    db.table("conversations").delete().eq(
+        "id", str(conversation_id)
+    ).eq("owner_id", str(owner_id)).execute()
+
+    return {"success": True}
+
+
+@router.post("/{conversation_id}/archive", status_code=200)
+async def archive_conversation(
+    conversation_id: UUID,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Arquiva uma conversa."""
+    result = db.table("conversations").update({
+        "archived_at": datetime.now(timezone.utc).isoformat()
+    }).eq("id", str(conversation_id)).eq("owner_id", str(owner_id)).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Conversa não encontrada")
+
+    return {"success": True}
+
+
+@router.post("/{conversation_id}/unarchive", status_code=200)
+async def unarchive_conversation(
+    conversation_id: UUID,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Desarquiva uma conversa."""
+    result = db.table("conversations").update({
+        "archived_at": None
+    }).eq("id", str(conversation_id)).eq("owner_id", str(owner_id)).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Conversa não encontrada")
+
+    return {"success": True}

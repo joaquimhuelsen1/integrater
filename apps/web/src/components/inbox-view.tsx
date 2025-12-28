@@ -217,6 +217,48 @@ export function InboxView({ userEmail }: InboxViewProps) {
     loadConversations(searchQuery)
   }, [supabase, loadConversations, searchQuery])
 
+  // Arquivar conversa
+  const handleArchiveConversation = useCallback(async (id: string) => {
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) return
+
+    await fetch(`${API_URL}/conversations/${id}/archive`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.access_token}` }
+    })
+
+    // Remove da lista local e limpa seleção se necessário
+    setConversations(prev => prev.filter(c => c.id !== id))
+    if (selectedId === id) {
+      setSelectedId(null)
+      setMessages([])
+    }
+  }, [supabase, selectedId])
+
+  // Excluir conversa
+  const handleDeleteConversation = useCallback(async (id: string) => {
+    if (!confirm("Tem certeza que deseja excluir esta conversa? Esta ação não pode ser desfeita.")) {
+      return
+    }
+
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) return
+
+    await fetch(`${API_URL}/conversations/${id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${session.access_token}` }
+    })
+
+    // Remove da lista local e limpa seleção se necessário
+    setConversations(prev => prev.filter(c => c.id !== id))
+    if (selectedId === id) {
+      setSelectedId(null)
+      setMessages([])
+    }
+  }, [supabase, selectedId])
+
   // Persistir conversa selecionada no localStorage
   useEffect(() => {
     if (selectedId) {
@@ -256,6 +298,9 @@ export function InboxView({ userEmail }: InboxViewProps) {
   // Conversas filtradas por tags e ordenadas (fixadas no topo)
   const filteredConversations = useMemo(() => {
     const filtered = conversations.filter(c => {
+      // Filtro de arquivadas (não mostrar arquivadas)
+      if (c.archived_at) return false
+
       // Filtro por canal (já feito no banco, mas mantém para segurança)
       if (selectedChannel && c.last_channel !== selectedChannel) return false
 
@@ -996,6 +1041,8 @@ I'll be waiting.`
               onUnpin={handleUnpinConversation}
               onMarkRead={markAsRead}
               onMarkUnread={markAsUnread}
+              onArchive={handleArchiveConversation}
+              onDelete={handleDeleteConversation}
             />
           )}
         </div>
