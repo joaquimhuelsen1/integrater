@@ -1171,7 +1171,13 @@ class TelegramWorker:
             messages_synced = 0
             three_months_ago = datetime.now(timezone.utc) - timedelta(days=90)
 
-            async for msg in client.iter_messages(entity, limit=limit, offset_date=three_months_ago, reverse=True):
+            # NOTA: Não usar offset_date com reverse=True - bug conhecido do Telethon para grupos
+            # Filtramos manualmente por data após receber as mensagens
+            async for msg in client.iter_messages(entity, limit=limit):
+                # Pula mensagens mais antigas que 3 meses
+                if msg.date.replace(tzinfo=timezone.utc) < three_months_ago:
+                    continue
+
                 # Pula se já existe
                 if str(msg.id) in existing_msg_ids:
                     continue
