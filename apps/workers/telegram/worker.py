@@ -1169,17 +1169,28 @@ class TelegramWorker:
 
             # Busca histórico do Telegram (limite de 3 meses)
             messages_synced = 0
+            skipped_old = 0
+            skipped_exists = 0
+            skipped_no_content = 0
+            total_fetched = 0
             three_months_ago = datetime.now(timezone.utc) - timedelta(days=90)
+
+            print(f"[SYNC] Buscando mensagens para entity {entity.id}, limit={limit}, is_group={is_group}")
+            print(f"[SYNC] Cutoff date: {three_months_ago}, existing_ids count: {len(existing_msg_ids)}")
 
             # NOTA: Não usar offset_date com reverse=True - bug conhecido do Telethon para grupos
             # Filtramos manualmente por data após receber as mensagens
             async for msg in client.iter_messages(entity, limit=limit):
+                total_fetched += 1
+
                 # Pula mensagens mais antigas que 3 meses
                 if msg.date.replace(tzinfo=timezone.utc) < three_months_ago:
+                    skipped_old += 1
                     continue
 
                 # Pula se já existe
                 if str(msg.id) in existing_msg_ids:
+                    skipped_exists += 1
                     continue
 
                 # Verifica se é mensagem de serviço (join/leave) - só para grupos
@@ -1206,6 +1217,7 @@ class TelegramWorker:
 
                 # Só processa mensagens com texto ou mídia
                 if not msg.text and not msg.media:
+                    skipped_no_content += 1
                     continue
 
                 # Determina direção
@@ -1235,6 +1247,8 @@ class TelegramWorker:
                     await self._process_incoming_media(client, db, owner_id, message_id, msg)
 
                 messages_synced += 1
+
+            print(f"[SYNC] Resumo: fetched={total_fetched}, old={skipped_old}, exists={skipped_exists}, no_content={skipped_no_content}, synced={messages_synced}")
 
             # Busca a última mensagem REAL da conversa (pode ser nova ou existente)
             last_msg_result = db.table("messages").select(
