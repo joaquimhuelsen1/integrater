@@ -13,7 +13,7 @@ Env vars necessárias:
 import asyncio
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from uuid import UUID, uuid4
 
 from dotenv import load_dotenv
@@ -1167,10 +1167,11 @@ class TelegramWorker:
 
             existing_msg_ids = {m["external_message_id"] for m in existing_result.data}
 
-            # Busca histórico do Telegram
+            # Busca histórico do Telegram (limite de 3 meses)
             messages_synced = 0
+            three_months_ago = datetime.now(timezone.utc) - timedelta(days=90)
 
-            async for msg in client.iter_messages(entity, limit=limit):
+            async for msg in client.iter_messages(entity, limit=limit, offset_date=three_months_ago, reverse=True):
                 # Pula se já existe
                 if str(msg.id) in existing_msg_ids:
                     continue
