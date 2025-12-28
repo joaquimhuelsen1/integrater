@@ -30,7 +30,7 @@ async def list_contacts(
     ).eq("workspace_id", str(workspace_id)).is_("deleted_at", "null")
 
     if search:
-        query = query.or_(f"name.ilike.%{search}%,company.ilike.%{search}%,notes.ilike.%{search}%")
+        query = query.ilike("display_name", f"%{search}%")
 
     if cursor:
         query = query.lt("id", str(cursor))
@@ -114,9 +114,18 @@ async def link_identity(
     ).eq("id", str(data.identity_id)).eq("owner_id", str(owner_id)).execute()
 
     # 2. Atualiza conversas que usam essa identity
-    db.table("conversations").update(
-        {"contact_id": str(contact_id)}
-    ).eq("primary_identity_id", str(data.identity_id)).eq("owner_id", str(owner_id)).execute()
+    try:
+        db.table("conversations").update(
+            {"contact_id": str(contact_id)}
+        ).eq("primary_identity_id", str(data.identity_id)).eq("owner_id", str(owner_id)).execute()
+    except Exception as e:
+        error_msg = str(e)
+        if "conversations_owner_contact_channel_uniq" in error_msg or "23505" in error_msg:
+            raise HTTPException(
+                status_code=409,
+                detail="Este contato já está vinculado a outra conversa neste canal"
+            )
+        raise
 
 
 @router.post("/{contact_id}/unlink-identity", status_code=204)

@@ -93,6 +93,8 @@ interface ChatViewProps {
   onSendWelcome?: (telegramUserId: number, userName: string) => Promise<boolean>
   // Template de boas-vindas para novos membros
   welcomeTemplate?: string
+  // Workspace para vincular contatos
+  workspaceId?: string
 }
 
 export function ChatView({
@@ -129,6 +131,7 @@ export function ChatView({
   onOpenUserChat,
   onSendWelcome,
   welcomeTemplate,
+  workspaceId,
 }: ChatViewProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -713,6 +716,7 @@ export function ChatView({
           identityValue={identityValue}
           onContactLinked={onContactLinked}
           apiUrl={apiUrl}
+          workspaceId={workspaceId}
         />
       )}
 

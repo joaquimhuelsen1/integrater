@@ -1038,6 +1038,7 @@ I'll be waiting.`
             onOpenUserChat={handleOpenUserChat}
             onSendWelcome={handleSendWelcome}
             welcomeTemplate={welcomeTemplate}
+            workspaceId={currentWorkspace?.id}
           />
         </div>
       </div>

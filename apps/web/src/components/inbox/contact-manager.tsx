@@ -15,6 +15,7 @@ interface ContactManagerProps {
   identityValue: string | null
   onContactLinked: () => void
   apiUrl?: string
+  workspaceId?: string
 }
 
 export function ContactManager({
@@ -23,6 +24,7 @@ export function ContactManager({
   identityValue,
   onContactLinked,
   apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
+  workspaceId,
 }: ContactManagerProps) {
   const supabase = createClient()
   const [isOpen, setIsOpen] = useState(false)
@@ -31,6 +33,7 @@ export function ContactManager({
   const [searchQuery, setSearchQuery] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [newName, setNewName] = useState("")
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   // Helper para obter token
   const getAuthHeaders = async () => {
@@ -44,9 +47,11 @@ export function ContactManager({
 
   // Carregar contatos para vincular
   const loadContacts = useCallback(async () => {
+    if (!workspaceId) return
     try {
       const headers = await getAuthHeaders()
-      const res = await fetch(`${apiUrl}/contacts?search=${searchQuery}`, { headers })
+      const searchParam = searchQuery ? `&search=${encodeURIComponent(searchQuery)}` : ""
+      const res = await fetch(`${apiUrl}/contacts?workspace_id=${workspaceId}${searchParam}`, { headers })
       if (res.ok) {
         const data = await res.json()
         setContacts(data)
@@ -54,7 +59,7 @@ export function ContactManager({
     } catch {
       console.error("Erro ao carregar contatos")
     }
-  }, [apiUrl, searchQuery, supabase])
+  }, [apiUrl, searchQuery, workspaceId, supabase])
 
   useEffect(() => {
     if (isOpen && mode === "link") {
@@ -64,14 +69,14 @@ export function ContactManager({
 
   // Criar novo contato
   const createContact = async () => {
-    if (!newName.trim() || !identityId) return
+    if (!newName.trim() || !identityId || !workspaceId) return
 
     setIsLoading(true)
     try {
       const headers = await getAuthHeaders()
 
       // 1. Criar contato
-      const createRes = await fetch(`${apiUrl}/contacts`, {
+      const createRes = await fetch(`${apiUrl}/contacts?workspace_id=${workspaceId}`, {
         method: "POST",
         headers,
         body: JSON.stringify({ display_name: newName.trim() }),
@@ -103,18 +108,29 @@ export function ContactManager({
     if (!identityId) return
 
     setIsLoading(true)
+    setErrorMessage(null)
     try {
       const headers = await getAuthHeaders()
-      await fetch(`${apiUrl}/contacts/${contactId}/link-identity`, {
+      const res = await fetch(`${apiUrl}/contacts/${contactId}/link-identity`, {
         method: "POST",
         headers,
         body: JSON.stringify({ identity_id: identityId }),
       })
 
+      if (!res.ok) {
+        if (res.status === 409) {
+          const data = await res.json()
+          setErrorMessage(data.detail || "Este contato já está vinculado a outra conversa neste canal")
+          return
+        }
+        throw new Error("Erro ao vincular")
+      }
+
       setIsOpen(false)
       onContactLinked()
     } catch (error) {
       console.error("Erro ao vincular contato:", error)
+      setErrorMessage("Erro ao vincular contato")
     } finally {
       setIsLoading(false)
     }
@@ -160,7 +176,7 @@ export function ContactManager({
             {/* Tabs */}
             <div className="mb-4 flex gap-2">
               <button
-                onClick={() => setMode("create")}
+                onClick={() => { setMode("create"); setErrorMessage(null) }}
                 className={`flex-1 rounded-md px-3 py-2 text-sm font-medium ${
                   mode === "create"
                     ? "bg-blue-500 text-white"
@@ -171,7 +187,7 @@ export function ContactManager({
                 Criar Novo
               </button>
               <button
-                onClick={() => setMode("link")}
+                onClick={() => { setMode("link"); setErrorMessage(null) }}
                 className={`flex-1 rounded-md px-3 py-2 text-sm font-medium ${
                   mode === "link"
                     ? "bg-blue-500 text-white"
@@ -182,6 +198,13 @@ export function ContactManager({
                 Vincular Existente
               </button>
             </div>
+
+            {/* Mensagem de erro */}
+            {errorMessage && (
+              <div className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">
+                {errorMessage}
+              </div>
+            )}
 
             {mode === "create" ? (
               <div className="space-y-4">
