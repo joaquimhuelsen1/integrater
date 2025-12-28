@@ -141,6 +141,7 @@ export function ChatView({
   const [isSummarizing, setIsSummarizing] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
+  const [showAvatarModal, setShowAvatarModal] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
   // Reply/Pin states
@@ -519,18 +520,49 @@ export function ChatView({
           </div>
         </div>
       )}
+      {/* Modal foto de perfil em tela cheia */}
+      {showAvatarModal && avatarUrl && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm"
+          onClick={() => setShowAvatarModal(false)}
+        >
+          <button
+            onClick={() => setShowAvatarModal(false)}
+            className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white transition-colors hover:bg-white/20"
+            title="Fechar"
+          >
+            <X className="h-6 w-6" />
+          </button>
+          <div className="relative max-h-[90vh] max-w-[90vw]">
+            <img
+              src={avatarUrl}
+              alt={displayName || "Avatar"}
+              className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <p className="mt-4 text-center text-lg font-medium text-white">
+              {displayName}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-[#18181B]">
         <div className="flex items-center gap-3">
-          {/* Avatar */}
+          {/* Avatar - clicável para ver em tela cheia */}
           {avatarUrl ? (
-            <div className="relative h-10 w-10 overflow-hidden rounded-full">
+            <button
+              onClick={() => setShowAvatarModal(true)}
+              className="relative h-10 w-10 overflow-hidden rounded-full ring-2 ring-transparent transition-all hover:ring-violet-500 cursor-pointer"
+              title="Ver foto de perfil"
+            >
               <img
                 src={avatarUrl}
                 alt={displayName || "Avatar"}
                 className="h-full w-full object-cover"
               />
-            </div>
+            </button>
           ) : (
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-blue-500 text-sm font-medium text-white">
               {displayName
