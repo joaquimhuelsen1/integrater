@@ -533,8 +533,8 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
               className="flex-1 resize-none bg-transparent py-2.5 pr-2 text-sm focus:outline-none disabled:opacity-50"
             />
 
-            {/* Templates dropdown - comandos rápidos */}
-            {showTemplates && filteredTemplates.length > 0 && (
+            {/* Templates dropdown - comandos rápidos (só aparece quando digita /) */}
+            {showTemplates && text.startsWith("/") && filteredTemplates.length > 0 && (
               <div
                 data-templates-dropdown
                 className="absolute bottom-12 left-0 z-50 w-64 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
@@ -579,7 +579,7 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
               >
                 <FileText className="h-5 w-5" />
               </button>
-              {showTemplates && (
+              {showTemplates && !text.startsWith("/") && (
                 <div className="absolute bottom-14 right-0 z-50 w-64 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
                   <div className="px-3 py-1 text-xs font-medium text-zinc-500">Templates</div>
                   {templates.map(t => (
