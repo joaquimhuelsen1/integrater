@@ -1003,7 +1003,7 @@ I'll be waiting.`
     <div className="flex h-screen overflow-hidden bg-zinc-50 dark:bg-zinc-950">
       {/* Sidebar */}
       <div
-        className={`flex w-96 flex-shrink-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 ${
+        className={`flex w-[460px] flex-shrink-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 ${
           isSidebarOpen ? "" : "hidden md:flex"
         }`}
       >

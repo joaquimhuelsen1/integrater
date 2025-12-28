@@ -28,7 +28,7 @@ export function ChannelTabs({ selected, onSelect }: ChannelTabsProps) {
             onClick={() => onSelect(ch.id)}
             className={`whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
               isSelected
-                ? "bg-emerald-600 text-white dark:bg-emerald-500"
+                ? "bg-blue-600 text-white dark:bg-blue-500"
                 : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
             }`}
           >

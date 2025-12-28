@@ -142,7 +142,7 @@ export function ConversationItem({
       onClick={onClick}
       onContextMenu={handleContextMenu}
       className={`flex w-full cursor-pointer items-center gap-4 px-4 py-4 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50 ${
-        isSelected ? "bg-emerald-500/10 dark:bg-emerald-500/10" : ""
+        isSelected ? "bg-blue-500/10 dark:bg-blue-500/10" : ""
       } ${hasUnread ? "bg-zinc-50/50 dark:bg-zinc-800/30" : ""}`}
     >
       <div className="relative flex-shrink-0">
@@ -171,7 +171,7 @@ export function ConversationItem({
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             {isPinned && (
-              <Pin className="h-4 w-4 flex-shrink-0 text-emerald-500" />
+              <Pin className="h-4 w-4 flex-shrink-0 text-blue-500" />
             )}
             <span className="truncate text-[15px] font-medium text-zinc-900 dark:text-zinc-100">
               {displayName}
@@ -191,7 +191,7 @@ export function ConversationItem({
             {conversation.last_message_preview || ""}
           </span>
           {hasUnread && (
-            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-xs font-medium text-white flex-shrink-0">
+            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500 px-1.5 text-xs font-medium text-white flex-shrink-0">
               {unreadCount > 99 ? "99+" : unreadCount}
             </span>
           )}
