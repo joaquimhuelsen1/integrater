@@ -136,7 +136,7 @@ export function ConversationItem({
       onClick={onClick}
       onContextMenu={handleContextMenu}
       className={`flex w-full cursor-pointer items-start gap-4 border-b border-zinc-100 p-4 text-left transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50 ${
-        isSelected ? "bg-blue-500/50 dark:bg-blue-500/50" : ""
+        isSelected ? "bg-blue-500/20 dark:bg-blue-500/20" : ""
       } ${hasUnread ? "bg-blue-50/50 dark:bg-blue-900/10" : ""}`}
     >
       <div className="relative flex-shrink-0">
