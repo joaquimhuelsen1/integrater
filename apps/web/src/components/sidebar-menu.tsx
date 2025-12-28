@@ -9,8 +9,7 @@ import {
   Settings,
   ChevronRight,
   LogOut,
-  Bookmark,
-  MoreHorizontal
+  Bookmark
 } from "lucide-react"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase"
@@ -31,7 +30,6 @@ interface SidebarMenuProps {
 export function SidebarMenu({ userEmail, filterTags, onFilterTagsChange, onLogout }: SidebarMenuProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [showTagsSubmenu, setShowTagsSubmenu] = useState(false)
-  const [showMoreSubmenu, setShowMoreSubmenu] = useState(false)
   const [allTags, setAllTags] = useState<Tag[]>([])
   const menuRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -62,7 +60,6 @@ export function SidebarMenu({ userEmail, filterTags, onFilterTagsChange, onLogou
       ) {
         setIsOpen(false)
         setShowTagsSubmenu(false)
-        setShowMoreSubmenu(false)
       }
     }
 
@@ -184,6 +181,16 @@ export function SidebarMenu({ userEmail, filterTags, onFilterTagsChange, onLogou
               <span className="text-sm">Contatos</span>
             </Link>
 
+            {/* CRM */}
+            <Link
+              href="/crm"
+              onClick={() => setIsOpen(false)}
+              className="flex items-center gap-3 px-3 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            >
+              <LayoutGrid className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
+              <span className="text-sm">CRM</span>
+            </Link>
+
             {/* Settings */}
             <Link
               href="/settings"
@@ -194,37 +201,15 @@ export function SidebarMenu({ userEmail, filterTags, onFilterTagsChange, onLogou
               <span className="text-sm">Configurações</span>
             </Link>
 
-            {/* More */}
-            <button
-              onClick={() => setShowMoreSubmenu(!showMoreSubmenu)}
-              className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            {/* Logs */}
+            <Link
+              href="/logs"
+              onClick={() => setIsOpen(false)}
+              className="flex items-center gap-3 px-3 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             >
-              <MoreHorizontal className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
-              <span className="flex-1 text-sm">Mais</span>
-              <ChevronRight className={`h-4 w-4 text-zinc-400 transition-transform ${showMoreSubmenu ? "rotate-90" : ""}`} />
-            </button>
-
-            {/* More Submenu */}
-            {showMoreSubmenu && (
-              <div className="border-b border-zinc-100 bg-zinc-50 py-1 dark:border-zinc-800 dark:bg-zinc-800/50">
-                <Link
-                  href="/crm"
-                  onClick={() => setIsOpen(false)}
-                  className="flex items-center gap-2 px-10 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
-                >
-                  <LayoutGrid className="h-4 w-4 text-zinc-500" />
-                  <span>CRM</span>
-                </Link>
-                <Link
-                  href="/logs"
-                  onClick={() => setIsOpen(false)}
-                  className="flex items-center gap-2 px-10 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
-                >
-                  <FileText className="h-4 w-4 text-zinc-500" />
-                  <span>Logs</span>
-                </Link>
-              </div>
-            )}
+              <FileText className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
+              <span className="text-sm">Logs</span>
+            </Link>
 
             <div className="my-1 border-t border-zinc-100 dark:border-zinc-800" />
 
