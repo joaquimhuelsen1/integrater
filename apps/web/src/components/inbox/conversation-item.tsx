@@ -136,7 +136,7 @@ export function ConversationItem({
       onClick={onClick}
       onContextMenu={handleContextMenu}
       className={`flex w-full cursor-pointer items-start gap-4 border-b border-zinc-100 p-4 text-left transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50 ${
-        isSelected ? "bg-[#8200DB]/50 dark:bg-[#8200DB]/50" : ""
+        isSelected ? "bg-blue-500/50 dark:bg-blue-500/50" : ""
       } ${hasUnread ? "bg-blue-50/50 dark:bg-blue-900/10" : ""}`}
     >
       <div className="relative flex-shrink-0">
@@ -171,7 +171,7 @@ export function ConversationItem({
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             {isPinned && (
-              <Pin className="h-4 w-4 flex-shrink-0 text-violet-500" />
+              <Pin className="h-4 w-4 flex-shrink-0 text-blue-500" />
             )}
             <span className="truncate text-base font-medium text-zinc-900 dark:text-zinc-100">
               {displayName}
