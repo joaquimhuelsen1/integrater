@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useEffect, useState, useCallback, useMemo } from "react"
-import { Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical } from "lucide-react"
+import { Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical, Unlink } from "lucide-react"
 import { MessageItem } from "./message-item"
 import { DateDivider } from "./date-divider"
 import { Composer } from "./composer"
@@ -19,6 +19,8 @@ export interface Message {
   channel: "telegram" | "email" | "openphone_sms"
   sent_at: string
   attachments?: { id: string; file_name: string; mime_type: string; storage_path: string; storage_bucket?: string }[]
+  reply_to_message_id?: string | null
+  is_pinned?: boolean
 }
 
 export interface Translation {
@@ -39,10 +41,17 @@ export interface AISuggestion {
   content: string
 }
 
+// Canal disponível para envio
+interface AvailableChannel {
+  type: string
+  label: string
+}
+
 interface ChatViewProps {
   conversationId: string | null
   messages: Message[]
   displayName: string | null
+  avatarUrl?: string | null
   onSendMessage: (text: string, attachments?: File[]) => void
   onDownloadAttachment?: (attachmentId: string, filename: string) => void
   templates?: Template[]
@@ -64,12 +73,20 @@ interface ChatViewProps {
   onMarkAsRead?: () => void
   onMarkAsUnread?: () => void
   onSyncHistory?: () => Promise<void>
+  // Props para timeline unificada
+  showChannelIndicator?: boolean
+  availableChannels?: AvailableChannel[]
+  selectedSendChannel?: string | null
+  onSendChannelChange?: (channel: string) => void
+  // Desvincular contato
+  onUnlinkContact?: () => void
 }
 
 export function ChatView({
   conversationId,
   messages,
   displayName,
+  avatarUrl,
   onSendMessage,
   onDownloadAttachment,
   templates = [],
@@ -91,6 +108,11 @@ export function ChatView({
   onMarkAsRead,
   onMarkAsUnread,
   onSyncHistory,
+  showChannelIndicator = false,
+  availableChannels = [],
+  selectedSendChannel = null,
+  onSendChannelChange,
+  onUnlinkContact,
 }: ChatViewProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [showTranslation, setShowTranslation] = useState(false)
@@ -103,6 +125,9 @@ export function ChatView({
   const [isSyncing, setIsSyncing] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+
+  // Reply/Pin states
+  const [replyToMessage, setReplyToMessage] = useState<Message | null>(null)
 
   // Fecha menu ao clicar fora
   useEffect(() => {
@@ -129,8 +154,51 @@ export function ChatView({
     [messages]
   )
 
+  // Mapa de mensagens por ID para lookup de replies
+  const messagesById = useMemo(() => {
+    const map: Record<string, Message> = {}
+    for (const msg of messages) {
+      map[msg.id] = msg
+    }
+    return map
+  }, [messages])
+
+  // Handlers para reply
+  const handleReply = useCallback((message: Message) => {
+    setReplyToMessage(message)
+  }, [])
+
+  const handleCancelReply = useCallback(() => {
+    setReplyToMessage(null)
+  }, [])
+
+  // Handlers para pin/unpin (atualiza no banco)
+  const handlePin = useCallback(async (messageId: string) => {
+    try {
+      const resp = await fetch(`${apiUrl}/messages/${messageId}/pin`, { method: "POST" })
+      if (resp.ok) {
+        // Mensagem pinada - realtime vai atualizar
+      }
+    } catch (err) {
+      console.error("Erro ao fixar mensagem:", err)
+    }
+  }, [apiUrl])
+
+  const handleUnpin = useCallback(async (messageId: string) => {
+    try {
+      const resp = await fetch(`${apiUrl}/messages/${messageId}/unpin`, { method: "POST" })
+      if (resp.ok) {
+        // Mensagem desafixada - realtime vai atualizar
+      }
+    } catch (err) {
+      console.error("Erro ao desafixar mensagem:", err)
+    }
+  }, [apiUrl])
+
+  // Scroll para o final das mensagens (sempre instantâneo, sem animação)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    if (messages.length === 0) return
+    messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
   }, [messages])
 
   // Drag and drop handlers
@@ -365,10 +433,11 @@ export function ChatView({
     }
   }, [suggestion, apiUrl, onSuggestionChange])
 
-  // Enviar mensagem e limpar draft
+  // Enviar mensagem e limpar draft e reply
   const handleSendMessage = useCallback((text: string, attachments?: File[]) => {
     onSendMessage(text, attachments)
     onDraftChange?.("")
+    setReplyToMessage(null) // Limpa reply após enviar
   }, [onSendMessage, onDraftChange])
 
   // Sincronizar histórico
@@ -413,10 +482,33 @@ export function ChatView({
         </div>
       )}
       {/* Header */}
-      <div className="flex flex-shrink-0 items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-        <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
-          {displayName || "Conversa"}
-        </h2>
+      <div className="flex flex-shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-[#18181B]">
+        <div className="flex items-center gap-3">
+          {/* Avatar */}
+          {avatarUrl ? (
+            <div className="relative h-10 w-10 overflow-hidden rounded-full">
+              <img
+                src={avatarUrl}
+                alt={displayName || "Avatar"}
+                className="h-full w-full object-cover"
+              />
+            </div>
+          ) : (
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-blue-500 text-sm font-medium text-white">
+              {displayName
+                ? displayName
+                    .split(" ")
+                    .map((n) => n[0])
+                    .join("")
+                    .toUpperCase()
+                    .slice(0, 2)
+                : "?"}
+            </div>
+          )}
+          <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
+            {displayName || "Conversa"}
+          </h2>
+        </div>
         <div className="flex items-center gap-2">
           {/* Toggle tradução */}
           {Object.keys(translations).length > 0 && (
@@ -504,6 +596,16 @@ export function ChatView({
                   contactName={displayName}
                   variant="menu-item"
                 />
+                {/* Desvincular do contato */}
+                {contactId && onUnlinkContact && (
+                  <button
+                    onClick={() => { onUnlinkContact(); setShowMenu(false); }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-orange-600 hover:bg-zinc-100 dark:text-orange-400 dark:hover:bg-zinc-700"
+                  >
+                    <Unlink className="h-4 w-4" />
+                    Desvincular do contato
+                  </button>
+                )}
                 {/* Separador */}
                 <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
                 {/* Marcar lida/não lida */}
@@ -597,44 +699,61 @@ export function ChatView({
         </div>
       )}
 
-      {/* Messages */}
-      <div className="chat-background flex-1 overflow-y-auto p-4">
-        {isLoading ? (
-          <div className="flex h-full items-center justify-center">
-            <span className="text-zinc-500">Carregando...</span>
-          </div>
-        ) : messages.length === 0 ? (
-          <div className="flex h-full items-center justify-center">
-            <span className="text-zinc-500">Nenhuma mensagem</span>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {groupedMessages.map((item, index) =>
-              item.type === "date_divider" ? (
-                <DateDivider key={`date-${item.dateKey}`} date={item.date} />
-              ) : (
-                <MessageItem
-                  key={item.message.id}
-                  message={item.message}
-                  onDownload={onDownloadAttachment}
-                  translation={showTranslation && item.message.direction === "inbound" ? translations[item.message.id] : undefined}
-                />
-              )
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-        )}
-      </div>
+      {/* Messages + Composer wrapper com background único */}
+      <div className="chat-background flex min-h-0 flex-1 flex-col">
+        {/* Messages (scroll area) */}
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 md:px-12 lg:px-20">
+          {isLoading ? (
+            <div className="flex h-full items-center justify-center">
+              <span className="text-zinc-500">Carregando...</span>
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="flex h-full items-center justify-center">
+              <span className="text-zinc-500">Nenhuma mensagem</span>
+            </div>
+          ) : (
+            <div className="mx-auto max-w-3xl space-y-4">
+              {groupedMessages.map((item, index) =>
+                item.type === "date_divider" ? (
+                  <DateDivider key={`date-${item.dateKey}`} date={item.date} />
+                ) : (
+                  <MessageItem
+                    key={item.message.id}
+                    message={item.message}
+                    onDownload={onDownloadAttachment}
+                    translation={showTranslation && item.message.direction === "inbound" ? translations[item.message.id] : undefined}
+                    showChannelIndicator={showChannelIndicator}
+                    onReply={handleReply}
+                    onPin={handlePin}
+                    onUnpin={handleUnpin}
+                    isPinned={item.message.is_pinned}
+                    replyToMessage={item.message.reply_to_message_id ? messagesById[item.message.reply_to_message_id] : null}
+                  />
+                )
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </div>
 
-      {/* Composer */}
-      <Composer
-        onSend={handleSendMessage}
-        templates={templates}
-        initialText={draft}
-        onTextChange={onDraftChange}
-        externalFiles={pendingFiles}
-        onExternalFilesProcessed={() => setPendingFiles([])}
-      />
+        {/* Composer (flutuando sobre o mesmo background) */}
+        <Composer
+          onSend={handleSendMessage}
+          templates={templates}
+          initialText={draft}
+          onTextChange={onDraftChange}
+          externalFiles={pendingFiles}
+          onExternalFilesProcessed={() => setPendingFiles([])}
+          availableChannels={availableChannels}
+          selectedChannel={selectedSendChannel}
+          onChannelChange={onSendChannelChange}
+          replyTo={replyToMessage ? {
+            ...replyToMessage,
+            senderName: replyToMessage.direction === "outbound" ? "Você" : (displayName || "Contato")
+          } : null}
+          onCancelReply={handleCancelReply}
+        />
+      </div>
     </div>
   )
 }

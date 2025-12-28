@@ -1,9 +1,21 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { Check, Download, FileText, Image as ImageIcon, X, ZoomIn, ZoomOut, Mic, Play, Pause, FileAudio, Loader2 } from "lucide-react"
+import { useState, useEffect, useRef } from "react"
+import { Check, Download, FileText, Image as ImageIcon, X, ZoomIn, ZoomOut, Mic, Play, Pause, FileAudio, Loader2, MessageSquare, Mail, Phone, Reply, Pin } from "lucide-react"
 import { createClient } from "@/lib/supabase"
 import type { Message, Translation } from "./chat-view"
+
+const channelIcons = {
+  telegram: MessageSquare,
+  email: Mail,
+  openphone_sms: Phone,
+}
+
+const channelLabels = {
+  telegram: "Telegram",
+  email: "Email",
+  openphone_sms: "SMS",
+}
 
 interface MessageItemProps {
   message: Message
@@ -11,6 +23,12 @@ interface MessageItemProps {
   translation?: Translation
   apiUrl?: string
   onTranscriptionComplete?: (messageId: string, transcription: string) => void
+  showChannelIndicator?: boolean
+  onReply?: (message: Message) => void
+  onPin?: (messageId: string) => void
+  onUnpin?: (messageId: string) => void
+  isPinned?: boolean
+  replyToMessage?: Message | null
 }
 
 export function MessageItem({
@@ -19,6 +37,12 @@ export function MessageItem({
   translation,
   apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
   onTranscriptionComplete,
+  showChannelIndicator = false,
+  onReply,
+  onPin,
+  onUnpin,
+  isPinned = false,
+  replyToMessage,
 }: MessageItemProps) {
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({})
   const [audioUrls, setAudioUrls] = useState<Record<string, string>>({})
@@ -28,7 +52,13 @@ export function MessageItem({
   const [zoomLevel, setZoomLevel] = useState(1)
   const [transcriptions, setTranscriptions] = useState<Record<string, string>>({})
   const [transcribing, setTranscribing] = useState<Record<string, boolean>>({})
+  const [showContextMenu, setShowContextMenu] = useState(false)
+  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 })
+  const menuRef = useRef<HTMLDivElement>(null)
   const supabase = createClient()
+
+  // Reply só disponível para Telegram
+  const canReply = message.channel === "telegram"
 
   const isOutbound = message.direction === "outbound"
   const time = new Date(message.sent_at).toLocaleTimeString("pt-BR", {
@@ -75,11 +105,33 @@ export function MessageItem({
       if (e.key === "Escape") {
         setExpandedImage(null)
         setZoomLevel(1)
+        setShowContextMenu(false)
       }
     }
     window.addEventListener("keydown", handleEsc)
     return () => window.removeEventListener("keydown", handleEsc)
   }, [])
+
+  // Fecha menu ao clicar fora
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowContextMenu(false)
+      }
+    }
+    if (showContextMenu) {
+      document.addEventListener("mousedown", handleClickOutside)
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [showContextMenu])
+
+  // Handler do menu de contexto (right-click)
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setMenuPosition({ x: e.clientX, y: e.clientY })
+    setShowContextMenu(true)
+  }
 
   const openImage = (url: string) => {
     setExpandedImage(url)
@@ -95,7 +147,7 @@ export function MessageItem({
   const zoomOut = () => setZoomLevel(prev => Math.max(prev - 0.5, 0.5))
 
   // Audio player functions
-  const toggleAudio = (attId: string, url: string) => {
+  const toggleAudio = (attId: string) => {
     const audioEl = document.getElementById(`audio-${attId}`) as HTMLAudioElement
     if (!audioEl) return
 
@@ -122,13 +174,6 @@ export function MessageItem({
   const handleAudioEnded = (attId: string) => {
     setPlayingAudio(null)
     setAudioProgress(prev => ({ ...prev, [attId]: 0 }))
-  }
-
-  const formatDuration = (seconds: number) => {
-    if (!seconds || isNaN(seconds)) return "0:00"
-    const mins = Math.floor(seconds / 60)
-    const secs = Math.floor(seconds % 60)
-    return `${mins}:${secs.toString().padStart(2, "0")}`
   }
 
   // Carrega transcrições em cache
@@ -228,12 +273,40 @@ export function MessageItem({
         className={`flex ${isOutbound ? "justify-end" : "justify-start"}`}
       >
         <div
-          className={`max-w-[70%] rounded-2xl px-4 py-2 shadow-sm ${
-            isOutbound
-              ? "bg-purple-600 text-white dark:bg-purple-700"
-              : "bg-white text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
-          }`}
+          className="relative max-w-[70%] cursor-pointer"
+          onContextMenu={handleContextMenu}
         >
+          {/* Indicador de mensagem fixada */}
+          {isPinned && (
+            <div className="absolute -top-5 left-0 flex items-center gap-1 text-xs text-violet-500">
+              <Pin className="h-3 w-3" />
+              <span>Fixada</span>
+            </div>
+          )}
+
+          {/* Preview da mensagem sendo respondida */}
+          {replyToMessage && (
+            <div
+              className={`mb-1 rounded-lg border-l-2 px-2 py-1 text-xs ${
+                isOutbound
+                  ? "border-purple-300 bg-purple-700/50 text-purple-200"
+                  : "border-zinc-400 bg-zinc-100 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-400"
+              }`}
+            >
+              <div className="font-medium">
+                {replyToMessage.direction === "outbound" ? "Você" : "Contato"}
+              </div>
+              <div className="truncate">{replyToMessage.text?.slice(0, 50) || "Anexo"}</div>
+            </div>
+          )}
+
+          <div
+            className={`rounded-2xl px-4 py-2 shadow-sm ${
+              isOutbound
+                ? "bg-purple-600 text-white dark:bg-purple-700"
+                : "bg-white text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
+            }`}
+          >
           {/* Imagens primeiro */}
           {message.attachments && message.attachments.length > 0 && (
             <div className="space-y-2">
@@ -274,7 +347,7 @@ export function MessageItem({
                     }`}
                   >
                     <button
-                      onClick={() => { const url = audioUrls[att.id]; if (url) toggleAudio(att.id, url); }}
+                      onClick={() => audioUrls[att.id] && toggleAudio(att.id)}
                       className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full ${
                         isOutbound
                           ? "bg-white/20 hover:bg-white/30"
@@ -385,13 +458,68 @@ export function MessageItem({
             isOutbound ? "text-purple-200" : "text-zinc-500 dark:text-zinc-400"
           }`}
         >
+          {showChannelIndicator && message.channel && (
+            <>
+              {(() => {
+                const ChannelIcon = channelIcons[message.channel as keyof typeof channelIcons]
+                const label = channelLabels[message.channel as keyof typeof channelLabels]
+                return ChannelIcon ? (
+                  <span className="flex items-center gap-0.5" title={label}>
+                    <ChannelIcon className="h-3 w-3" />
+                  </span>
+                ) : null
+              })()}
+              <span className="mx-0.5">•</span>
+            </>
+          )}
           <span>{time}</span>
           {isOutbound && (
             <Check className="h-3 w-3" />
           )}
         </div>
+          </div>
+        </div>
+
       </div>
-    </div>
+
+      {/* Menu de contexto (right-click) */}
+      {showContextMenu && (
+        <div
+          ref={menuRef}
+          className="fixed z-50 min-w-44 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+          style={{ left: menuPosition.x, top: menuPosition.y }}
+        >
+          {/* Responder (só Telegram) */}
+          {canReply && onReply && (
+            <button
+              onClick={() => { onReply(message); setShowContextMenu(false) }}
+              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+            >
+              <Reply className="h-4 w-4 text-zinc-500" />
+              <span>Responder</span>
+            </button>
+          )}
+
+          {/* Fixar/Desafixar (todos os canais) */}
+          {isPinned ? (
+            <button
+              onClick={() => { onUnpin?.(message.id); setShowContextMenu(false) }}
+              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+            >
+              <Pin className="h-4 w-4 text-violet-500" />
+              <span>Desafixar</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => { onPin?.(message.id); setShowContextMenu(false) }}
+              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+            >
+              <Pin className="h-4 w-4 text-zinc-500" />
+              <span>Fixar</span>
+            </button>
+          )}
+        </div>
+      )}
     </>
   )
 }

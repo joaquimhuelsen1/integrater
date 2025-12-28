@@ -1,15 +1,15 @@
 "use client"
 
-import { Inbox, MessageSquare, Mail, Phone } from "lucide-react"
+import { MessageSquare, Mail, Phone, Users } from "lucide-react"
 
 const CHANNELS = [
-  { id: null, label: "Geral", icon: Inbox },
+  { id: null, label: "Contatos", icon: Users },
   { id: "telegram", label: "Telegram", icon: MessageSquare },
   { id: "email", label: "Email", icon: Mail },
   { id: "openphone_sms", label: "SMS", icon: Phone },
 ] as const
 
-type ChannelId = "telegram" | "email" | "openphone_sms" | null
+export type ChannelId = "telegram" | "email" | "openphone_sms" | null
 
 interface ChannelTabsProps {
   selected: ChannelId

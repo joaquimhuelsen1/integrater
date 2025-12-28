@@ -12,6 +12,62 @@ Tarefas relacionadas ao frontend Next.js (apps/web).
 
 ## Concluídas
 
+#### [WEB-016] Menu de contexto e fixar conversas (Pin) ✅
+**Data:** 2025-12-27
+**Resultado:** Right-click nas conversas abre menu estilo Telegram com opção de fixar
+**Funcionalidades:**
+- Menu de contexto (right-click) em cada conversa
+- Opção "Fixar" / "Desafixar" conversa
+- Opção "Marcar como lida" / "Marcar como não lida"
+- Conversas fixadas aparecem no topo da lista
+- Indicador visual de pin (ícone 📌 roxo)
+- Background levemente roxo nas conversas fixadas
+- Persistência no localStorage (não precisa de migration)
+**Arquivos:**
+- `apps/web/src/components/inbox/conversation-item.tsx` - menu de contexto, indicador pin
+- `apps/web/src/components/inbox/conversation-list.tsx` - props para pin
+- `apps/web/src/components/inbox-view.tsx` - lógica de pin, localStorage, ordenação
+
+#### [WEB-015] Busca de conversas no banco de dados ✅
+**Data:** 2025-12-27
+**Resultado:** Busca agora pesquisa em toda a base de dados, não apenas nas 50 carregadas
+**Funcionalidades:**
+- Busca em `contacts.display_name` com ilike
+- Busca em `contact_identities.value` (email, telefone, username)
+- Debounce de 300ms para evitar muitas requisições
+- Limite de 200 resultados quando buscando (vs 50 normal)
+- Preserva searchQuery após operações (markAsRead, send, realtime)
+**Arquivos:**
+- `apps/web/src/components/inbox-view.tsx` - loadConversations com busca no banco
+
+#### [WEB-014] Timeline unificada para contatos com múltiplos canais ✅
+**Data:** 2025-12-27
+**Resultado:** Ao selecionar conversa com contato, exibe mensagens de TODOS os canais
+**Funcionalidades:**
+- Aba "Geral" renomeada para "Contatos" com ícone de usuários
+- Ao selecionar conversa com contact_id, carrega msgs de TODAS conversas do contato
+- Timeline unificada: mensagens de TODOS os canais em ordem cronológica
+- Indicador de canal em cada mensagem (ícone Telegram/Email/SMS)
+- Dropdown no Composer para escolher canal de envio (quando há múltiplos)
+- Envio direcionado: mensagem vai para a conversa do canal selecionado
+- Realtime atualiza mensagens de qualquer conversa do contato
+**Arquivos:**
+- `apps/web/src/components/inbox/channel-tabs.tsx` - "Geral" → "Contatos"
+- `apps/web/src/components/inbox/message-item.tsx` - indicador de canal existente
+- `apps/web/src/components/inbox/composer.tsx` - dropdown seletor de canal
+- `apps/web/src/components/inbox/chat-view.tsx` - props showChannelIndicator + channel selector
+- `apps/web/src/components/inbox-view.tsx` - loadContactMessages, handleSendMessage multicanal
+
+#### [WEB-013] Avatar no header e margens nas mensagens ✅
+**Data:** 2025-12-27
+**Resultado:** UI de chat mais similar ao Telegram com avatar e mensagens centralizadas
+**Funcionalidades:**
+- Avatar com iniciais do contato no header (círculo roxo/azul gradiente)
+- Margens horizontais responsivas nas mensagens (md:px-12 lg:px-20)
+- Container de mensagens limitado a max-w-3xl para centralizar
+**Arquivos:**
+- `apps/web/src/components/inbox/chat-view.tsx` - avatar header + padding mensagens
+
 #### [WEB-012] Menu hamburger estilo Telegram ✅
 **Data:** 2025-12-27
 **Resultado:** Menu lateral slide-out estilo Telegram com todas as opções

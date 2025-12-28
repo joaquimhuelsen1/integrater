@@ -37,12 +37,22 @@ interface ConversationListProps {
   conversations: Conversation[]
   selectedId: string | null
   onSelect: (id: string) => void
+  pinnedIds?: string[]
+  onPin?: (id: string) => void
+  onUnpin?: (id: string) => void
+  onMarkRead?: (id: string) => void
+  onMarkUnread?: (id: string) => void
 }
 
 export function ConversationList({
   conversations,
   selectedId,
   onSelect,
+  pinnedIds = [],
+  onPin,
+  onUnpin,
+  onMarkRead,
+  onMarkUnread,
 }: ConversationListProps) {
   if (conversations.length === 0) {
     return (
@@ -59,7 +69,12 @@ export function ConversationList({
           key={conv.id}
           conversation={conv}
           isSelected={conv.id === selectedId}
+          isPinned={pinnedIds.includes(conv.id)}
           onClick={() => onSelect(conv.id)}
+          onPin={onPin}
+          onUnpin={onUnpin}
+          onMarkRead={onMarkRead}
+          onMarkUnread={onMarkUnread}
         />
       ))}
     </div>

@@ -1,13 +1,19 @@
 "use client"
 
-import { MessageSquare, Mail, Phone } from "lucide-react"
+import { useState, useRef, useEffect } from "react"
+import { MessageSquare, Mail, Phone, Pin, Eye, EyeOff } from "lucide-react"
 import Image from "next/image"
 import type { Conversation, Tag } from "./conversation-list"
 
 interface ConversationItemProps {
   conversation: Conversation
   isSelected: boolean
+  isPinned?: boolean
   onClick: () => void
+  onPin?: (id: string) => void
+  onUnpin?: (id: string) => void
+  onMarkRead?: (id: string) => void
+  onMarkUnread?: (id: string) => void
 }
 
 const channelIcons = {
@@ -36,13 +42,43 @@ const avatarColors = [
 export function ConversationItem({
   conversation,
   isSelected,
+  isPinned = false,
   onClick,
+  onPin,
+  onUnpin,
+  onMarkRead,
+  onMarkUnread,
 }: ConversationItemProps) {
+  const [showContextMenu, setShowContextMenu] = useState(false)
+  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 })
+  const menuRef = useRef<HTMLDivElement>(null)
+
   const channel = conversation.last_channel || "telegram"
   const Icon = channelIcons[channel]
   const timeAgo = conversation.last_message_at
     ? formatTimeAgo(new Date(conversation.last_message_at))
     : ""
+
+  // Fechar menu ao clicar fora
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowContextMenu(false)
+      }
+    }
+    if (showContextMenu) {
+      document.addEventListener("mousedown", handleClickOutside)
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [showContextMenu])
+
+  // Handler do menu de contexto (right-click)
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setMenuPosition({ x: e.clientX, y: e.clientY })
+    setShowContextMenu(true)
+  }
 
   // Nome: contato > identity metadata > desconhecido
   const getDisplayName = () => {
@@ -95,11 +131,13 @@ export function ConversationItem({
   }
 
   return (
+    <>
     <button
       onClick={onClick}
-      className={`flex w-full items-start gap-4 border-b border-zinc-100 p-4 text-left transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50 ${
+      onContextMenu={handleContextMenu}
+      className={`flex w-full cursor-pointer items-start gap-4 border-b border-zinc-100 p-4 text-left transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50 ${
         isSelected ? "bg-zinc-100 dark:bg-zinc-800" : ""
-      } ${hasUnread ? "bg-blue-50/50 dark:bg-blue-900/10" : ""}`}
+      } ${hasUnread ? "bg-blue-50/50 dark:bg-blue-900/10" : ""} ${isPinned ? "bg-violet-50/50 dark:bg-violet-900/10" : ""}`}
     >
       <div className="relative flex-shrink-0">
         {avatarUrl ? (
@@ -132,6 +170,9 @@ export function ConversationItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
+            {isPinned && (
+              <Pin className="h-4 w-4 flex-shrink-0 text-violet-500" />
+            )}
             <span className="truncate text-base font-medium text-zinc-900 dark:text-zinc-100">
               {displayName}
             </span>
@@ -173,6 +214,54 @@ export function ConversationItem({
         )}
       </div>
     </button>
+
+    {/* Menu de contexto (right-click) */}
+    {showContextMenu && (
+      <div
+        ref={menuRef}
+        className="fixed z-50 min-w-48 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+        style={{ left: menuPosition.x, top: menuPosition.y }}
+      >
+        {/* Pin/Unpin */}
+        {isPinned ? (
+          <button
+            onClick={() => { onUnpin?.(conversation.id); setShowContextMenu(false) }}
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+          >
+            <Pin className="h-4 w-4 text-zinc-500" />
+            <span>Desafixar</span>
+          </button>
+        ) : (
+          <button
+            onClick={() => { onPin?.(conversation.id); setShowContextMenu(false) }}
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+          >
+            <Pin className="h-4 w-4 text-zinc-500" />
+            <span>Fixar</span>
+          </button>
+        )}
+
+        {/* Marcar como lida/não lida */}
+        {hasUnread ? (
+          <button
+            onClick={() => { onMarkRead?.(conversation.id); setShowContextMenu(false) }}
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+          >
+            <Eye className="h-4 w-4 text-zinc-500" />
+            <span>Marcar como lida</span>
+          </button>
+        ) : (
+          <button
+            onClick={() => { onMarkUnread?.(conversation.id); setShowContextMenu(false) }}
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+          >
+            <EyeOff className="h-4 w-4 text-zinc-500" />
+            <span>Marcar como não lida</span>
+          </button>
+        )}
+      </div>
+    )}
+    </>
   )
 }
 

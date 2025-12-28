@@ -1,10 +1,11 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { ArrowLeft, Search, Plus, Pencil, Trash2, X, User } from "lucide-react"
+import { ArrowLeft, Search, Plus, Pencil, Trash2, X, User, Settings, MessageSquare, Mail, Phone, Unlink } from "lucide-react"
 import Link from "next/link"
 import { ThemeToggle } from "./theme-toggle"
 import { useWorkspace } from "@/contexts/workspace-context"
+import { createClient } from "@/lib/supabase"
 
 interface Contact {
   id: string
@@ -21,6 +22,29 @@ interface Identity {
   value: string
 }
 
+interface LinkedConversation {
+  id: string
+  last_channel: string
+  last_message_at: string
+  primary_identity?: {
+    type: string
+    value: string
+    metadata?: Record<string, unknown>
+  }
+}
+
+const channelIcons: Record<string, typeof MessageSquare> = {
+  telegram: MessageSquare,
+  email: Mail,
+  openphone_sms: Phone,
+}
+
+const channelLabels: Record<string, string> = {
+  telegram: "Telegram",
+  email: "Email",
+  openphone_sms: "SMS",
+}
+
 export function ContactsView() {
   const { currentWorkspace } = useWorkspace()
   const [contacts, setContacts] = useState<Contact[]>([])
@@ -30,8 +54,13 @@ export function ContactsView() {
   const [isCreating, setIsCreating] = useState(false)
   const [newName, setNewName] = useState("")
   const [editName, setEditName] = useState("")
+  // Estado para gerenciar conversas vinculadas
+  const [managingContact, setManagingContact] = useState<Contact | null>(null)
+  const [linkedConversations, setLinkedConversations] = useState<LinkedConversation[]>([])
+  const [isLoadingConversations, setIsLoadingConversations] = useState(false)
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+  const supabase = createClient()
 
   const loadContacts = useCallback(async () => {
     if (!currentWorkspace) return
@@ -120,6 +149,54 @@ export function ContactsView() {
   const startEdit = (contact: Contact) => {
     setEditingContact(contact)
     setEditName(contact.display_name)
+  }
+
+  // Carregar conversas vinculadas a um contato
+  const loadLinkedConversations = async (contactId: string) => {
+    setIsLoadingConversations(true)
+    try {
+      const { data, error } = await supabase
+        .from("conversations")
+        .select("id, last_channel, last_message_at, contact_identities!primary_identity_id(type, value, metadata)")
+        .eq("contact_id", contactId)
+        .order("last_message_at", { ascending: false })
+
+      if (!error && data) {
+        const mapped = data.map((c: Record<string, unknown>) => ({
+          ...c,
+          primary_identity: c.contact_identities,
+        })) as LinkedConversation[]
+        setLinkedConversations(mapped)
+      }
+    } catch {
+      console.error("Erro ao carregar conversas vinculadas")
+    } finally {
+      setIsLoadingConversations(false)
+    }
+  }
+
+  // Abrir modal de gerenciamento
+  const startManaging = (contact: Contact) => {
+    setManagingContact(contact)
+    loadLinkedConversations(contact.id)
+  }
+
+  // Desvincular conversa do contato
+  const unlinkConversation = async (conversationId: string) => {
+    if (!managingContact) return
+
+    const { error } = await supabase
+      .from("conversations")
+      .update({ contact_id: null })
+      .eq("id", conversationId)
+
+    if (error) {
+      console.error("Erro ao desvincular:", error)
+      return
+    }
+
+    // Recarrega conversas vinculadas
+    loadLinkedConversations(managingContact.id)
   }
 
   const formatDate = (dateStr: string) => {
@@ -215,6 +292,77 @@ export function ContactsView() {
           </div>
         )}
 
+        {/* Manage Conversations Modal */}
+        {managingContact && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-900">
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="text-lg font-semibold">
+                  Conversas de {managingContact.display_name}
+                </h3>
+                <button
+                  onClick={() => setManagingContact(null)}
+                  className="rounded p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {isLoadingConversations ? (
+                <div className="py-8 text-center text-zinc-500">Carregando...</div>
+              ) : linkedConversations.length === 0 ? (
+                <div className="py-8 text-center text-zinc-500">
+                  <MessageSquare className="mx-auto mb-2 h-8 w-8 text-zinc-300" />
+                  <p>Nenhuma conversa vinculada</p>
+                </div>
+              ) : (
+                <div className="max-h-96 space-y-2 overflow-y-auto">
+                  {linkedConversations.map((conv) => {
+                    const Icon = channelIcons[conv.last_channel] || MessageSquare
+                    const channelLabel = channelLabels[conv.last_channel] || conv.last_channel
+                    const identity = conv.primary_identity
+                    const displayValue = identity?.value || "Sem identificação"
+
+                    return (
+                      <div
+                        key={conv.id}
+                        className="flex items-center justify-between rounded-lg border border-zinc-200 p-3 dark:border-zinc-700"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800">
+                            <Icon className="h-5 w-5 text-zinc-600 dark:text-zinc-400" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium">{displayValue}</p>
+                            <p className="text-xs text-zinc-500">{channelLabel}</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => unlinkConversation(conv.id)}
+                          className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-orange-600 hover:bg-orange-50 dark:text-orange-400 dark:hover:bg-orange-900/20"
+                          title="Desvincular"
+                        >
+                          <Unlink className="h-4 w-4" />
+                          Desvincular
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              <div className="mt-4 flex justify-end">
+                <button
+                  onClick={() => setManagingContact(null)}
+                  className="rounded-md bg-zinc-100 px-4 py-2 text-sm font-medium hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Edit Modal */}
         {editingContact && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -290,7 +438,14 @@ export function ContactsView() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => startManaging(contact)}
+                      className="rounded p-2 hover:bg-blue-100 dark:hover:bg-blue-900/30"
+                      title="Gerenciar conversas"
+                    >
+                      <Settings className="h-4 w-4 text-blue-500" />
+                    </button>
                     <button
                       onClick={() => startEdit(contact)}
                       className="rounded p-2 hover:bg-zinc-100 dark:hover:bg-zinc-700"

@@ -2,8 +2,15 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { createClient } from "@/lib/supabase"
-import { ConversationList, type Conversation, ChannelTabs } from "@/components/inbox"
+import { ConversationList, type Conversation, ChannelTabs, type ChannelId } from "@/components/inbox"
 import { ChatView, type Message, type Template, type AISuggestion } from "@/components/inbox"
+
+// Tipo para canais disponíveis do contato
+interface ContactChannel {
+  type: string
+  identityId: string
+  conversationId: string
+}
 import { WorkspaceSelector } from "@/components/workspace-selector"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { SidebarMenu } from "@/components/sidebar-menu"
@@ -61,14 +68,26 @@ export function InboxView({ userEmail }: InboxViewProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
-  const [selectedChannel, setSelectedChannel] = useState<"telegram" | "email" | "openphone_sms" | null>(null)
+  const [selectedChannel, setSelectedChannel] = useState<ChannelId>(null)
   const [filterTags, setFilterTags] = useState<string[]>([])
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [suggestions, setSuggestions] = useState<Record<string, AISuggestion | null>>({})
   const [summaries, setSummaries] = useState<Record<string, string | null>>({})
+  // Canais disponíveis do contato selecionado e canal escolhido para envio
+  const [contactChannels, setContactChannels] = useState<ContactChannel[]>([])
+  const [selectedSendChannel, setSelectedSendChannel] = useState<string | null>(null)
+  // Conversas fixadas (pinned) - salvas no localStorage
+  const [pinnedIds, setPinnedIds] = useState<string[]>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("pinnedConversations")
+      return saved ? JSON.parse(saved) : []
+    }
+    return []
+  })
 
   const supabase = createClient()
   const router = useRouter()
@@ -79,9 +98,59 @@ export function InboxView({ userEmail }: InboxViewProps) {
     router.push("/login")
   }
 
+  // Salvar pinnedIds no localStorage
+  useEffect(() => {
+    localStorage.setItem("pinnedConversations", JSON.stringify(pinnedIds))
+  }, [pinnedIds])
+
+  // Fixar conversa
+  const handlePinConversation = useCallback((id: string) => {
+    setPinnedIds(prev => prev.includes(id) ? prev : [...prev, id])
+  }, [])
+
+  // Desafixar conversa
+  const handleUnpinConversation = useCallback((id: string) => {
+    setPinnedIds(prev => prev.filter(p => p !== id))
+  }, [])
+
   // Carregar conversas com tags e identity
-  const loadConversations = useCallback(async () => {
+  const loadConversations = useCallback(async (search?: string) => {
     if (!currentWorkspace) return
+
+    const searchTerm = search?.trim().toLowerCase()
+
+    // Se há busca, buscar por contatos E identities
+    let matchingContactIds: string[] = []
+    let matchingIdentityIds: string[] = []
+
+    if (searchTerm) {
+      // Busca em contacts.display_name
+      const { data: matchingContacts } = await supabase
+        .from("contacts")
+        .select("id")
+        .eq("workspace_id", currentWorkspace.id)
+        .ilike("display_name", `%${searchTerm}%`)
+        .limit(100)
+
+      if (matchingContacts) {
+        matchingContactIds = matchingContacts.map(c => c.id)
+      }
+
+      // Busca em contact_identities.value (email, telefone, username)
+      const { data: matchingIdentities } = await supabase
+        .from("contact_identities")
+        .select("id, contact_id")
+        .ilike("value", `%${searchTerm}%`)
+        .limit(100)
+
+      if (matchingIdentities) {
+        // Coleta IDs das identities para buscar por primary_identity_id
+        matchingIdentityIds = matchingIdentities.map(i => i.id)
+        // Também adiciona contact_ids se existirem
+        const identityContactIds = matchingIdentities.map(i => i.contact_id).filter(Boolean) as string[]
+        matchingContactIds = [...new Set([...matchingContactIds, ...identityContactIds])]
+      }
+    }
 
     let query = supabase
       .from("conversations")
@@ -93,9 +162,29 @@ export function InboxView({ userEmail }: InboxViewProps) {
       query = query.eq("last_channel", selectedChannel)
     }
 
+    // Se há busca, filtrar por contatos OU identities encontrados
+    if (searchTerm) {
+      if (matchingContactIds.length === 0 && matchingIdentityIds.length === 0) {
+        // Busca não encontrou nada - retorna vazio
+        setConversations([])
+        setIsLoading(false)
+        return
+      }
+
+      // Usa OR para buscar por contact_id OU primary_identity_id
+      const conditions: string[] = []
+      if (matchingContactIds.length > 0) {
+        conditions.push(`contact_id.in.(${matchingContactIds.join(",")})`)
+      }
+      if (matchingIdentityIds.length > 0) {
+        conditions.push(`primary_identity_id.in.(${matchingIdentityIds.join(",")})`)
+      }
+      query = query.or(conditions.join(","))
+    }
+
     const { data, error } = await query
       .order("last_message_at", { ascending: false, nullsFirst: false })
-      .limit(50)
+      .limit(searchTerm ? 200 : 50) // Mais resultados quando buscando
 
     if (error) {
       console.error("Error loading conversations:", error)
@@ -111,10 +200,19 @@ export function InboxView({ userEmail }: InboxViewProps) {
     setIsLoading(false)
   }, [supabase, currentWorkspace, selectedChannel])
 
-  // Conversas filtradas por canal, busca e tags
+  // Busca com debounce no banco de dados
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      loadConversations(searchQuery)
+    }, 300) // 300ms debounce
+
+    return () => clearTimeout(timer)
+  }, [searchQuery, loadConversations])
+
+  // Conversas filtradas por tags e ordenadas (fixadas no topo)
   const filteredConversations = useMemo(() => {
-    return conversations.filter(c => {
-      // Filtro por canal
+    const filtered = conversations.filter(c => {
+      // Filtro por canal (já feito no banco, mas mantém para segurança)
       if (selectedChannel && c.last_channel !== selectedChannel) return false
 
       // Filtro por tags
@@ -124,19 +222,21 @@ export function InboxView({ userEmail }: InboxViewProps) {
         if (!hasAllTags) return false
       }
 
-      // Filtro por busca
-      if (!searchQuery) return true
-      const q = searchQuery.toLowerCase()
-      if (c.contact?.display_name?.toLowerCase().includes(q)) return true
-      const meta = c.primary_identity?.metadata
-      if (meta?.display_name?.toLowerCase().includes(q)) return true
-      if (meta?.first_name?.toLowerCase().includes(q)) return true
-      if (meta?.last_name?.toLowerCase().includes(q)) return true
-      if (meta?.username?.toLowerCase().includes(q)) return true
-      if (c.primary_identity?.value?.toLowerCase().includes(q)) return true
-      return false
+      return true
     })
-  }, [conversations, selectedChannel, searchQuery, filterTags])
+
+    // Ordenar: fixadas primeiro, depois por data
+    return filtered.sort((a, b) => {
+      const aIsPinned = pinnedIds.includes(a.id)
+      const bIsPinned = pinnedIds.includes(b.id)
+
+      // Se ambos são fixados ou ambos não são, mantém ordem por data (já ordenada do banco)
+      if (aIsPinned === bIsPinned) return 0
+
+      // Fixados vêm primeiro
+      return aIsPinned ? -1 : 1
+    })
+  }, [conversations, selectedChannel, filterTags, pinnedIds])
 
   // Marcar conversa como lida
   const markAsRead = useCallback(async (conversationId: string) => {
@@ -144,8 +244,8 @@ export function InboxView({ userEmail }: InboxViewProps) {
       .from("conversations")
       .update({ unread_count: 0 })
       .eq("id", conversationId)
-    loadConversations()
-  }, [supabase, loadConversations])
+    loadConversations(searchQuery)
+  }, [supabase, loadConversations, searchQuery])
 
   // Marcar conversa como não lida
   const markAsUnread = useCallback(async (conversationId: string) => {
@@ -153,8 +253,8 @@ export function InboxView({ userEmail }: InboxViewProps) {
       .from("conversations")
       .update({ unread_count: 1 })
       .eq("id", conversationId)
-    loadConversations()
-  }, [supabase, loadConversations])
+    loadConversations(searchQuery)
+  }, [supabase, loadConversations, searchQuery])
 
   // Carregar mensagens da conversa selecionada
   const loadMessages = useCallback(async (conversationId: string) => {
@@ -170,6 +270,82 @@ export function InboxView({ userEmail }: InboxViewProps) {
       setMessages(data as Message[])
     }
   }, [supabase])
+
+  // Carregar mensagens de TODAS as conversas de um contato (timeline unificada)
+  const loadContactMessages = useCallback(async (contactId: string) => {
+    // Buscar todas as conversas do contato
+    const { data: convs, error: convError } = await supabase
+      .from("conversations")
+      .select("id, last_channel, primary_identity_id")
+      .eq("contact_id", contactId)
+
+    if (convError || !convs || convs.length === 0) {
+      setMessages([])
+      setContactChannels([])
+      return
+    }
+
+    // Buscar identities para obter o tipo de cada canal
+    const identityIds = convs.map(c => c.primary_identity_id).filter(Boolean)
+    const { data: identities } = await supabase
+      .from("contact_identities")
+      .select("id, type")
+      .in("id", identityIds)
+
+    // Mapear canais disponíveis para o dropdown
+    const channels: ContactChannel[] = convs.map(c => {
+      const identity = identities?.find(i => i.id === c.primary_identity_id)
+      return {
+        type: identity?.type || c.last_channel || "unknown",
+        identityId: c.primary_identity_id || "",
+        conversationId: c.id,
+      }
+    }).filter(ch => ch.identityId)
+
+    setContactChannels(channels)
+
+    // Selecionar primeiro canal por padrão se não há seleção
+    const firstChannel = channels[0]
+    if (firstChannel && !selectedSendChannel) {
+      setSelectedSendChannel(firstChannel.type)
+    }
+
+    // Buscar mensagens de TODAS as conversas do contato
+    const convIds = convs.map(c => c.id)
+    const { data: msgs, error: msgError } = await supabase
+      .from("messages")
+      .select("*, attachments(*)")
+      .in("conversation_id", convIds)
+      .is("deleted_at", null)
+      .order("sent_at", { ascending: true })
+      .limit(500)
+
+    if (!msgError && msgs) {
+      setMessages(msgs as Message[])
+    }
+  }, [supabase, selectedSendChannel])
+
+  // Desvincular conversa do contato
+  const unlinkContact = useCallback(async (conversationId: string) => {
+    const { error } = await supabase
+      .from("conversations")
+      .update({ contact_id: null })
+      .eq("id", conversationId)
+
+    if (error) {
+      console.error("Erro ao desvincular contato:", error)
+      return
+    }
+
+    // Limpa estados do modo contatos
+    setSelectedContactId(null)
+    setContactChannels([])
+    setSelectedSendChannel(null)
+
+    // Recarrega mensagens apenas dessa conversa
+    loadMessages(conversationId)
+    loadConversations(searchQuery)
+  }, [supabase, loadMessages, loadConversations, searchQuery])
 
   // Sincronizar histórico de mensagens
   const syncHistory = useCallback(async (conversationId: string) => {
@@ -216,8 +392,8 @@ export function InboxView({ userEmail }: InboxViewProps) {
 
     // Recarrega mensagens após sync
     loadMessages(conversationId)
-    loadConversations()
-  }, [supabase, loadMessages, loadConversations])
+    loadConversations(searchQuery)
+  }, [supabase, loadMessages, loadConversations, searchQuery])
 
   // Carregar templates
   const loadTemplates = useCallback(async () => {
@@ -279,36 +455,71 @@ export function InboxView({ userEmail }: InboxViewProps) {
   // Selecionar conversa
   const handleSelectConversation = useCallback((id: string) => {
     setSelectedId(id)
-    loadMessages(id)
+    setSelectedSendChannel(null) // Reset canal selecionado
+
+    // Buscar a conversa para verificar se tem contact_id
+    const conv = conversations.find(c => c.id === id)
+    if (conv?.contact_id) {
+      // Se tem contato, carregar mensagens de TODAS as conversas do contato
+      setSelectedContactId(conv.contact_id)
+      loadContactMessages(conv.contact_id)
+    } else {
+      // Se não tem contato, carregar apenas mensagens dessa conversa
+      setSelectedContactId(null)
+      setContactChannels([])
+      loadMessages(id)
+    }
+
     // Marca como lida ao selecionar
     markAsRead(id)
     // Fecha sidebar em mobile
     if (window.innerWidth < 768) {
       setIsSidebarOpen(false)
     }
-  }, [loadMessages, markAsRead])
+  }, [conversations, loadMessages, loadContactMessages, markAsRead])
 
   // Enviar mensagem com attachments
   const handleSendMessage = useCallback(async (text: string, attachmentFiles?: File[]) => {
     if (!selectedId) return
     if (!text.trim() && (!attachmentFiles || attachmentFiles.length === 0)) return
 
-    const conv = conversations.find(c => c.id === selectedId)
-    if (!conv) return
+    // Se tem múltiplos canais disponíveis, usar o canal selecionado
+    let targetConversationId = selectedId
+    let channel = "telegram"
+
+    if (contactChannels.length > 0 && selectedSendChannel) {
+      // Encontrar a conversa do canal selecionado
+      const selectedChannelInfo = contactChannels.find(ch => ch.type === selectedSendChannel)
+      if (selectedChannelInfo) {
+        targetConversationId = selectedChannelInfo.conversationId
+        // Mapear tipo de identidade para channel
+        const typeToChannel: Record<string, string> = {
+          telegram_user: "telegram",
+          email: "email",
+          phone: "openphone_sms",
+          openphone_sms: "openphone_sms",
+        }
+        channel = typeToChannel[selectedChannelInfo.type] || "telegram"
+      }
+    } else {
+      // Usar a conversa selecionada diretamente
+      const conv = conversations.find(c => c.id === selectedId)
+      if (conv) {
+        channel = conv.last_channel || "telegram"
+      }
+    }
 
     // Buscar dados necessários para criar a mensagem
     const { data: userData } = await supabase.auth.getUser()
     if (!userData.user) return
 
     const ownerId = userData.user.id
-    const now = new Date().toISOString()
-    const channel = conv.last_channel || "telegram"
 
-    // Buscar primary_identity_id da conversa
+    // Buscar primary_identity_id da conversa de destino
     const { data: convDetailsList, error: convError } = await supabase
       .from("conversations")
-      .select("primary_identity_id")
-      .eq("id", selectedId)
+      .select("primary_identity_id, contact_id")
+      .eq("id", targetConversationId)
       .limit(1)
 
     if (convError) {
@@ -347,11 +558,11 @@ export function InboxView({ userEmail }: InboxViewProps) {
 
     // Usar primary_identity_id ou buscar uma
     let identityId = convDetails?.primary_identity_id
-    if (!identityId && conv.contact_id) {
+    if (!identityId && convDetails?.contact_id) {
       const { data: identities, error: idError } = await supabase
         .from("contact_identities")
         .select("id")
-        .eq("contact_id", conv.contact_id)
+        .eq("contact_id", convDetails.contact_id)
         .limit(1)
 
       if (idError) {
@@ -362,7 +573,7 @@ export function InboxView({ userEmail }: InboxViewProps) {
     }
 
     if (!identityId) {
-      console.error("No identity found for conversation, contact_id:", conv.contact_id)
+      console.error("No identity found for conversation")
       return
     }
 
@@ -378,7 +589,7 @@ export function InboxView({ userEmail }: InboxViewProps) {
     }
 
     console.log("Sending message via API:", {
-      conversation_id: selectedId,
+      conversation_id: targetConversationId,
       channel: channel,
       integration_account_id: integrationAccount.id,
     })
@@ -394,7 +605,7 @@ export function InboxView({ userEmail }: InboxViewProps) {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
-          conversation_id: selectedId,
+          conversation_id: targetConversationId,
           text: text || "",
           channel: channel,
           integration_account_id: integrationAccount.id,
@@ -450,15 +661,18 @@ export function InboxView({ userEmail }: InboxViewProps) {
     }
 
     // Recarregar mensagens e conversas
-    loadMessages(selectedId)
-    loadConversations()
-  }, [selectedId, conversations, supabase, loadConversations, loadMessages, uploadAttachment])
+    if (selectedContactId) {
+      loadContactMessages(selectedContactId)
+    } else {
+      loadMessages(selectedId)
+    }
+    loadConversations(searchQuery)
+  }, [selectedId, selectedContactId, contactChannels, selectedSendChannel, conversations, supabase, loadConversations, loadMessages, loadContactMessages, uploadAttachment, searchQuery])
 
-  // Carregar conversas e templates ao montar
+  // Carregar templates ao montar (conversas são carregadas pelo debounce effect)
   useEffect(() => {
-    loadConversations()
     loadTemplates()
-  }, [loadConversations, loadTemplates])
+  }, [loadTemplates])
 
   // Realtime - novas mensagens
   useEffect(() => {
@@ -469,11 +683,14 @@ export function InboxView({ userEmail }: InboxViewProps) {
         { event: "INSERT", schema: "public", table: "messages" },
         (payload) => {
           const newMsg = payload.new as Message
-          if (newMsg.conversation_id === selectedId) {
+          // Se tem contato selecionado, verificar se msg é de qualquer conversa do contato
+          if (selectedContactId && contactChannels.some(ch => ch.conversationId === newMsg.conversation_id)) {
+            loadContactMessages(selectedContactId)
+          } else if (newMsg.conversation_id === selectedId) {
             // Recarrega mensagens para incluir attachments
             loadMessages(selectedId)
           }
-          loadConversations()
+          loadConversations(searchQuery)
         }
       )
       .on(
@@ -483,7 +700,11 @@ export function InboxView({ userEmail }: InboxViewProps) {
           // Quando attachment é criado, recarrega mensagens
           const att = payload.new as { message_id?: string }
           if (att.message_id && selectedId) {
-            loadMessages(selectedId)
+            if (selectedContactId) {
+              loadContactMessages(selectedContactId)
+            } else {
+              loadMessages(selectedId)
+            }
           }
         }
       )
@@ -491,7 +712,7 @@ export function InboxView({ userEmail }: InboxViewProps) {
         "postgres_changes",
         { event: "*", schema: "public", table: "conversations" },
         () => {
-          loadConversations()
+          loadConversations(searchQuery)
         }
       )
       .subscribe()
@@ -499,7 +720,7 @@ export function InboxView({ userEmail }: InboxViewProps) {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [supabase, selectedId, loadConversations])
+  }, [supabase, selectedId, selectedContactId, contactChannels, loadConversations, loadMessages, loadContactMessages, searchQuery])
 
   const selectedConversation = conversations.find(c => c.id === selectedId)
 
@@ -584,6 +805,11 @@ export function InboxView({ userEmail }: InboxViewProps) {
               conversations={filteredConversations}
               selectedId={selectedId}
               onSelect={handleSelectConversation}
+              pinnedIds={pinnedIds}
+              onPin={handlePinConversation}
+              onUnpin={handleUnpinConversation}
+              onMarkRead={markAsRead}
+              onMarkUnread={markAsUnread}
             />
           )}
         </div>
@@ -607,6 +833,7 @@ export function InboxView({ userEmail }: InboxViewProps) {
             conversationId={selectedId}
             messages={messages}
             displayName={getDisplayName(selectedConversation)}
+            avatarUrl={selectedConversation?.primary_identity?.metadata?.avatar_url}
             onSendMessage={handleSendMessage}
             onDownloadAttachment={handleDownloadAttachment}
             templates={templates}
@@ -638,6 +865,11 @@ export function InboxView({ userEmail }: InboxViewProps) {
             onMarkAsRead={selectedId ? () => markAsRead(selectedId) : undefined}
             onMarkAsUnread={selectedId ? () => markAsUnread(selectedId) : undefined}
             onSyncHistory={selectedId ? () => syncHistory(selectedId) : undefined}
+            showChannelIndicator={!!selectedContactId}
+            availableChannels={contactChannels.map(ch => ({ type: ch.type, label: ch.type }))}
+            selectedSendChannel={selectedSendChannel}
+            onSendChannelChange={setSelectedSendChannel}
+            onUnlinkContact={selectedId ? () => unlinkContact(selectedId) : undefined}
           />
         </div>
       </div>
