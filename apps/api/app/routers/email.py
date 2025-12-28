@@ -386,10 +386,18 @@ async def sync_email_history(
                     "sent_at": sent_at.isoformat(),
                 }).execute()
 
-                # Atualiza conversa
+                # Atualiza conversa com preview
+                if body_text:
+                    preview = (body_text[:100] + "...") if len(body_text) > 100 else body_text
+                elif subject:
+                    preview = (subject[:50] + "...") if len(subject) > 50 else subject
+                else:
+                    preview = "[Sem conteúdo]"
+
                 db.table("conversations").update({
                     "last_message_at": sent_at.isoformat(),
                     "last_channel": "email",
+                    "last_message_preview": preview,
                 }).eq("id", conv_id).execute()
 
                 emails_synced += 1
