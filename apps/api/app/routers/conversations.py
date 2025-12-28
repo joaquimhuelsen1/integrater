@@ -158,7 +158,7 @@ async def merge_conversations(
 @router.post("/{conversation_id}/sync-history", status_code=200)
 async def sync_conversation_history(
     conversation_id: UUID,
-    limit: int = Query(default=500, le=500),
+    limit: int = Query(default=10000, le=10000),
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
