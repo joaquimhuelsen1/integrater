@@ -162,14 +162,15 @@ export function CRMPanel({
 
   // Carregar pipelines
   const loadPipelines = useCallback(async () => {
+    if (!workspaceId) return
     try {
       const headers = await getAuthHeaders()
-      const res = await fetch(`${API_URL}/pipelines`, { headers })
+      const res = await fetch(`${API_URL}/pipelines?workspace_id=${workspaceId}`, { headers })
       if (res.ok) {
         const data = await res.json()
         const pipelinesWithStages = await Promise.all(
           data.map(async (p: Pipeline) => {
-            const stagesRes = await fetch(`${API_URL}/deals/by-pipeline/${p.id}`, { headers })
+            const stagesRes = await fetch(`${API_URL}/pipelines/${p.id}/stages`, { headers })
             if (stagesRes.ok) {
               const stages = await stagesRes.json()
               return { ...p, stages }
@@ -188,7 +189,7 @@ export function CRMPanel({
     } catch (error) {
       console.error("Erro ao carregar pipelines:", error)
     }
-  }, [API_URL, supabase])
+  }, [API_URL, workspaceId, supabase])
 
   // Carregar contatos para vincular
   const loadContacts = useCallback(async () => {
