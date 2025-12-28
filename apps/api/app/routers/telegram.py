@@ -288,17 +288,16 @@ async def get_workers_status(
 # Sync History
 # ============================================
 
-PERIOD_LIMITS = {
-    "1d": 100,
-    "3d": 300,
-    "7d": 700,
-}
-
+# Período define APENAS quais conversas descobrir (atividade recente)
+# Cada conversa sincroniza o HISTÓRICO COMPLETO
 PERIOD_DAYS = {
     "1d": 1,
     "3d": 3,
     "7d": 7,
 }
+
+# Limite alto para pegar histórico completo (sem limite prático)
+FULL_HISTORY_LIMIT = 10000
 
 
 async def _download_and_store_avatar(
@@ -434,8 +433,9 @@ async def sync_history(
     owner_id: UUID = Depends(get_current_user_id),
     db: Client = Depends(get_supabase),
 ):
-    """Descobre TODAS as conversas do Telegram e cria jobs de sync."""
-    limit = PERIOD_LIMITS.get(request.period, 100)
+    """Descobre conversas com atividade recente e sincroniza histórico COMPLETO de cada uma."""
+    # Período define apenas QUAIS conversas descobrir, não limita mensagens
+    # Cada conversa sincroniza o histórico completo (até 10000 msgs)
 
     # Busca conta com sessão
     account = db.table("integration_accounts").select(
@@ -519,14 +519,14 @@ async def sync_history(
                 print(f"[SYNC] -> Pulando, já tem job pendente")
                 continue
 
-            # Cria job de sync
+            # Cria job de sync (histórico completo)
             job_id = uuid4()
             db.table("sync_history_jobs").insert({
                 "id": str(job_id),
                 "owner_id": str(owner_id),
                 "conversation_id": conv_id,
                 "integration_account_id": str(request.account_id),
-                "limit_messages": limit,
+                "limit_messages": FULL_HISTORY_LIMIT,
                 "status": "pending",
             }).execute()
             job_ids.append(job_id)
