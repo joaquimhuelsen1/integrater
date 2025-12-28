@@ -1,13 +1,11 @@
 "use client"
 
-import { MessageSquare, Mail, Phone, Users, Archive } from "lucide-react"
-
 const CHANNELS = [
-  { id: null, label: "Contatos", icon: Users },
-  { id: "telegram", label: "Telegram", icon: MessageSquare },
-  { id: "email", label: "Email", icon: Mail },
-  { id: "openphone_sms", label: "SMS", icon: Phone },
-  { id: "archived", label: "Arquivadas", icon: Archive },
+  { id: null, label: "Todos" },
+  { id: "telegram", label: "Telegram" },
+  { id: "email", label: "Email" },
+  { id: "openphone_sms", label: "SMS" },
+  { id: "archived", label: "Arquivadas" },
 ] as const
 
 export type ChannelId = "telegram" | "email" | "openphone_sms" | "archived" | null
@@ -15,28 +13,26 @@ export type ChannelId = "telegram" | "email" | "openphone_sms" | "archived" | nu
 interface ChannelTabsProps {
   selected: ChannelId
   onSelect: (channel: ChannelId) => void
-  counts: Record<string, number>
+  counts?: Record<string, number>
 }
 
-export function ChannelTabs({ selected, onSelect }: Omit<ChannelTabsProps, "counts">) {
+export function ChannelTabs({ selected, onSelect }: ChannelTabsProps) {
   return (
-    <div className="flex border-b border-zinc-200 dark:border-zinc-800">
+    <div className="flex gap-2 overflow-x-auto px-4 py-3 scrollbar-hide">
       {CHANNELS.map((ch) => {
-        const Icon = ch.icon
         const isSelected = selected === ch.id
 
         return (
           <button
-            key={ch.id ?? "geral"}
+            key={ch.id ?? "all"}
             onClick={() => onSelect(ch.id)}
-            className={`flex flex-1 items-center justify-center gap-1.5 py-3 text-sm font-medium transition-colors ${
+            className={`whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
               isSelected
-                ? "border-b-2 border-blue-500 text-blue-600 dark:text-blue-400"
-                : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                ? "bg-emerald-600 text-white dark:bg-emerald-500"
+                : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
             }`}
           >
-            <Icon className="h-4 w-4" />
-            <span>{ch.label}</span>
+            {ch.label}
           </button>
         )
       })}

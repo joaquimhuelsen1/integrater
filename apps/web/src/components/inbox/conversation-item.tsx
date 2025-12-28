@@ -141,23 +141,23 @@ export function ConversationItem({
     <button
       onClick={onClick}
       onContextMenu={handleContextMenu}
-      className={`flex w-full cursor-pointer items-start gap-4 border-b border-zinc-100 p-4 text-left transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50 ${
-        isSelected ? "bg-blue-500/20 dark:bg-blue-500/20" : ""
-      } ${hasUnread ? "bg-blue-50/50 dark:bg-blue-900/10" : ""}`}
+      className={`flex w-full cursor-pointer items-center gap-4 px-4 py-4 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50 ${
+        isSelected ? "bg-emerald-500/10 dark:bg-emerald-500/10" : ""
+      } ${hasUnread ? "bg-zinc-50/50 dark:bg-zinc-800/30" : ""}`}
     >
       <div className="relative flex-shrink-0">
         {avatarUrl ? (
-          <div className="relative h-12 w-12 overflow-hidden rounded-full">
+          <div className="relative h-14 w-14 overflow-hidden rounded-full">
             <Image
               src={avatarUrl}
               alt={displayName}
               fill
               className="object-cover"
-              sizes="48px"
+              sizes="56px"
             />
           </div>
         ) : (
-          <div className={`flex h-12 w-12 items-center justify-center rounded-full text-base font-medium text-white ${getAvatarColor()}`}>
+          <div className={`flex h-14 w-14 items-center justify-center rounded-full text-lg font-medium text-white ${getAvatarColor()}`}>
             {getInitials()}
           </div>
         )}
@@ -165,21 +165,15 @@ export function ConversationItem({
         <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-zinc-100 dark:border-zinc-900 dark:bg-zinc-700">
           <Icon className="h-3 w-3 text-zinc-600 dark:text-zinc-400" />
         </span>
-        {/* Status indicator */}
-        <span
-          className={`absolute -top-0.5 -left-0.5 h-3.5 w-3.5 rounded-full border-2 border-white dark:border-zinc-900 ${
-            statusColors[conversation.status]
-          }`}
-        />
       </div>
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             {isPinned && (
-              <Pin className="h-4 w-4 flex-shrink-0 text-blue-500" />
+              <Pin className="h-4 w-4 flex-shrink-0 text-emerald-500" />
             )}
-            <span className="truncate text-base font-medium text-zinc-900 dark:text-zinc-100">
+            <span className="truncate text-[15px] font-medium text-zinc-900 dark:text-zinc-100">
               {displayName}
             </span>
             {isUnlinked && (
@@ -188,33 +182,33 @@ export function ConversationItem({
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            {hasUnread && (
-              <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-blue-500 px-2 text-sm font-medium text-white">
-                {unreadCount > 99 ? "99+" : unreadCount}
-              </span>
-            )}
-            <span className="flex-shrink-0 text-sm text-zinc-500">{timeAgo}</span>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className="text-xs text-zinc-500">{timeAgo}</span>
           </div>
         </div>
-        <div className="flex items-center gap-2 mt-1">
-          <span className="truncate text-sm text-zinc-500 dark:text-zinc-400">
+        <div className="flex items-center justify-between gap-2 mt-1">
+          <span className="truncate text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
             {conversation.last_message_preview || ""}
           </span>
+          {hasUnread && (
+            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-xs font-medium text-white flex-shrink-0">
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          )}
         </div>
         {tags.length > 0 && (
-          <div className="flex gap-1 mt-1">
+          <div className="flex gap-1 mt-1.5">
             {tags.slice(0, 3).map(tag => (
               <span
                 key={tag.id}
-                className="rounded px-2 py-0.5 text-sm font-medium"
+                className="rounded px-1.5 py-0.5 text-xs font-medium"
                 style={{ backgroundColor: tag.color + "20", color: tag.color }}
               >
                 {tag.name}
               </span>
             ))}
             {tags.length > 3 && (
-              <span className="text-sm text-zinc-400">+{tags.length - 3}</span>
+              <span className="text-xs text-zinc-400">+{tags.length - 3}</span>
             )}
           </div>
         )}
