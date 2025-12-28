@@ -33,3 +33,4 @@ Thumbs.db
 # Secrets (nunca commitar!)
 *.pem
 *.key
+.playwright-mcp/

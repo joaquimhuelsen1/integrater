@@ -513,30 +513,30 @@ async def sync_history(
             safe_name = name.encode('ascii', 'replace').decode('ascii')
             print(f"[SYNC] Dialogo {discovered}: {safe_name} (id={entity.id})")
 
-            # Cria identity se não existir (com avatar)
-            identity = await _get_or_create_identity(db, str(owner_id), entity, client)
-            identity_id = identity["id"]
+            telegram_id = str(entity.id)
+            is_group = isinstance(entity, (Chat, Channel))
 
-            # Cria conversa se não existir
-            conv = await _get_or_create_conversation(db, str(owner_id), identity_id, workspace_id)
-            conv_id = conv["id"]
-
-            # Verifica se já tem job pendente/processing
+            # Verifica se já tem job pendente para este telegram_id
             existing = db.table("sync_history_jobs").select("id").eq(
-                "conversation_id", conv_id
-            ).in_("status", ["pending", "processing"]).execute()
+                "telegram_id", telegram_id
+            ).eq("integration_account_id", str(request.account_id)).in_(
+                "status", ["pending", "processing"]
+            ).execute()
 
             if existing.data:
                 skipped_existing += 1
                 print(f"[SYNC] -> Pulando, já tem job pendente")
                 continue
 
-            # Cria job de sync (histórico completo)
+            # Cria job de sync - worker vai criar identity/conversa
             job_id = uuid4()
             db.table("sync_history_jobs").insert({
                 "id": str(job_id),
                 "owner_id": str(owner_id),
-                "conversation_id": conv_id,
+                "workspace_id": workspace_id,
+                "telegram_id": telegram_id,
+                "telegram_name": name,
+                "is_group": is_group,
                 "integration_account_id": str(request.account_id),
                 "limit_messages": FULL_HISTORY_LIMIT,
                 "status": "pending",

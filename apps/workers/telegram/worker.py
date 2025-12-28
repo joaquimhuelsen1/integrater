@@ -928,23 +928,129 @@ class TelegramWorker:
         """Processa jobs de sincronização de histórico pendentes."""
         db = get_supabase()
 
-        # Busca jobs pendentes
+        # Busca jobs pendentes (novo formato com telegram_id ou antigo com conversation_id)
         result = db.table("sync_history_jobs").select(
-            "id, owner_id, conversation_id, integration_account_id, limit_messages"
+            "id, owner_id, conversation_id, integration_account_id, limit_messages, "
+            "telegram_id, telegram_name, workspace_id, is_group"
         ).eq("status", "pending").order("created_at").limit(5).execute()
 
         for job in result.data:
             await self._process_single_history_job(db, job)
 
+    async def _resolve_telegram_entity(self, client, telegram_id: int):
+        """Resolve entidade do Telegram (usuário ou grupo)."""
+        entity = None
+        try:
+            entity = await client.get_entity(telegram_id)
+        except ValueError:
+            pass
+
+        # Se não encontrou, carrega diálogos para popular cache
+        if not entity:
+            print(f"[SYNC] Carregando diálogos para encontrar {telegram_id}...")
+            async for dialog in client.iter_dialogs():
+                if dialog.entity and hasattr(dialog.entity, 'id') and dialog.entity.id == telegram_id:
+                    entity = dialog.entity
+                    print(f"[SYNC] Encontrado nos diálogos: {entity.id}")
+                    break
+
+        return entity
+
+    async def _get_or_create_sync_identity(self, db, owner_id: str, telegram_id: int, entity, is_group: bool, client):
+        """Busca ou cria identity para sync (função unificada)."""
+        telegram_id_str = str(telegram_id)
+        identity_type = "telegram" if is_group else "telegram_user"
+
+        # Busca existente (tenta ambos os tipos para compatibilidade)
+        existing = db.table("contact_identities").select(
+            "id, metadata, type"
+        ).eq("owner_id", owner_id).eq("value", telegram_id_str).in_(
+            "type", ["telegram", "telegram_user"]
+        ).execute()
+
+        if existing.data:
+            identity = existing.data[0]
+            metadata = identity.get("metadata") or {}
+
+            # Atualiza is_group se necessário
+            if is_group and not metadata.get("is_group"):
+                metadata["is_group"] = True
+                db.table("contact_identities").update({
+                    "metadata": metadata
+                }).eq("id", identity["id"]).execute()
+
+            return identity["id"], metadata
+
+        # Cria nova identity
+        metadata = {"is_group": is_group}
+
+        if is_group:
+            metadata["title"] = getattr(entity, 'title', None) or f"Grupo {telegram_id}"
+            metadata["username"] = getattr(entity, 'username', None)
+        else:
+            metadata["first_name"] = getattr(entity, 'first_name', None)
+            metadata["last_name"] = getattr(entity, 'last_name', None)
+            metadata["username"] = getattr(entity, 'username', None)
+
+        # Baixa avatar
+        avatar_url = await self._download_and_store_avatar(client, owner_id, entity)
+        if avatar_url:
+            metadata["avatar_url"] = avatar_url
+
+        identity_id = str(uuid4())
+        db.table("contact_identities").insert({
+            "id": identity_id,
+            "owner_id": owner_id,
+            "contact_id": None,
+            "type": identity_type,
+            "value": telegram_id_str,
+            "metadata": metadata,
+        }).execute()
+
+        print(f"[SYNC] Identity criada: {identity_id}")
+        return identity_id, metadata
+
+    async def _get_or_create_sync_conversation(self, db, owner_id: str, identity_id: str, workspace_id: str) -> str:
+        """Busca ou cria conversa para sync (função unificada)."""
+        # Busca existente
+        existing = db.table("conversations").select(
+            "id"
+        ).eq("owner_id", owner_id).eq("primary_identity_id", identity_id).execute()
+
+        if existing.data:
+            return existing.data[0]["id"]
+
+        # Cria nova conversa
+        conv_id = str(uuid4())
+        db.table("conversations").insert({
+            "id": conv_id,
+            "owner_id": owner_id,
+            "workspace_id": workspace_id,
+            "contact_id": None,
+            "primary_identity_id": identity_id,
+            "status": "open",
+            "last_channel": "telegram",
+            "last_message_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+
+        print(f"[SYNC] Conversa criada: {conv_id}")
+        return conv_id
+
     async def _process_single_history_job(self, db, job: dict):
-        """Processa um job de sincronização de histórico."""
+        """Processa um job de sincronização de histórico (formato unificado)."""
         job_id = job["id"]
         owner_id = job["owner_id"]
-        conversation_id = job["conversation_id"]
         acc_id = job["integration_account_id"]
         limit = job.get("limit_messages", 100)
 
-        print(f"[SYNC] Processando job {job_id} para conversa {conversation_id}")
+        # Novo formato: telegram_id | Antigo formato: conversation_id
+        telegram_id = job.get("telegram_id")
+        workspace_id = job.get("workspace_id")
+        is_group = job.get("is_group", False)
+        telegram_name = job.get("telegram_name")
+        conversation_id = job.get("conversation_id")
+
+        print(f"[SYNC] Processando job {job_id}")
 
         # Marca como processing
         db.table("sync_history_jobs").update({
@@ -958,65 +1064,73 @@ class TelegramWorker:
 
             client = self.clients[acc_id]
 
-            # Busca primary_identity_id da conversa para pegar telegram_user_id
-            conv_result = db.table("conversations").select(
-                "primary_identity_id"
-            ).eq("id", conversation_id).single().execute()
+            # NOVO FORMATO: telegram_id (worker cria identity/conversa)
+            if telegram_id:
+                telegram_user_id = int(telegram_id)
 
-            if not conv_result.data:
-                raise Exception("Conversa não encontrada")
+                # Resolve entidade
+                entity = await self._resolve_telegram_entity(client, telegram_user_id)
+                if not entity:
+                    raise Exception(f"Entidade {telegram_user_id} não encontrada")
 
-            identity_id = conv_result.data["primary_identity_id"]
+                # Verifica se é grupo pela entidade real
+                is_group = isinstance(entity, (Chat, Channel))
 
-            # Busca telegram_user_id e metadata da identity
-            identity_result = db.table("contact_identities").select(
-                "value, metadata"
-            ).eq("id", identity_id).single().execute()
+                # Cria ou busca identity
+                identity_id, identity_metadata = await self._get_or_create_sync_identity(
+                    db, owner_id, telegram_user_id, entity, is_group, client
+                )
 
-            if not identity_result.data:
-                raise Exception("Identity não encontrada")
+                # Cria ou busca conversa
+                conversation_id = await self._get_or_create_sync_conversation(
+                    db, owner_id, identity_id, workspace_id
+                )
 
-            telegram_user_id = int(identity_result.data["value"])
-            identity_metadata = identity_result.data.get("metadata") or {}
-            is_group = identity_metadata.get("is_group", False)
+                # Atualiza job com conversation_id
+                db.table("sync_history_jobs").update({
+                    "conversation_id": conversation_id
+                }).eq("id", job_id).execute()
 
-            # Resolve a entidade primeiro (necessário para usuários não-cacheados)
-            entity = None
-            try:
-                entity = await client.get_entity(telegram_user_id)
-            except ValueError:
-                # Tenta buscar pelo username se tiver nos metadados
-                identity_meta = db.table("contact_identities").select(
-                    "metadata"
+            # ANTIGO FORMATO: conversation_id (compatibilidade)
+            else:
+                if not conversation_id:
+                    raise Exception("Job sem telegram_id nem conversation_id")
+
+                # Busca identity da conversa
+                conv_result = db.table("conversations").select(
+                    "primary_identity_id"
+                ).eq("id", conversation_id).single().execute()
+
+                if not conv_result.data:
+                    raise Exception("Conversa não encontrada")
+
+                identity_id = conv_result.data["primary_identity_id"]
+
+                # Busca telegram_user_id
+                identity_result = db.table("contact_identities").select(
+                    "value, metadata"
                 ).eq("id", identity_id).single().execute()
 
-                username = identity_meta.data.get("metadata", {}).get("username") if identity_meta.data else None
-                if username:
-                    try:
-                        entity = await client.get_entity(f"@{username}")
-                    except Exception:
-                        pass
+                if not identity_result.data:
+                    raise Exception("Identity não encontrada")
 
-            # Se ainda não encontrou, carrega todos os diálogos para popular cache
-            if not entity:
-                print(f"[SYNC] Carregando diálogos para popular cache...")
-                async for dialog in client.iter_dialogs():
-                    if dialog.entity and hasattr(dialog.entity, 'id') and dialog.entity.id == telegram_user_id:
-                        entity = dialog.entity
-                        print(f"[SYNC] Encontrado nos diálogos: {entity.id}")
-                        break
+                telegram_user_id = int(identity_result.data["value"])
+                identity_metadata = identity_result.data.get("metadata") or {}
+                is_group = identity_metadata.get("is_group", False)
 
-            if not entity:
-                raise Exception(f"Usuário {telegram_user_id} não encontrado nos diálogos")
+                # Resolve entidade
+                entity = await self._resolve_telegram_entity(client, telegram_user_id)
+                if not entity:
+                    raise Exception(f"Entidade {telegram_user_id} não encontrada")
 
-            # Verifica se é grupo e atualiza metadata se necessário
-            if isinstance(entity, (Chat, Channel)) and not is_group:
-                print(f"[SYNC] Detectado grupo, atualizando metadata...")
-                identity_metadata["is_group"] = True
-                is_group = True
-                db.table("contact_identities").update({
-                    "metadata": identity_metadata
-                }).eq("id", identity_id).execute()
+                # Atualiza is_group se detectou grupo
+                if isinstance(entity, (Chat, Channel)) and not is_group:
+                    print(f"[SYNC] Detectado grupo, atualizando metadata...")
+                    identity_metadata["is_group"] = True
+                    is_group = True
+                    db.table("contact_identities").update({
+                        "metadata": identity_metadata
+                    }).eq("id", identity_id).execute()
 
             # Busca mensagens existentes para evitar duplicatas
             existing_result = db.table("messages").select(
