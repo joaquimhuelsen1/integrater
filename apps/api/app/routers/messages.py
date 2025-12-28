@@ -71,10 +71,12 @@ async def send_message(
                 {"message_id": str(message_id)}
             ).eq("id", str(att_id)).execute()
 
-    # Atualizar last_message_at da conversa
-    db.table("conversations").update(
-        {"last_message_at": now}
-    ).eq("id", str(data.conversation_id)).execute()
+    # Atualizar last_message_at e preview da conversa
+    preview = (data.text[:100] + "...") if data.text and len(data.text) > 100 else data.text
+    db.table("conversations").update({
+        "last_message_at": now,
+        "last_message_preview": preview,
+    }).eq("id", str(data.conversation_id)).execute()
 
     # Enviar via canal apropriado
     channel = data.channel.value if data.channel else conv.get("last_channel", "telegram")

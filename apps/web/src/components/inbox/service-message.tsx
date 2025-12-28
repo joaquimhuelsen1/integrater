@@ -69,7 +69,7 @@ export function ServiceMessage({ message, onOpenChat, onSendWelcome }: ServiceMe
       <span className="rounded-full bg-zinc-800/60 px-3 py-1 text-xs text-zinc-400">
         <button
           onClick={handleNameClick}
-          className="font-medium text-violet-400 hover:text-violet-300 hover:underline"
+          className="font-medium text-violet-400 underline decoration-transparent transition-all hover:text-violet-300 hover:decoration-violet-300 cursor-pointer"
           title={`Abrir chat com ${userName}`}
         >
           {userName}
