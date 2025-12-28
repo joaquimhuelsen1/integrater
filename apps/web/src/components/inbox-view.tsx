@@ -987,15 +987,21 @@ I'll be waiting.`
   }, [supabase, selectedId, selectedContactId, contactChannels, loadConversations, loadMessages, loadContactMessages, searchQuery])
 
   // Busca conversa na lista ou usa cache (para quando muda de canal)
-  const conversationFromList = conversations.find(c => c.id === selectedId)
-  const selectedConversation = conversationFromList || (cachedSelectedConversation?.id === selectedId ? cachedSelectedConversation : null)
+  const conversationFromList = useMemo(() =>
+    conversations.find(c => c.id === selectedId),
+    [conversations, selectedId]
+  )
+
+  // Usa cache apenas se o ID bate (evita mostrar conversa errada)
+  const cachedIfMatches = cachedSelectedConversation?.id === selectedId ? cachedSelectedConversation : null
+  const selectedConversation = conversationFromList || cachedIfMatches
 
   // Atualiza cache quando conversa está na lista (mantém dados frescos)
   useEffect(() => {
-    if (conversationFromList && conversationFromList.id === selectedId) {
+    if (conversationFromList) {
       setCachedSelectedConversation(conversationFromList)
     }
-  }, [conversationFromList, selectedId])
+  }, [conversationFromList])
 
   // Determina display name para ChatView
   const getDisplayName = (conv: Conversation | undefined) => {
