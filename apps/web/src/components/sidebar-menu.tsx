@@ -61,7 +61,8 @@ export function SidebarMenu({ userEmail, filterTags, onFilterTagsChange, onLogou
   }
 
   // Get initials from email
-  const initials = (userEmail || "U").split("@")[0].slice(0, 2).toUpperCase()
+  const emailPart = userEmail?.split("@")[0] ?? "U"
+  const initials = emailPart.slice(0, 2).toUpperCase()
 
   return (
     <>
