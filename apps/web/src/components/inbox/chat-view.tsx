@@ -21,6 +21,8 @@ export interface Message {
   subject: string | null  // Assunto do email
   channel: "telegram" | "email" | "openphone_sms"
   sent_at: string
+  edited_at?: string | null  // Quando foi editada
+  deleted_at?: string | null // Quando foi deletada (soft delete)
   message_type?: string // text, service_join, service_leave, service_kick, service_add
   attachments?: { id: string; file_name: string; mime_type: string; storage_path: string; storage_bucket?: string }[]
   reply_to_message_id?: string | null
