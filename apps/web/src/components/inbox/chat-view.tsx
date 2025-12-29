@@ -13,6 +13,23 @@ import { ContactManager } from "./contact-manager"
 import { groupMessagesByDate } from "@/lib/group-messages-by-date"
 import type { Tag } from "./conversation-list"
 
+// Formata "última vez visto" de forma amigável
+function formatLastSeen(dateStr: string): string {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMin = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+
+  if (diffMin < 1) return "agora"
+  if (diffMin < 60) return `há ${diffMin} min`
+  if (diffHours < 24) return `há ${diffHours}h`
+  if (diffDays === 1) return "ontem"
+  if (diffDays < 7) return `há ${diffDays} dias`
+  return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })
+}
+
 export interface Message {
   id: string
   conversation_id: string
@@ -227,7 +244,7 @@ export function ChatView({
 
   // Polling para presence status (typing/online) - 1 segundo
   useEffect(() => {
-    if (!conversationId) {
+    if (!conversationId && !identityId) {
       setIsTyping(false)
       setIsOnline(false)
       setLastSeen(null)
@@ -238,11 +255,18 @@ export function ChatView({
 
     const fetchPresence = async () => {
       try {
-        const { data } = await supabase
+        // Busca por conversation_id OU contact_identity_id
+        let query = supabase
           .from("presence_status")
           .select("is_typing, is_online, last_seen_at, typing_expires_at")
-          .eq("conversation_id", conversationId)
-          .maybeSingle()
+
+        if (conversationId) {
+          query = query.eq("conversation_id", conversationId)
+        } else if (identityId) {
+          query = query.eq("contact_identity_id", identityId)
+        }
+
+        const { data } = await query.maybeSingle()
 
         if (data) {
           // Verifica se typing expirou (5 segundos)
@@ -256,6 +280,7 @@ export function ChatView({
         } else {
           setIsTyping(false)
           setIsOnline(false)
+          setLastSeen(null)
         }
       } catch (err) {
         // Ignora erros silenciosamente
@@ -271,7 +296,7 @@ export function ChatView({
     return () => {
       clearInterval(interval)
     }
-  }, [conversationId])
+  }, [conversationId, identityId])
 
   // Agrupa mensagens por data para exibir divisores
   const groupedMessages = useMemo(
@@ -801,11 +826,19 @@ export function ChatView({
               )}
             </div>
             {/* Typing indicator */}
-            {isTyping && (
+            {isTyping ? (
               <span className="text-xs text-zinc-500 animate-pulse">
                 digitando...
               </span>
-            )}
+            ) : isOnline ? (
+              <span className="text-xs text-green-600 dark:text-green-400">
+                online
+              </span>
+            ) : lastSeen ? (
+              <span className="text-xs text-zinc-500">
+                visto {formatLastSeen(lastSeen)}
+              </span>
+            ) : null}
           </div>
           {/* Ícone do canal com cor */}
           {channel && (
