@@ -999,21 +999,42 @@ class TelegramWorker:
     async def _resolve_telegram_entity(self, client, telegram_id: int):
         """Resolve entidade do Telegram (usuário ou grupo)."""
         entity = None
+
+        # Método 1: get_entity direto (usa cache interno do Telethon)
         try:
             entity = await client.get_entity(telegram_id)
-        except ValueError:
-            pass
+            if entity:
+                print(f"[SYNC] Entidade {telegram_id} encontrada via get_entity")
+                return entity
+        except (ValueError, Exception) as e:
+            print(f"[SYNC] get_entity falhou para {telegram_id}: {e}")
 
-        # Se não encontrou, carrega diálogos para popular cache
-        if not entity:
-            print(f"[SYNC] Carregando diálogos para encontrar {telegram_id}...")
-            async for dialog in client.iter_dialogs():
+        # Método 2: get_input_entity (funciona com IDs conhecidos)
+        try:
+            from telethon.tl.types import InputPeerUser, InputPeerChat, InputPeerChannel
+            input_entity = await client.get_input_entity(telegram_id)
+            if input_entity:
+                # Converte input entity para entity completa
+                entity = await client.get_entity(input_entity)
+                if entity:
+                    print(f"[SYNC] Entidade {telegram_id} encontrada via get_input_entity")
+                    return entity
+        except (ValueError, Exception) as e:
+            print(f"[SYNC] get_input_entity falhou para {telegram_id}: {e}")
+
+        # Método 3: Busca nos diálogos (mais lento)
+        print(f"[SYNC] Carregando diálogos para encontrar {telegram_id}...")
+        try:
+            async for dialog in client.iter_dialogs(limit=None):
                 if dialog.entity and hasattr(dialog.entity, 'id') and dialog.entity.id == telegram_id:
                     entity = dialog.entity
                     print(f"[SYNC] Encontrado nos diálogos: {entity.id}")
-                    break
+                    return entity
+        except Exception as e:
+            print(f"[SYNC] iter_dialogs falhou: {e}")
 
-        return entity
+        print(f"[SYNC] Entidade {telegram_id} não encontrada em nenhum método")
+        return None
 
     async def _get_or_create_sync_identity(self, db, owner_id: str, telegram_id: int, entity, is_group: bool, client):
         """Busca ou cria identity para sync (função unificada)."""
