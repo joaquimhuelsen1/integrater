@@ -964,10 +964,19 @@ class TelegramWorker:
 
     async def _history_sync_loop(self):
         """Loop para processar jobs de sincronização de histórico."""
+        # Aguarda 10s para contas conectarem antes de processar syncs
+        await asyncio.sleep(10)
+        print("[SYNC] Loop de sync iniciado")
+
         while True:
             try:
+                # Só processa se tiver pelo menos 1 conta conectada
+                if not self.clients:
+                    await asyncio.sleep(5)
+                    continue
+
                 await self._process_history_sync_jobs()
-                await asyncio.sleep(2)  # Verifica a cada 2s
+                await asyncio.sleep(5)  # Delay maior entre ciclos (era 2s)
             except Exception as e:
                 print(f"Erro no history sync loop: {e}")
                 await asyncio.sleep(10)
@@ -976,14 +985,16 @@ class TelegramWorker:
         """Processa jobs de sincronização de histórico pendentes."""
         db = get_supabase()
 
-        # Busca jobs pendentes (novo formato com telegram_id ou antigo com conversation_id)
+        # Busca apenas 1 job por vez para não sobrecarregar (era 5)
         result = db.table("sync_history_jobs").select(
             "id, owner_id, conversation_id, integration_account_id, limit_messages, "
             "telegram_id, telegram_name, workspace_id, is_group"
-        ).eq("status", "pending").order("created_at").limit(5).execute()
+        ).eq("status", "pending").order("created_at").limit(1).execute()
 
         for job in result.data:
             await self._process_single_history_job(db, job)
+            # Delay após cada sync para não sobrecarregar
+            await asyncio.sleep(2)
 
     async def _resolve_telegram_entity(self, client, telegram_id: int):
         """Resolve entidade do Telegram (usuário ou grupo)."""
@@ -1435,8 +1446,16 @@ class TelegramWorker:
 
     async def _message_jobs_loop(self):
         """Loop para processar jobs de edição/deleção de mensagens."""
+        # Aguarda 5s para contas conectarem
+        await asyncio.sleep(5)
+
         while True:
             try:
+                # Só processa se tiver conta conectada
+                if not self.clients:
+                    await asyncio.sleep(2)
+                    continue
+
                 await self._process_message_jobs()
                 await asyncio.sleep(2)  # Verifica a cada 2s
             except Exception as e:
