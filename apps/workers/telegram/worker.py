@@ -1481,6 +1481,24 @@ class TelegramWorker:
             if channel != "telegram":
                 raise Exception(f"Canal {channel} não suportado para {action}")
 
+            # Ação especial: typing (não precisa de message_id)
+            if action == "typing":
+                telegram_user_id = payload.get("telegram_user_id")
+                if not telegram_user_id:
+                    raise Exception("telegram_user_id não encontrado no payload")
+
+                # Envia ação de digitando para o Telegram
+                await client.action(int(telegram_user_id), 'typing')
+                print(f"[JOB] Typing enviado para {telegram_user_id}")
+
+                # Marca como completed
+                db.table("message_jobs").update({
+                    "status": "completed",
+                    "processed_at": datetime.now(timezone.utc).isoformat(),
+                }).eq("id", job_id).execute()
+
+                continue  # Próximo job
+
             external_msg_id = payload.get("external_message_id")
             if not external_msg_id or external_msg_id.startswith("local-") or external_msg_id.startswith("error-"):
                 raise Exception(f"Mensagem não tem ID externo válido: {external_msg_id}")

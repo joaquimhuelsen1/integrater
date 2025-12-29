@@ -323,3 +323,81 @@ async def delete_message(
         }).execute()
 
     return {"success": True, "deleted_at": now, "for_everyone": for_everyone}
+
+
+@router.post("/typing")
+async def send_typing(
+    data: dict,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """
+    Envia notificação de 'digitando...' para o Telegram.
+    Cria um job na tabela message_jobs com action='typing'.
+    O worker vai processar e enviar o typing action.
+    """
+    conversation_id = data.get("conversation_id")
+    if not conversation_id:
+        raise HTTPException(status_code=400, detail="conversation_id é obrigatório")
+
+    # Buscar conversa
+    conv_result = db.table("conversations").select("*").eq(
+        "id", str(conversation_id)
+    ).eq("owner_id", str(owner_id)).single().execute()
+
+    if not conv_result.data:
+        raise HTTPException(status_code=404, detail="Conversa não encontrada")
+
+    conv = conv_result.data
+
+    # Só funciona para Telegram
+    if conv.get("last_channel") != "telegram":
+        return {"success": False, "reason": "Typing só funciona para Telegram"}
+
+    # Buscar integration account do Telegram
+    int_result = db.table("integration_accounts").select("id").eq(
+        "owner_id", str(owner_id)
+    ).eq("type", "telegram_user").eq("is_active", True).limit(1).execute()
+
+    if not int_result.data:
+        return {"success": False, "reason": "Sem integração Telegram ativa"}
+
+    integration_account_id = int_result.data[0]["id"]
+
+    # Buscar identity para obter telegram_user_id
+    identity_id = conv.get("primary_identity_id")
+    if not identity_id:
+        return {"success": False, "reason": "Sem identity na conversa"}
+
+    id_result = db.table("contact_identities").select("*").eq(
+        "id", identity_id
+    ).single().execute()
+
+    if not id_result.data:
+        return {"success": False, "reason": "Identity não encontrada"}
+
+    identity = id_result.data
+    telegram_user_id = identity.get("metadata", {}).get("telegram_user_id")
+
+    if not telegram_user_id:
+        return {"success": False, "reason": "Sem telegram_user_id na identity"}
+
+    # Criar job de typing
+    now = datetime.utcnow().isoformat()
+    job_id = uuid4()
+
+    db.table("message_jobs").insert({
+        "id": str(job_id),
+        "owner_id": str(owner_id),
+        "message_id": None,  # Não há mensagem, é só typing
+        "integration_account_id": integration_account_id,
+        "action": "typing",
+        "payload": {
+            "telegram_user_id": telegram_user_id,
+            "conversation_id": str(conversation_id),
+        },
+        "status": "pending",
+        "created_at": now,
+    }).execute()
+
+    return {"success": True, "job_id": str(job_id)}

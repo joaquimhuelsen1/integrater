@@ -46,6 +46,8 @@ interface ComposerProps {
   // Props para reply
   replyTo?: ReplyToMessage | null
   onCancelReply?: () => void
+  // Callback quando usuário está digitando (para enviar typing ao Telegram)
+  onTyping?: () => void
 }
 
 // Detecta tipo de arquivo pela extensão quando file.type está vazio
@@ -82,7 +84,7 @@ const EMOJI_CATEGORIES = [
   { name: "Objetos", emojis: ["💼", "📱", "💻", "📧", "📞", "💰", "💵", "📝", "✅", "❌", "⭐", "🌟", "💡", "🎯", "🚀", "⏰"] },
 ]
 
-export function Composer({ onSend, disabled, templates = [], initialText = "", onTextChange, externalFiles = [], onExternalFilesProcessed, apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000", availableChannels, selectedChannel, onChannelChange, replyTo, onCancelReply }: ComposerProps) {
+export function Composer({ onSend, disabled, templates = [], initialText = "", onTextChange, externalFiles = [], onExternalFilesProcessed, apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000", availableChannels, selectedChannel, onChannelChange, replyTo, onCancelReply, onTyping }: ComposerProps) {
   const [text, setText] = useState(initialText)
   const [attachments, setAttachments] = useState<AttachmentPreview[]>([])
   const [showTemplates, setShowTemplates] = useState(false)
@@ -100,6 +102,8 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const audioPreviewRef = useRef<HTMLAudioElement | null>(null)
   const emojiPickerRef = useRef<HTMLDivElement>(null)
+  // Ref para debounce do typing (envia a cada 3 segundos)
+  const lastTypingRef = useRef<number>(0)
 
   // Limite de caracteres baseado no canal selecionado
   const charLimit = selectedChannel && selectedChannel in CHAR_LIMITS
@@ -135,11 +139,21 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
     }
   }, [externalFiles, onExternalFilesProcessed])
 
-  // Notify parent on text change
+  // Notify parent on text change + enviar typing com debounce
   const updateText = useCallback((newText: string) => {
     setText(newText)
     onTextChange?.(newText)
-  }, [onTextChange])
+
+    // Enviar typing com debounce de 3 segundos
+    // (Telegram typing action expira em ~5s, então 3s é seguro)
+    if (onTyping && newText.length > 0) {
+      const now = Date.now()
+      if (now - lastTypingRef.current > 3000) {
+        lastTypingRef.current = now
+        onTyping()
+      }
+    }
+  }, [onTextChange, onTyping])
 
   const handleSubmit = useCallback(() => {
     const trimmed = text.trim()

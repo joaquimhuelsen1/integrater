@@ -49,6 +49,8 @@ export interface Message {
     action_user_name?: string
     action_user_ids?: number[]
   }
+  // Status para optimistic update: enviando → enviado → falhou
+  sending_status?: "sending" | "sent" | "failed"
 }
 
 export interface Translation {
@@ -123,6 +125,8 @@ interface ChatViewProps {
   onMessageUpdate?: (messageId: string, updates: Partial<Message>) => void
   // Callback para remover mensagem localmente (delete)
   onMessageDelete?: (messageId: string) => void
+  // Callback quando usuário está digitando (para enviar typing ao Telegram)
+  onTyping?: () => void
 }
 
 export function ChatView({
@@ -164,6 +168,7 @@ export function ChatView({
   onOpenCRMPanel,
   onMessageUpdate,
   onMessageDelete,
+  onTyping,
 }: ChatViewProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -215,31 +220,42 @@ export function ChatView({
   const [isOnline, setIsOnline] = useState(false)
   const [lastSeen, setLastSeen] = useState<string | null>(null)
 
-  // Busca eventos de leitura para mensagens outbound
+  // Polling de eventos de leitura para mensagens outbound - 1 segundo
   useEffect(() => {
+    const outboundMsgIds = messages
+      .filter(m => m.direction === "outbound")
+      .map(m => m.id)
+
+    if (outboundMsgIds.length === 0) {
+      setReadMessageIds(new Set())
+      return
+    }
+
+    const supabase = createClient()
+
     const fetchReadEvents = async () => {
-      const outboundMsgIds = messages
-        .filter(m => m.direction === "outbound")
-        .map(m => m.id)
+      try {
+        const { data } = await supabase
+          .from("message_events")
+          .select("message_id")
+          .in("message_id", outboundMsgIds)
+          .eq("type", "read")
 
-      if (outboundMsgIds.length === 0) {
-        setReadMessageIds(new Set())
-        return
-      }
-
-      const supabase = createClient()
-      const { data } = await supabase
-        .from("message_events")
-        .select("message_id")
-        .in("message_id", outboundMsgIds)
-        .eq("type", "read")
-
-      if (data) {
-        setReadMessageIds(new Set(data.map(e => e.message_id)))
+        if (data) {
+          setReadMessageIds(new Set(data.map(e => e.message_id)))
+        }
+      } catch (err) {
+        // Ignora erros silenciosamente
       }
     }
 
+    // Busca inicial
     fetchReadEvents()
+
+    // Polling a cada 1 segundo
+    const interval = setInterval(fetchReadEvents, 1000)
+
+    return () => clearInterval(interval)
   }, [messages])
 
   // Polling para presence status (typing/online) - 1 segundo
@@ -1132,6 +1148,7 @@ export function ChatView({
             senderName: replyToMessage.direction === "outbound" ? "Você" : (displayName || "Contato")
           } : null}
           onCancelReply={handleCancelReply}
+          onTyping={onTyping}
         />
       </div>
     </div>

@@ -46,6 +46,10 @@ interface ConversationListProps {
   onArchive?: (id: string) => void
   onUnarchive?: (id: string) => void
   onDelete?: (id: string) => void
+  // Read status: Set de conversation_ids cuja última msg outbound foi lida
+  readConversationIds?: Set<string>
+  // Direção da última mensagem por conversa
+  lastMessageDirections?: Record<string, "inbound" | "outbound">
 }
 
 export function ConversationList({
@@ -59,6 +63,8 @@ export function ConversationList({
   onArchive,
   onUnarchive,
   onDelete,
+  readConversationIds = new Set(),
+  lastMessageDirections = {},
 }: ConversationListProps) {
   if (conversations.length === 0) {
     return (
@@ -84,6 +90,8 @@ export function ConversationList({
           onArchive={onArchive}
           onUnarchive={onUnarchive}
           onDelete={onDelete}
+          isLastOutboundRead={readConversationIds.has(conv.id)}
+          lastMessageDirection={lastMessageDirections[conv.id]}
         />
       ))}
     </div>

@@ -89,6 +89,9 @@ export function InboxView({ userEmail }: InboxViewProps) {
   const [selectedSendChannel, setSelectedSendChannel] = useState<string | null>(null)
   // Painel CRM lateral
   const [isCRMPanelOpen, setIsCRMPanelOpen] = useState(false)
+  // Read status para lista de conversas
+  const [readConversationIds, setReadConversationIds] = useState<Set<string>>(new Set())
+  const [lastMessageDirections, setLastMessageDirections] = useState<Record<string, "inbound" | "outbound">>({})
 
   const supabase = useMemo(() => createClient(), [])
   const router = useRouter()
@@ -757,14 +760,14 @@ I'll be waiting.`
     }
   }, [conversations, loadMessages, loadContactMessages, markAsRead])
 
-  // Enviar mensagem com attachments
+  // Enviar mensagem com attachments (com optimistic update)
   const handleSendMessage = useCallback(async (text: string, attachmentFiles?: File[]) => {
     if (!selectedId) return
     if (!text.trim() && (!attachmentFiles || attachmentFiles.length === 0)) return
 
     // Se tem múltiplos canais disponíveis, usar o canal selecionado
     let targetConversationId = selectedId
-    let channel = "telegram"
+    let channel: "telegram" | "email" | "openphone_sms" = "telegram"
 
     if (contactChannels.length > 0 && selectedSendChannel) {
       // Encontrar a conversa do canal selecionado
@@ -772,7 +775,7 @@ I'll be waiting.`
       if (selectedChannelInfo) {
         targetConversationId = selectedChannelInfo.conversationId
         // Mapear tipo de identidade para channel
-        const typeToChannel: Record<string, string> = {
+        const typeToChannel: Record<string, "telegram" | "email" | "openphone_sms"> = {
           telegram_user: "telegram",
           email: "email",
           phone: "openphone_sms",
@@ -788,9 +791,33 @@ I'll be waiting.`
       }
     }
 
+    // ID temporário para optimistic update
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+    // Mensagem temporária (aparece instantaneamente)
+    const tempMessage: Message = {
+      id: tempId,
+      conversation_id: targetConversationId,
+      direction: "outbound",
+      text: text || "",
+      subject: null,
+      channel: channel,
+      sent_at: new Date().toISOString(),
+      sending_status: "sending", // Mostra ícone de carregando
+    }
+
+    // Optimistic update: adiciona imediatamente na lista
+    setMessages(prev => [...prev, tempMessage])
+
     // Buscar dados necessários para criar a mensagem
     const { data: userData } = await supabase.auth.getUser()
-    if (!userData.user) return
+    if (!userData.user) {
+      // Falhou: marcar como erro
+      setMessages(prev => prev.map(m =>
+        m.id === tempId ? { ...m, sending_status: "failed" as const } : m
+      ))
+      return
+    }
 
     const ownerId = userData.user.id
 
@@ -803,6 +830,9 @@ I'll be waiting.`
 
     if (convError) {
       console.error("Error fetching conversation details:", convError)
+      setMessages(prev => prev.map(m =>
+        m.id === tempId ? { ...m, sending_status: "failed" as const } : m
+      ))
       return
     }
 
@@ -826,12 +856,18 @@ I'll be waiting.`
 
     if (intError) {
       console.error("Error fetching integration account:", intError)
+      setMessages(prev => prev.map(m =>
+        m.id === tempId ? { ...m, sending_status: "failed" as const } : m
+      ))
       return
     }
 
     const integrationAccount = integrationAccounts?.[0]
     if (!integrationAccount) {
       console.error(`No active ${integrationType} integration account found`)
+      setMessages(prev => prev.map(m =>
+        m.id === tempId ? { ...m, sending_status: "failed" as const } : m
+      ))
       return
     }
 
@@ -846,6 +882,9 @@ I'll be waiting.`
 
       if (idError) {
         console.error("Error fetching identity:", idError)
+        setMessages(prev => prev.map(m =>
+          m.id === tempId ? { ...m, sending_status: "failed" as const } : m
+        ))
         return
       }
       identityId = identities?.[0]?.id
@@ -853,29 +892,20 @@ I'll be waiting.`
 
     if (!identityId) {
       console.error("No identity found for conversation")
+      setMessages(prev => prev.map(m =>
+        m.id === tempId ? { ...m, sending_status: "failed" as const } : m
+      ))
       return
     }
 
-    // Enviar via API (que envia via canal e salva no banco)
+    // Enviar via API
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
     const { data: sessionData } = await supabase.auth.getSession()
     const token = sessionData?.session?.access_token
 
-    // Se não tem texto nem attachments, não envia
-    if (!text.trim() && (!attachmentFiles || attachmentFiles.length === 0)) {
-      console.error("No text and no attachments, aborting send")
-      return
-    }
-
-    console.log("Sending message via API:", {
-      conversation_id: targetConversationId,
-      channel: channel,
-      integration_account_id: integrationAccount.id,
-    })
-
     let messageId: string | null = null
 
-    // 1. Criar mensagem primeiro (para ter o ID)
+    // 1. Criar mensagem no servidor
     try {
       const response = await fetch(`${apiUrl}/messages/send`, {
         method: "POST",
@@ -895,14 +925,26 @@ I'll be waiting.`
       if (!response.ok) {
         const errorText = await response.text()
         console.error("Error sending message:", response.status, errorText)
+        // Marcar como falha
+        setMessages(prev => prev.map(m =>
+          m.id === tempId ? { ...m, sending_status: "failed" as const } : m
+        ))
         return
       }
 
       const messageData = await response.json()
       messageId = messageData.id
       console.log("Message created with ID:", messageId)
+
+      // Sucesso: atualizar ID real e status para "sent"
+      setMessages(prev => prev.map(m =>
+        m.id === tempId ? { ...m, id: messageId!, sending_status: "sent" as const } : m
+      ))
     } catch (error) {
       console.error("Error sending message:", error)
+      setMessages(prev => prev.map(m =>
+        m.id === tempId ? { ...m, sending_status: "failed" as const } : m
+      ))
       return
     }
 
@@ -937,16 +979,46 @@ I'll be waiting.`
           }
         }
       }
+      // Recarregar para pegar attachments
+      if (selectedContactId) {
+        loadContactMessages(selectedContactId)
+      } else {
+        loadMessages(selectedId)
+      }
     }
 
-    // Recarregar mensagens e conversas
-    if (selectedContactId) {
-      loadContactMessages(selectedContactId)
-    } else {
-      loadMessages(selectedId)
-    }
+    // Atualizar lista de conversas
     loadConversations(searchQuery)
   }, [selectedId, selectedContactId, contactChannels, selectedSendChannel, conversations, supabase, loadConversations, loadMessages, loadContactMessages, uploadAttachment, searchQuery])
+
+  // Enviar typing notification para o Telegram
+  const handleTyping = useCallback(async () => {
+    if (!selectedId) return
+
+    // Descobrir o canal da conversa
+    const conv = conversations.find(c => c.id === selectedId)
+    if (!conv || conv.last_channel !== "telegram") return // Só funciona para Telegram
+
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData?.session?.access_token
+
+      await fetch(`${apiUrl}/messages/typing`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          conversation_id: selectedId,
+        }),
+      })
+    } catch (error) {
+      // Silencioso - typing não é crítico
+      console.debug("Typing notification failed:", error)
+    }
+  }, [selectedId, conversations, supabase])
 
   // Carregar templates ao montar (conversas são carregadas pelo debounce effect)
   useEffect(() => {
@@ -973,6 +1045,85 @@ I'll be waiting.`
 
     return () => clearInterval(interval)
   }, [currentWorkspace?.id, selectedId, selectedContactId, searchQuery, loadConversations, loadMessages, loadContactMessages])
+
+  // Polling de read status para lista de conversas - 3 segundos
+  useEffect(() => {
+    if (!currentWorkspace?.id || conversations.length === 0) return
+
+    const fetchReadStatus = async () => {
+      try {
+        // Buscar última mensagem de cada conversa (últimas 24h)
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+        const convIds = conversations
+          .filter(c => c.last_message_at && c.last_message_at > twentyFourHoursAgo)
+          .map(c => c.id)
+
+        if (convIds.length === 0) return
+
+        // Buscar última mensagem de cada conversa
+        const { data: lastMessages } = await supabase
+          .from("messages")
+          .select("id, conversation_id, direction")
+          .in("conversation_id", convIds)
+          .is("deleted_at", null)
+          .order("sent_at", { ascending: false })
+
+        if (!lastMessages) return
+
+        // Agrupar por conversa (pegar só a última)
+        const lastMsgByConv: Record<string, { id: string; direction: string }> = {}
+        for (const msg of lastMessages) {
+          if (!lastMsgByConv[msg.conversation_id]) {
+            lastMsgByConv[msg.conversation_id] = { id: msg.id, direction: msg.direction }
+          }
+        }
+
+        // Atualizar direções
+        const directions: Record<string, "inbound" | "outbound"> = {}
+        for (const [convId, msg] of Object.entries(lastMsgByConv)) {
+          directions[convId] = msg.direction as "inbound" | "outbound"
+        }
+        setLastMessageDirections(directions)
+
+        // Buscar quais mensagens outbound foram lidas
+        const outboundMsgIds = Object.values(lastMsgByConv)
+          .filter(m => m.direction === "outbound")
+          .map(m => m.id)
+
+        if (outboundMsgIds.length === 0) {
+          setReadConversationIds(new Set())
+          return
+        }
+
+        const { data: readEvents } = await supabase
+          .from("message_events")
+          .select("message_id")
+          .in("message_id", outboundMsgIds)
+          .eq("type", "read")
+
+        if (readEvents) {
+          const readMsgIds = new Set(readEvents.map(e => e.message_id))
+          const readConvIds = new Set<string>()
+          for (const [convId, msg] of Object.entries(lastMsgByConv)) {
+            if (msg.direction === "outbound" && readMsgIds.has(msg.id)) {
+              readConvIds.add(convId)
+            }
+          }
+          setReadConversationIds(readConvIds)
+        }
+      } catch (err) {
+        // Ignora erros silenciosamente
+      }
+    }
+
+    // Busca inicial
+    fetchReadStatus()
+
+    // Polling a cada 3 segundos
+    const interval = setInterval(fetchReadStatus, 3000)
+
+    return () => clearInterval(interval)
+  }, [currentWorkspace?.id, conversations, supabase])
 
   // Refs para callbacks do realtime (evita re-subscriptions)
   const loadConversationsRef = useRef(loadConversations)
@@ -1178,6 +1329,8 @@ I'll be waiting.`
               onArchive={handleArchiveConversation}
               onUnarchive={handleUnarchiveConversation}
               onDelete={handleDeleteConversation}
+              readConversationIds={readConversationIds}
+              lastMessageDirections={lastMessageDirections}
             />
           )}
         </div>
@@ -1252,6 +1405,7 @@ I'll be waiting.`
             onMessageDelete={(messageId) => {
               setMessages(prev => prev.filter(m => m.id !== messageId))
             }}
+            onTyping={handleTyping}
           />
         </div>
       </div>

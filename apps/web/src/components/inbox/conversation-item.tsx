@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { MessageSquare, Mail, Phone, Pin, Eye, EyeOff, Archive, ArchiveRestore, Trash2 } from "lucide-react"
+import { MessageSquare, Mail, Phone, Pin, Eye, EyeOff, Archive, ArchiveRestore, Trash2, Check, CheckCheck } from "lucide-react"
 import Image from "next/image"
 import type { Conversation, Tag } from "./conversation-list"
 
@@ -17,6 +17,9 @@ interface ConversationItemProps {
   onArchive?: (id: string) => void
   onUnarchive?: (id: string) => void
   onDelete?: (id: string) => void
+  // Read status da última mensagem outbound
+  isLastOutboundRead?: boolean
+  lastMessageDirection?: "inbound" | "outbound"
 }
 
 const channelIcons = {
@@ -60,6 +63,8 @@ export function ConversationItem({
   onArchive,
   onUnarchive,
   onDelete,
+  isLastOutboundRead = false,
+  lastMessageDirection,
 }: ConversationItemProps) {
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 })
@@ -194,8 +199,14 @@ export function ConversationItem({
           </div>
         </div>
         <div className="flex items-center justify-between gap-2 mt-1">
-          <span className="truncate text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
-            {conversation.last_message_preview || ""}
+          <span className="truncate text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed flex items-center gap-1">
+            {/* Checkmarks para mensagens outbound */}
+            {lastMessageDirection === "outbound" && (
+              isLastOutboundRead
+                ? <CheckCheck className="h-5 w-5 text-blue-400 flex-shrink-0" />
+                : <Check className="h-5 w-5 text-zinc-400 flex-shrink-0" />
+            )}
+            <span className="truncate">{conversation.last_message_preview || ""}</span>
           </span>
           {hasUnread && (
             <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500 px-1.5 text-xs font-medium text-white flex-shrink-0">

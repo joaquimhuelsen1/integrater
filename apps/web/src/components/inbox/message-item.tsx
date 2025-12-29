@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Check, CheckCheck, Download, FileText, Image as ImageIcon, X, ZoomIn, ZoomOut, Mic, Play, Pause, FileAudio, Loader2, MessageSquare, Mail, Phone, Reply, Pin, Pencil, Trash2 } from "lucide-react"
+import { Check, CheckCheck, Download, FileText, Image as ImageIcon, X, ZoomIn, ZoomOut, Mic, Play, Pause, FileAudio, Loader2, MessageSquare, Mail, Phone, Reply, Pin, Pencil, Trash2, AlertCircle } from "lucide-react"
 import { createClient } from "@/lib/supabase"
 import type { Message, Translation } from "./chat-view"
 
@@ -545,9 +545,16 @@ export function MessageItem({
           )}
           <span>{time}</span>
           {isOutbound && (
-            isRead
-              ? <CheckCheck className="h-3 w-3 text-blue-500" />
-              : <Check className="h-3 w-3" />
+            // Status da mensagem: sending (spinner) → sent (✓) → read (✓✓ azul) | failed (X vermelho)
+            message.sending_status === "sending" ? (
+              <Loader2 className="h-3 w-3 animate-spin text-zinc-400" />
+            ) : message.sending_status === "failed" ? (
+              <AlertCircle className="h-3 w-3 text-red-500" />
+            ) : isRead ? (
+              <CheckCheck className="h-3 w-3 text-blue-500" />
+            ) : (
+              <Check className="h-3 w-3" />
+            )
           )}
         </div>
           </div>
