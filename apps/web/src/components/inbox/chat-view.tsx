@@ -100,6 +100,10 @@ interface ChatViewProps {
   channel?: "telegram" | "email" | "openphone_sms" | null
   // Abrir painel CRM
   onOpenCRMPanel?: () => void
+  // Callback para atualizar mensagem localmente (edit)
+  onMessageUpdate?: (messageId: string, updates: Partial<Message>) => void
+  // Callback para remover mensagem localmente (delete)
+  onMessageDelete?: (messageId: string) => void
 }
 
 export function ChatView({
@@ -139,6 +143,8 @@ export function ChatView({
   workspaceId,
   channel = null,
   onOpenCRMPanel,
+  onMessageUpdate,
+  onMessageDelete,
 }: ChatViewProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -372,7 +378,11 @@ export function ChatView({
         method: "PUT",
       })
       if (resp.ok) {
-        // Mensagem editada - realtime vai atualizar
+        // Atualiza mensagem localmente (optimistic update)
+        onMessageUpdate?.(editingMessage.id, {
+          text: editText.trim(),
+          edited_at: new Date().toISOString()
+        })
         setEditingMessage(null)
         setEditText("")
       } else {
@@ -383,7 +393,7 @@ export function ChatView({
     } finally {
       setIsEditing(false)
     }
-  }, [apiUrl, editingMessage, editText, isEditing])
+  }, [apiUrl, editingMessage, editText, isEditing, onMessageUpdate])
 
   const handleDelete = useCallback(async (messageId: string) => {
     if (isDeleting) return
@@ -399,7 +409,8 @@ export function ChatView({
         method: "DELETE",
       })
       if (resp.ok) {
-        // Mensagem deletada - realtime vai atualizar (ou desaparecer da lista)
+        // Remove mensagem localmente (optimistic update)
+        onMessageDelete?.(messageId)
       } else {
         console.error("Erro ao deletar mensagem")
       }
@@ -408,7 +419,7 @@ export function ChatView({
     } finally {
       setIsDeleting(false)
     }
-  }, [apiUrl, isDeleting])
+  }, [apiUrl, isDeleting, onMessageDelete])
 
   // Scroll para o final das mensagens (sempre instantâneo, sem animação)
   useEffect(() => {

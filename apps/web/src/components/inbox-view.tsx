@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef, MutableRefObject } from "react"
 import { createClient } from "@/lib/supabase"
 import { ConversationList, type Conversation, ChannelTabs, type ChannelId } from "@/components/inbox"
 import { ChatView, type Message, type Template, type AISuggestion } from "@/components/inbox"
@@ -93,6 +93,18 @@ export function InboxView({ userEmail }: InboxViewProps) {
   const supabase = createClient()
   const router = useRouter()
   const { currentWorkspace } = useWorkspace()
+
+  // Refs para evitar re-subscriptions no realtime
+  const selectedIdRef = useRef(selectedId)
+  const selectedContactIdRef = useRef(selectedContactId)
+  const contactChannelsRef = useRef(contactChannels)
+  const searchQueryRef = useRef(searchQuery)
+
+  // Atualiza refs quando valores mudam
+  useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
+  useEffect(() => { selectedContactIdRef.current = selectedContactId }, [selectedContactId])
+  useEffect(() => { contactChannelsRef.current = contactChannels }, [contactChannels])
+  useEffect(() => { searchQueryRef.current = searchQuery }, [searchQuery])
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -941,7 +953,15 @@ I'll be waiting.`
     loadTemplates()
   }, [loadTemplates])
 
-  // Realtime - novas mensagens
+  // Refs para callbacks do realtime (evita re-subscriptions)
+  const loadConversationsRef = useRef(loadConversations)
+  const loadMessagesRef = useRef(loadMessages)
+  const loadContactMessagesRef = useRef(loadContactMessages)
+  useEffect(() => { loadConversationsRef.current = loadConversations }, [loadConversations])
+  useEffect(() => { loadMessagesRef.current = loadMessages }, [loadMessages])
+  useEffect(() => { loadContactMessagesRef.current = loadContactMessages }, [loadContactMessages])
+
+  // Realtime - novas mensagens (dependências mínimas para evitar loop)
   useEffect(() => {
     if (!currentWorkspace?.id) {
       console.log("[Realtime] Aguardando workspace...")
@@ -962,14 +982,33 @@ I'll be waiting.`
         (payload) => {
           console.log("[Realtime] Nova mensagem:", payload.new)
           const newMsg = payload.new as Message
+          const currContactId = selectedContactIdRef.current
+          const currChannels = contactChannelsRef.current
+          const currSelectedId = selectedIdRef.current
+
           // Se tem contato selecionado, verificar se msg é de qualquer conversa do contato
-          if (selectedContactId && contactChannels.some(ch => ch.conversationId === newMsg.conversation_id)) {
-            loadContactMessages(selectedContactId)
-          } else if (newMsg.conversation_id === selectedId) {
-            // Recarrega mensagens para incluir attachments
-            loadMessages(selectedId)
+          if (currContactId && currChannels.some(ch => ch.conversationId === newMsg.conversation_id)) {
+            loadContactMessagesRef.current(currContactId)
+          } else if (newMsg.conversation_id === currSelectedId) {
+            loadMessagesRef.current(currSelectedId)
           }
-          loadConversations(searchQuery)
+          loadConversationsRef.current(searchQueryRef.current)
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "messages",
+        },
+        (payload) => {
+          console.log("[Realtime] Mensagem atualizada:", payload.new)
+          const updatedMsg = payload.new as Message
+          // Atualiza mensagem localmente sem recarregar tudo
+          setMessages(prev => prev.map(m =>
+            m.id === updatedMsg.id ? { ...m, ...updatedMsg } : m
+          ))
         }
       )
       .on(
@@ -977,13 +1016,15 @@ I'll be waiting.`
         { event: "INSERT", schema: "public", table: "attachments" },
         (payload) => {
           console.log("[Realtime] Novo attachment:", payload.new)
-          // Quando attachment é criado, recarrega mensagens
           const att = payload.new as { message_id?: string }
-          if (att.message_id && selectedId) {
-            if (selectedContactId) {
-              loadContactMessages(selectedContactId)
+          const currSelectedId = selectedIdRef.current
+          const currContactId = selectedContactIdRef.current
+
+          if (att.message_id && currSelectedId) {
+            if (currContactId) {
+              loadContactMessagesRef.current(currContactId)
             } else {
-              loadMessages(selectedId)
+              loadMessagesRef.current(currSelectedId)
             }
           }
         }
@@ -998,7 +1039,7 @@ I'll be waiting.`
         },
         (payload) => {
           console.log("[Realtime] Mudança em conversa:", payload)
-          loadConversations(searchQuery)
+          loadConversationsRef.current(searchQueryRef.current)
         }
       )
       .subscribe((status) => {
@@ -1009,7 +1050,7 @@ I'll be waiting.`
       console.log("[Realtime] Removendo channel...")
       supabase.removeChannel(channel)
     }
-  }, [supabase, currentWorkspace?.id, selectedId, selectedContactId, contactChannels, loadConversations, loadMessages, loadContactMessages, searchQuery])
+  }, [supabase, currentWorkspace?.id]) // Dependências mínimas!
 
   // Busca conversa na lista ou usa cache (para quando muda de canal)
   const conversationFromList = useMemo(() =>
@@ -1182,6 +1223,14 @@ I'll be waiting.`
             workspaceId={currentWorkspace?.id}
             channel={selectedConversation?.last_channel}
             onOpenCRMPanel={() => setIsCRMPanelOpen(true)}
+            onMessageUpdate={(messageId, updates) => {
+              setMessages(prev => prev.map(m =>
+                m.id === messageId ? { ...m, ...updates } : m
+              ))
+            }}
+            onMessageDelete={(messageId) => {
+              setMessages(prev => prev.filter(m => m.id !== messageId))
+            }}
           />
         </div>
       </div>
