@@ -546,8 +546,8 @@ export function MessageItem({
           <span>{time}</span>
           {isOutbound && (
             isRead
-              ? <CheckCheck className="h-3 w-3 text-blue-500" title="Lida" />
-              : <Check className="h-3 w-3" title="Enviada" />
+              ? <CheckCheck className="h-3 w-3 text-blue-500" />
+              : <Check className="h-3 w-3" />
           )}
         </div>
           </div>
