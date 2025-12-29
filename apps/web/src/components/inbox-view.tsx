@@ -90,7 +90,7 @@ export function InboxView({ userEmail }: InboxViewProps) {
   // Painel CRM lateral
   const [isCRMPanelOpen, setIsCRMPanelOpen] = useState(false)
 
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const router = useRouter()
   const { currentWorkspace } = useWorkspace()
 
