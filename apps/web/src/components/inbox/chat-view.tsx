@@ -225,7 +225,7 @@ export function ChatView({
     fetchReadEvents()
   }, [messages])
 
-  // Busca e subscreve presence status
+  // Polling para presence status (typing/online) - 1 segundo
   useEffect(() => {
     if (!conversationId) {
       setIsTyping(false)
@@ -236,61 +236,40 @@ export function ChatView({
 
     const supabase = createClient()
 
-    // Busca inicial
     const fetchPresence = async () => {
-      const { data } = await supabase
-        .from("presence_status")
-        .select("is_typing, is_online, last_seen_at, typing_expires_at")
-        .eq("conversation_id", conversationId)
-        .maybeSingle()
+      try {
+        const { data } = await supabase
+          .from("presence_status")
+          .select("is_typing, is_online, last_seen_at, typing_expires_at")
+          .eq("conversation_id", conversationId)
+          .maybeSingle()
 
-      if (data) {
-        // Verifica se typing expirou (5 segundos)
-        const typingExpired = data.typing_expires_at
-          ? new Date(data.typing_expires_at) < new Date()
-          : true
+        if (data) {
+          // Verifica se typing expirou (5 segundos)
+          const typingExpired = data.typing_expires_at
+            ? new Date(data.typing_expires_at) < new Date()
+            : true
 
-        setIsTyping(data.is_typing && !typingExpired)
-        setIsOnline(data.is_online || false)
-        setLastSeen(data.last_seen_at)
+          setIsTyping(data.is_typing && !typingExpired)
+          setIsOnline(data.is_online || false)
+          setLastSeen(data.last_seen_at)
+        } else {
+          setIsTyping(false)
+          setIsOnline(false)
+        }
+      } catch (err) {
+        // Ignora erros silenciosamente
       }
     }
 
+    // Busca inicial
     fetchPresence()
 
-    // Subscreve a mudanças
-    const channel = supabase
-      .channel(`presence-${conversationId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "presence_status",
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        (payload) => {
-          const data = payload.new as {
-            is_typing?: boolean
-            is_online?: boolean
-            last_seen_at?: string
-            typing_expires_at?: string
-          }
-          if (data) {
-            const typingExpired = data.typing_expires_at
-              ? new Date(data.typing_expires_at) < new Date()
-              : true
-
-            setIsTyping(data.is_typing === true && !typingExpired)
-            setIsOnline(data.is_online || false)
-            setLastSeen(data.last_seen_at || null)
-          }
-        }
-      )
-      .subscribe()
+    // Polling a cada 1 segundo
+    const interval = setInterval(fetchPresence, 1000)
 
     return () => {
-      supabase.removeChannel(channel)
+      clearInterval(interval)
     }
   }, [conversationId])
 

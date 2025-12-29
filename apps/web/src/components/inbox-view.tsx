@@ -953,6 +953,27 @@ I'll be waiting.`
     loadTemplates()
   }, [loadTemplates])
 
+  // Polling fallback para mensagens (caso realtime falhe) - 3 segundos
+  useEffect(() => {
+    if (!currentWorkspace?.id) return
+
+    const pollMessages = () => {
+      // Recarrega conversas
+      loadConversations(searchQuery)
+      // Recarrega mensagens se tem conversa selecionada
+      if (selectedContactId) {
+        loadContactMessages(selectedContactId)
+      } else if (selectedId) {
+        loadMessages(selectedId)
+      }
+    }
+
+    // Polling a cada 3 segundos
+    const interval = setInterval(pollMessages, 3000)
+
+    return () => clearInterval(interval)
+  }, [currentWorkspace?.id, selectedId, selectedContactId, searchQuery, loadConversations, loadMessages, loadContactMessages])
+
   // Refs para callbacks do realtime (evita re-subscriptions)
   const loadConversationsRef = useRef(loadConversations)
   const loadMessagesRef = useRef(loadMessages)
