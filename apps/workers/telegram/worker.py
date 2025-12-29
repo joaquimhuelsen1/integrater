@@ -1497,7 +1497,7 @@ class TelegramWorker:
                     "processed_at": datetime.now(timezone.utc).isoformat(),
                 }).eq("id", job_id).execute()
 
-                continue  # Próximo job
+                return  # Job concluído, sai da função
 
             external_msg_id = payload.get("external_message_id")
             if not external_msg_id or external_msg_id.startswith("local-") or external_msg_id.startswith("error-"):
