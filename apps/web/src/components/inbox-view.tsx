@@ -943,12 +943,24 @@ I'll be waiting.`
 
   // Realtime - novas mensagens
   useEffect(() => {
+    if (!currentWorkspace?.id) {
+      console.log("[Realtime] Aguardando workspace...")
+      return
+    }
+
+    console.log(`[Realtime] Iniciando subscription para workspace ${currentWorkspace.id}`)
+
     const channel = supabase
-      .channel("inbox-realtime")
+      .channel(`inbox-realtime-${currentWorkspace.id}`)
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages" },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+        },
         (payload) => {
+          console.log("[Realtime] Nova mensagem:", payload.new)
           const newMsg = payload.new as Message
           // Se tem contato selecionado, verificar se msg é de qualquer conversa do contato
           if (selectedContactId && contactChannels.some(ch => ch.conversationId === newMsg.conversation_id)) {
@@ -964,6 +976,7 @@ I'll be waiting.`
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "attachments" },
         (payload) => {
+          console.log("[Realtime] Novo attachment:", payload.new)
           // Quando attachment é criado, recarrega mensagens
           const att = payload.new as { message_id?: string }
           if (att.message_id && selectedId) {
@@ -977,17 +990,26 @@ I'll be waiting.`
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "conversations" },
-        () => {
+        {
+          event: "*",
+          schema: "public",
+          table: "conversations",
+          filter: `workspace_id=eq.${currentWorkspace.id}`,
+        },
+        (payload) => {
+          console.log("[Realtime] Mudança em conversa:", payload)
           loadConversations(searchQuery)
         }
       )
-      .subscribe()
+      .subscribe((status) => {
+        console.log(`[Realtime] Status: ${status}`)
+      })
 
     return () => {
+      console.log("[Realtime] Removendo channel...")
       supabase.removeChannel(channel)
     }
-  }, [supabase, selectedId, selectedContactId, contactChannels, loadConversations, loadMessages, loadContactMessages, searchQuery])
+  }, [supabase, currentWorkspace?.id, selectedId, selectedContactId, contactChannels, loadConversations, loadMessages, loadContactMessages, searchQuery])
 
   // Busca conversa na lista ou usa cache (para quando muda de canal)
   const conversationFromList = useMemo(() =>

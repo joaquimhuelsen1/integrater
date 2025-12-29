@@ -47,6 +47,29 @@ async def send_message(
             identity_id = id_result.data[0]["id"]
 
     external_message_id = f"local-{message_id}"
+    channel = data.channel.value if data.channel else conv.get("last_channel", "telegram")
+
+    # Para emails: buscar última mensagem inbound para threading correto
+    email_reply_to = None
+    email_subject = None
+    if channel == "email":
+        last_inbound = db.table("messages").select(
+            "external_message_id, subject"
+        ).eq("conversation_id", str(data.conversation_id)).eq(
+            "direction", "inbound"
+        ).eq("channel", "email").order(
+            "sent_at", desc=True
+        ).limit(1).execute()
+
+        if last_inbound.data:
+            email_reply_to = last_inbound.data[0].get("external_message_id")
+            original_subject = last_inbound.data[0].get("subject", "")
+            if original_subject:
+                # Adiciona "Re:" se não tiver
+                if not original_subject.lower().startswith("re:"):
+                    email_subject = f"Re: {original_subject}"
+                else:
+                    email_subject = original_subject
 
     message_payload = {
         "id": str(message_id),
@@ -54,9 +77,11 @@ async def send_message(
         "conversation_id": str(data.conversation_id),
         "integration_account_id": str(data.integration_account_id) if data.integration_account_id else None,
         "identity_id": identity_id,
-        "channel": data.channel.value if data.channel else conv.get("last_channel", "telegram"),
+        "channel": channel,
         "direction": MessageDirection.outbound.value,
         "external_message_id": external_message_id,
+        "external_reply_to_message_id": email_reply_to,
+        "subject": email_subject,
         "text": data.text,
         "sent_at": now,
         "raw_payload": {},
@@ -78,8 +103,7 @@ async def send_message(
         "last_message_preview": preview,
     }).eq("id", str(data.conversation_id)).execute()
 
-    # Enviar via canal apropriado
-    channel = data.channel.value if data.channel else conv.get("last_channel", "telegram")
+    # Enviar via canal apropriado (channel já definido acima)
     send_status = "sent"
     external_id = None
 
@@ -182,3 +206,120 @@ async def get_message(
         raise HTTPException(status_code=404, detail="Mensagem não encontrada")
 
     return result.data
+
+
+@router.put("/{message_id}")
+async def edit_message(
+    message_id: UUID,
+    text: str,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """
+    Edita o texto de uma mensagem.
+    Só pode editar mensagens outbound (enviadas pelo usuário).
+    Cria um job para o worker editar no canal externo (Telegram/etc).
+    """
+    # Buscar mensagem
+    msg_result = db.table("messages").select("*").eq(
+        "id", str(message_id)
+    ).eq("owner_id", str(owner_id)).single().execute()
+
+    if not msg_result.data:
+        raise HTTPException(status_code=404, detail="Mensagem não encontrada")
+
+    msg = msg_result.data
+
+    # Só pode editar mensagens outbound
+    if msg["direction"] != "outbound":
+        raise HTTPException(status_code=400, detail="Só pode editar mensagens enviadas")
+
+    # Validar tamanho do texto
+    if not text or len(text.strip()) < 1:
+        raise HTTPException(status_code=400, detail="Texto não pode ser vazio")
+
+    if len(text) > 4096:
+        raise HTTPException(status_code=400, detail="Texto muito longo (máx 4096)")
+
+    now = datetime.utcnow().isoformat()
+
+    # Atualizar mensagem no banco
+    db.table("messages").update({
+        "text": text.strip(),
+        "edited_at": now,
+    }).eq("id", str(message_id)).execute()
+
+    # Criar job para o worker editar no canal externo
+    job_id = uuid4()
+    db.table("message_jobs").insert({
+        "id": str(job_id),
+        "owner_id": str(owner_id),
+        "message_id": str(message_id),
+        "integration_account_id": msg.get("integration_account_id"),
+        "action": "edit",
+        "payload": {
+            "new_text": text.strip(),
+            "external_message_id": msg.get("external_message_id"),
+            "channel": msg.get("channel"),
+        },
+        "status": "pending",
+        "created_at": now,
+    }).execute()
+
+    # Retornar mensagem atualizada
+    result = db.table("messages").select("*").eq("id", str(message_id)).single().execute()
+    return result.data
+
+
+@router.delete("/{message_id}")
+async def delete_message(
+    message_id: UUID,
+    for_everyone: bool = True,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """
+    Deleta uma mensagem.
+    for_everyone=True: deleta no Telegram E marca como deletada no banco
+    for_everyone=False: apenas marca como deletada no banco (soft delete)
+    Só pode deletar mensagens outbound (enviadas pelo usuário).
+    """
+    # Buscar mensagem
+    msg_result = db.table("messages").select("*").eq(
+        "id", str(message_id)
+    ).eq("owner_id", str(owner_id)).single().execute()
+
+    if not msg_result.data:
+        raise HTTPException(status_code=404, detail="Mensagem não encontrada")
+
+    msg = msg_result.data
+
+    # Só pode deletar mensagens outbound
+    if msg["direction"] != "outbound":
+        raise HTTPException(status_code=400, detail="Só pode deletar mensagens enviadas")
+
+    now = datetime.utcnow().isoformat()
+
+    # Soft delete no banco
+    db.table("messages").update({
+        "deleted_at": now,
+    }).eq("id", str(message_id)).execute()
+
+    # Se for_everyone, criar job para deletar no canal externo
+    if for_everyone:
+        job_id = uuid4()
+        db.table("message_jobs").insert({
+            "id": str(job_id),
+            "owner_id": str(owner_id),
+            "message_id": str(message_id),
+            "integration_account_id": msg.get("integration_account_id"),
+            "action": "delete",
+            "payload": {
+                "external_message_id": msg.get("external_message_id"),
+                "channel": msg.get("channel"),
+            },
+            "status": "pending",
+            "created_at": now,
+        }).execute()
+
+    return {"success": True, "deleted_at": now, "for_everyone": for_everyone}

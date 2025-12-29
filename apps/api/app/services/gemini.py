@@ -62,8 +62,15 @@ Conversation:
 
 Summary in Portuguese:""",
 
-    "draft_translation": """Translate this Portuguese text to English. Output ONLY the translation, nothing else.
+    "draft_translation": """Translate this Portuguese text to English.
 
+CRITICAL RULES:
+- Output ONLY the translation, no explanations
+- PRESERVE ALL punctuation marks exactly (?, !, ..., etc.)
+- Keep the same tone and formality level
+- Do NOT add or remove any punctuation
+
+Text to translate:
 {text}""",
 }
 

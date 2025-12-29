@@ -67,6 +67,13 @@ function isPdfFile(file: File): boolean {
   return ext === "pdf"
 }
 
+// Limite de caracteres por canal
+const CHAR_LIMITS = {
+  telegram: 4096,
+  sms: 1600,  // 10 SMS concatenados
+  email: 100000,  // Praticamente ilimitado
+} as const
+
 // Emojis populares organizados por categoria
 const EMOJI_CATEGORIES = [
   { name: "Frequentes", emojis: ["😊", "😂", "❤️", "👍", "🔥", "✨", "🎉", "💯", "🙏", "😍", "🥰", "😘", "🤔", "👀", "💪", "🤝"] },
@@ -75,7 +82,7 @@ const EMOJI_CATEGORIES = [
   { name: "Objetos", emojis: ["💼", "📱", "💻", "📧", "📞", "💰", "💵", "📝", "✅", "❌", "⭐", "🌟", "💡", "🎯", "🚀", "⏰"] },
 ]
 
-export function Composer({ onSend, disabled, templates = [], initialText = "", onTextChange, externalFiles = [], onExternalFilesProcessed, apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000", replyTo, onCancelReply }: ComposerProps) {
+export function Composer({ onSend, disabled, templates = [], initialText = "", onTextChange, externalFiles = [], onExternalFilesProcessed, apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000", availableChannels, selectedChannel, onChannelChange, replyTo, onCancelReply }: ComposerProps) {
   const [text, setText] = useState(initialText)
   const [attachments, setAttachments] = useState<AttachmentPreview[]>([])
   const [showTemplates, setShowTemplates] = useState(false)
@@ -93,6 +100,14 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const audioPreviewRef = useRef<HTMLAudioElement | null>(null)
   const emojiPickerRef = useRef<HTMLDivElement>(null)
+
+  // Limite de caracteres baseado no canal selecionado
+  const charLimit = selectedChannel && selectedChannel in CHAR_LIMITS
+    ? CHAR_LIMITS[selectedChannel as keyof typeof CHAR_LIMITS]
+    : CHAR_LIMITS.telegram  // Default para Telegram
+  const charCount = text.length
+  const isOverLimit = charCount > charLimit
+  const isNearLimit = charCount > charLimit * 0.9  // Avisa quando passa de 90%
 
   // Sync with external initialText and resize
   useEffect(() => {
@@ -129,6 +144,8 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
   const handleSubmit = useCallback(() => {
     const trimmed = text.trim()
     if ((!trimmed && attachments.length === 0) || disabled) return
+    // Bloqueia se texto excede limite de caracteres
+    if (trimmed.length > charLimit) return
 
     onSend(trimmed, attachments.map(a => a.file))
     updateText("")
@@ -137,7 +154,7 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto"
     }
-  }, [text, attachments, disabled, onSend, updateText])
+  }, [text, attachments, disabled, onSend, updateText, charLimit])
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
@@ -617,14 +634,23 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
             </button>
           )}
 
+          {/* Contador de caracteres */}
+          {isNearLimit && (
+            <span className={`text-xs font-medium ${isOverLimit ? "text-red-500" : "text-amber-500"}`}>
+              {charCount}/{charLimit}
+            </span>
+          )}
+
           {/* Mic / Send button */}
           {hasContent ? (
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={disabled}
-              className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-violet-500 text-white hover:bg-violet-600 disabled:opacity-50"
-              title="Enviar"
+              disabled={disabled || isOverLimit}
+              className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-white disabled:opacity-50 ${
+                isOverLimit ? "bg-red-500 cursor-not-allowed" : "bg-violet-500 hover:bg-violet-600"
+              }`}
+              title={isOverLimit ? `Texto excede limite de ${charLimit} caracteres` : "Enviar"}
             >
               <Send className="h-5 w-5" />
             </button>

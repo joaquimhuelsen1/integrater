@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useState, useCallback, useMemo } from "react"
 import { Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical, Unlink, MessageSquare, Phone, Briefcase } from "lucide-react"
+import { createClient } from "@/lib/supabase"
 import { MessageItem } from "./message-item"
 import { DateDivider } from "./date-divider"
 import { ServiceMessage } from "./service-message"
@@ -156,6 +157,12 @@ export function ChatView({
   // Reply/Pin states
   const [replyToMessage, setReplyToMessage] = useState<Message | null>(null)
 
+  // Edit/Delete states
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null)
+  const [editText, setEditText] = useState("")
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+
   // Fecha menu ao clicar fora
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -174,6 +181,110 @@ export function ChatView({
 
   // Track messages being translated to avoid duplicates
   const translatingRef = useRef<Set<string>>(new Set())
+
+  // Read receipts - IDs de mensagens que foram lidas
+  const [readMessageIds, setReadMessageIds] = useState<Set<string>>(new Set())
+
+  // Presence status - typing e online
+  const [isTyping, setIsTyping] = useState(false)
+  const [isOnline, setIsOnline] = useState(false)
+  const [lastSeen, setLastSeen] = useState<string | null>(null)
+
+  // Busca eventos de leitura para mensagens outbound
+  useEffect(() => {
+    const fetchReadEvents = async () => {
+      const outboundMsgIds = messages
+        .filter(m => m.direction === "outbound")
+        .map(m => m.id)
+
+      if (outboundMsgIds.length === 0) {
+        setReadMessageIds(new Set())
+        return
+      }
+
+      const supabase = createClient()
+      const { data } = await supabase
+        .from("message_events")
+        .select("message_id")
+        .in("message_id", outboundMsgIds)
+        .eq("type", "read")
+
+      if (data) {
+        setReadMessageIds(new Set(data.map(e => e.message_id)))
+      }
+    }
+
+    fetchReadEvents()
+  }, [messages])
+
+  // Busca e subscreve presence status
+  useEffect(() => {
+    if (!conversationId) {
+      setIsTyping(false)
+      setIsOnline(false)
+      setLastSeen(null)
+      return
+    }
+
+    const supabase = createClient()
+
+    // Busca inicial
+    const fetchPresence = async () => {
+      const { data } = await supabase
+        .from("presence_status")
+        .select("is_typing, is_online, last_seen_at, typing_expires_at")
+        .eq("conversation_id", conversationId)
+        .maybeSingle()
+
+      if (data) {
+        // Verifica se typing expirou (5 segundos)
+        const typingExpired = data.typing_expires_at
+          ? new Date(data.typing_expires_at) < new Date()
+          : true
+
+        setIsTyping(data.is_typing && !typingExpired)
+        setIsOnline(data.is_online || false)
+        setLastSeen(data.last_seen_at)
+      }
+    }
+
+    fetchPresence()
+
+    // Subscreve a mudanças
+    const channel = supabase
+      .channel(`presence-${conversationId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "presence_status",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const data = payload.new as {
+            is_typing?: boolean
+            is_online?: boolean
+            last_seen_at?: string
+            typing_expires_at?: string
+          }
+          if (data) {
+            const typingExpired = data.typing_expires_at
+              ? new Date(data.typing_expires_at) < new Date()
+              : true
+
+            setIsTyping(data.is_typing === true && !typingExpired)
+            setIsOnline(data.is_online || false)
+            setLastSeen(data.last_seen_at || null)
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [conversationId])
 
   // Agrupa mensagens por data para exibir divisores
   const groupedMessages = useMemo(
@@ -240,6 +351,64 @@ export function ChatView({
       console.error("Erro ao desafixar mensagem:", err)
     }
   }, [apiUrl])
+
+  // Handlers para edit/delete
+  const handleEdit = useCallback((message: Message) => {
+    setEditingMessage(message)
+    setEditText(message.text || "")
+  }, [])
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingMessage(null)
+    setEditText("")
+  }, [])
+
+  const handleConfirmEdit = useCallback(async () => {
+    if (!editingMessage || !editText.trim() || isEditing) return
+
+    setIsEditing(true)
+    try {
+      const resp = await fetch(`${apiUrl}/messages/${editingMessage.id}?text=${encodeURIComponent(editText.trim())}`, {
+        method: "PUT",
+      })
+      if (resp.ok) {
+        // Mensagem editada - realtime vai atualizar
+        setEditingMessage(null)
+        setEditText("")
+      } else {
+        console.error("Erro ao editar mensagem")
+      }
+    } catch (err) {
+      console.error("Erro ao editar mensagem:", err)
+    } finally {
+      setIsEditing(false)
+    }
+  }, [apiUrl, editingMessage, editText, isEditing])
+
+  const handleDelete = useCallback(async (messageId: string) => {
+    if (isDeleting) return
+
+    // Confirmação simples
+    if (!window.confirm("Tem certeza que deseja deletar esta mensagem?")) {
+      return
+    }
+
+    setIsDeleting(true)
+    try {
+      const resp = await fetch(`${apiUrl}/messages/${messageId}?for_everyone=true`, {
+        method: "DELETE",
+      })
+      if (resp.ok) {
+        // Mensagem deletada - realtime vai atualizar (ou desaparecer da lista)
+      } else {
+        console.error("Erro ao deletar mensagem")
+      }
+    } catch (err) {
+      console.error("Erro ao deletar mensagem:", err)
+    } finally {
+      setIsDeleting(false)
+    }
+  }, [apiUrl, isDeleting])
 
   // Scroll para o final das mensagens (sempre instantâneo, sem animação)
   useEffect(() => {
@@ -529,6 +698,51 @@ export function ChatView({
           </div>
         </div>
       )}
+      {/* Modal de edição de mensagem */}
+      {editingMessage && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          onClick={handleCancelEdit}
+        >
+          <div
+            className="w-full max-w-md rounded-lg bg-white p-4 shadow-xl dark:bg-zinc-800"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center gap-2">
+              <Pencil className="h-5 w-5 text-zinc-500" />
+              <h3 className="font-medium text-zinc-900 dark:text-zinc-100">Editar mensagem</h3>
+            </div>
+            <textarea
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              className="mb-3 w-full resize-none rounded-lg border border-zinc-200 bg-white p-3 text-sm text-zinc-900 focus:border-violet-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+              rows={4}
+              autoFocus
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={handleCancelEdit}
+                className="rounded-lg px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-700"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmEdit}
+                disabled={isEditing || !editText.trim()}
+                className="flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm text-white hover:bg-violet-700 disabled:opacity-50"
+              >
+                {isEditing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Check className="h-4 w-4" />
+                )}
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal foto de perfil em tela cheia */}
       {showAvatarModal && avatarUrl && (
         <div
@@ -584,9 +798,23 @@ export function ChatView({
                 : "?"}
             </div>
           )}
-          <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
-            {displayName || "Conversa"}
-          </h2>
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2">
+              <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
+                {displayName || "Conversa"}
+              </h2>
+              {/* Indicador online */}
+              {isOnline && (
+                <span className="h-2 w-2 rounded-full bg-green-500" title="Online" />
+              )}
+            </div>
+            {/* Typing indicator */}
+            {isTyping && (
+              <span className="text-xs text-zinc-500 animate-pulse">
+                digitando...
+              </span>
+            )}
+          </div>
           {/* Ícone do canal com cor */}
           {channel && (
             <span className="flex items-center justify-center rounded-full p-1">
@@ -851,6 +1079,9 @@ export function ChatView({
                       onUnpin={handleUnpin}
                       isPinned={item.message.is_pinned}
                       replyToMessage={item.message.reply_to_message_id ? messagesById[item.message.reply_to_message_id] : null}
+                      isRead={readMessageIds.has(item.message.id)}
+                      onEdit={handleEdit}
+                      onDelete={handleDelete}
                     />
                   </div>
                 )

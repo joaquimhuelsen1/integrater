@@ -23,7 +23,9 @@ from telethon.tl.types import (
     User, PeerUser, MessageService, Chat, Channel,
     MessageActionChatJoinedByLink, MessageActionChatAddUser,
     MessageActionChatDeleteUser, MessageActionChatJoinedByRequest,
+    UserStatusOnline, UserStatusOffline, UserStatusRecently,
 )
+from telethon.tl.functions.messages import ReadHistoryRequest
 
 # Adiciona shared ao path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -48,11 +50,12 @@ class TelegramWorker:
     async def start(self):
         print("Telegram Worker iniciando...")
 
-        # Inicia loop de sincronização, envio e sync histórico em paralelo
+        # Inicia loop de sincronização, envio, sync histórico e jobs em paralelo
         await asyncio.gather(
             self._sync_loop(),
             self._outbound_loop(),
             self._history_sync_loop(),
+            self._message_jobs_loop(),
         )
 
     async def _sync_loop(self):
@@ -137,6 +140,16 @@ class TelegramWorker:
             async def handler_chat_action(event, _acc_id=acc_id, _owner_id=owner_id):
                 print(f"[DEBUG] Chat action para conta {_acc_id}")
                 await self._handle_chat_action(_acc_id, _owner_id, event)
+
+            # Handler para mensagens lidas (read receipts)
+            @client.on(events.MessageRead)
+            async def handler_message_read(event, _acc_id=acc_id, _owner_id=owner_id):
+                await self._handle_message_read(_acc_id, _owner_id, event)
+
+            # Handler para typing indicator
+            @client.on(events.UserUpdate)
+            async def handler_user_update(event, _acc_id=acc_id, _owner_id=owner_id):
+                await self._handle_user_update(_acc_id, _owner_id, event)
 
             # Inicia heartbeat
             hb = Heartbeat(
@@ -569,9 +582,12 @@ class TelegramWorker:
                 await self._process_incoming_media(client, db, owner_id, message_id, msg)
 
             # Atualiza conversa (sem incrementar unread - é outbound)
+            # Também atualiza preview para mostrar última mensagem enviada
+            preview = (text[:100] + "...") if text and len(text) > 100 else (text or "[Mídia]")
             db.table("conversations").update({
                 "last_message_at": now,
                 "last_channel": "telegram",
+                "last_message_preview": preview,
             }).eq("id", conversation["id"]).execute()
 
             display_text = text[:50] if text else "(mídia)"
@@ -1293,6 +1309,234 @@ class TelegramWorker:
 
             # Marca como failed
             db.table("sync_history_jobs").update({
+                "status": "failed",
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+                "error_message": str(e),
+            }).eq("id", job_id).execute()
+
+    async def _handle_message_read(self, acc_id: str, owner_id: str, event):
+        """Processa evento de leitura de mensagem (read receipts)."""
+        try:
+            # event.outbox = True quando NOSSA mensagem foi lida pelo outro
+            # event.outbox = False quando NÓS lemos mensagem deles
+            if not event.outbox:
+                return  # Só nos interessa quando nossas msgs são lidas
+
+            db = get_supabase()
+
+            # Pega o ID do chat/usuário que leu
+            chat_id = event.chat_id
+            max_id = event.max_id  # Todas as mensagens até esse ID foram lidas
+
+            # Busca mensagens outbound que foram lidas
+            result = db.table("messages").select(
+                "id, external_message_id"
+            ).eq("owner_id", owner_id).lte(
+                "external_message_id", str(max_id)
+            ).eq("direction", "outbound").eq(
+                "channel", "telegram"
+            ).execute()
+
+            now = datetime.now(timezone.utc).isoformat()
+
+            for msg in result.data:
+                # Verifica se já tem evento de read
+                existing = db.table("message_events").select("id").eq(
+                    "message_id", msg["id"]
+                ).eq("type", "read").execute()
+
+                if not existing.data:
+                    # Insere evento de leitura
+                    db.table("message_events").insert({
+                        "owner_id": owner_id,
+                        "message_id": msg["id"],
+                        "type": "read",
+                        "occurred_at": now,
+                        "payload": {"read_by_chat_id": chat_id},
+                    }).execute()
+
+            print(f"[READ] Mensagens até {max_id} marcadas como lidas")
+
+        except Exception as e:
+            print(f"[READ] Erro ao processar evento de leitura: {e}")
+
+    async def _handle_user_update(self, acc_id: str, owner_id: str, event):
+        """Processa eventos de atualização do usuário (typing, online)."""
+        try:
+            db = get_supabase()
+            user_id = event.user_id
+            now = datetime.now(timezone.utc)
+
+            # Busca identity do usuário
+            identity_result = db.table("contact_identities").select(
+                "id"
+            ).eq("owner_id", owner_id).eq(
+                "type", "telegram_user"
+            ).eq("value", str(user_id)).execute()
+
+            if not identity_result.data:
+                return  # Usuário não está em nossos contatos
+
+            identity_id = identity_result.data[0]["id"]
+
+            # Busca conversa do usuário
+            conv_result = db.table("conversations").select("id").eq(
+                "primary_identity_id", identity_id
+            ).execute()
+
+            conversation_id = conv_result.data[0]["id"] if conv_result.data else None
+
+            # Verifica se é evento de typing
+            is_typing = False
+            is_online = None
+            last_seen = None
+
+            if hasattr(event, 'typing') and event.typing:
+                is_typing = True
+                typing_expires = (now + timedelta(seconds=5)).isoformat()
+            else:
+                typing_expires = None
+
+            # Verifica status online
+            if hasattr(event, 'status'):
+                status = event.status
+                if isinstance(status, UserStatusOnline):
+                    is_online = True
+                    last_seen = now.isoformat()
+                elif isinstance(status, UserStatusOffline):
+                    is_online = False
+                    if hasattr(status, 'was_online'):
+                        last_seen = status.was_online.isoformat()
+                elif isinstance(status, UserStatusRecently):
+                    is_online = False
+                    last_seen = now.isoformat()  # Aproximado
+
+            # Upsert em presence_status
+            db.table("presence_status").upsert({
+                "owner_id": owner_id,
+                "contact_identity_id": identity_id,
+                "conversation_id": conversation_id,
+                "is_typing": is_typing,
+                "is_online": is_online if is_online is not None else False,
+                "last_seen_at": last_seen,
+                "typing_expires_at": typing_expires,
+                "updated_at": now.isoformat(),
+            }, on_conflict="owner_id,contact_identity_id").execute()
+
+            if is_typing:
+                print(f"[PRESENCE] Usuário {user_id} está digitando")
+            elif is_online is not None:
+                status_str = "online" if is_online else "offline"
+                print(f"[PRESENCE] Usuário {user_id} está {status_str}")
+
+        except Exception as e:
+            print(f"[PRESENCE] Erro ao processar evento: {e}")
+
+
+    async def _message_jobs_loop(self):
+        """Loop para processar jobs de edição/deleção de mensagens."""
+        while True:
+            try:
+                await self._process_message_jobs()
+                await asyncio.sleep(2)  # Verifica a cada 2s
+            except Exception as e:
+                print(f"Erro no message jobs loop: {e}")
+                await asyncio.sleep(5)
+
+    async def _process_message_jobs(self):
+        """Processa jobs de edit/delete pendentes."""
+        db = get_supabase()
+
+        # Busca jobs pendentes
+        result = db.table("message_jobs").select(
+            "id, owner_id, message_id, integration_account_id, action, payload, status"
+        ).eq("status", "pending").order("created_at").limit(10).execute()
+
+        for job in result.data:
+            await self._process_single_message_job(db, job)
+
+    async def _process_single_message_job(self, db, job: dict):
+        """Processa um job de edit ou delete."""
+        job_id = job["id"]
+        action = job["action"]
+        acc_id = job.get("integration_account_id")
+        payload = job.get("payload", {})
+
+        print(f"[JOB] Processando {action} job {job_id}")
+
+        # Marca como processing
+        db.table("message_jobs").update({
+            "status": "processing",
+        }).eq("id", job_id).execute()
+
+        try:
+            # Verifica se temos cliente conectado
+            if not acc_id or acc_id not in self.clients:
+                raise Exception(f"Conta {acc_id} não conectada")
+
+            client = self.clients[acc_id]
+            channel = payload.get("channel", "telegram")
+
+            # Só processa Telegram por enquanto
+            if channel != "telegram":
+                raise Exception(f"Canal {channel} não suportado para {action}")
+
+            external_msg_id = payload.get("external_message_id")
+            if not external_msg_id or external_msg_id.startswith("local-") or external_msg_id.startswith("error-"):
+                raise Exception(f"Mensagem não tem ID externo válido: {external_msg_id}")
+
+            msg_id = int(external_msg_id)
+
+            # Busca a conversa para pegar o chat_id
+            message_result = db.table("messages").select(
+                "conversation_id, identity_id"
+            ).eq("id", job["message_id"]).single().execute()
+
+            if not message_result.data:
+                raise Exception("Mensagem não encontrada")
+
+            identity_id = message_result.data["identity_id"]
+
+            # Busca telegram_user_id da identity
+            identity_result = db.table("contact_identities").select(
+                "value"
+            ).eq("id", identity_id).single().execute()
+
+            if not identity_result.data:
+                raise Exception("Identity não encontrada")
+
+            telegram_user_id = int(identity_result.data["value"])
+
+            if action == "edit":
+                new_text = payload.get("new_text", "")
+                if not new_text:
+                    raise Exception("Texto vazio para edição")
+
+                # Edita mensagem no Telegram
+                await client.edit_message(telegram_user_id, msg_id, new_text)
+                print(f"[JOB] Mensagem {msg_id} editada no Telegram")
+
+            elif action == "delete":
+                # Deleta mensagem no Telegram
+                await client.delete_messages(telegram_user_id, [msg_id])
+                print(f"[JOB] Mensagem {msg_id} deletada no Telegram")
+
+            else:
+                raise Exception(f"Ação desconhecida: {action}")
+
+            # Marca como completed
+            db.table("message_jobs").update({
+                "status": "completed",
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", job_id).execute()
+
+        except Exception as e:
+            import traceback
+            print(f"[JOB] Erro no job {job_id}: {e}")
+            traceback.print_exc()
+
+            # Marca como failed
+            db.table("message_jobs").update({
                 "status": "failed",
                 "processed_at": datetime.now(timezone.utc).isoformat(),
                 "error_message": str(e),

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Check, Download, FileText, Image as ImageIcon, X, ZoomIn, ZoomOut, Mic, Play, Pause, FileAudio, Loader2, MessageSquare, Mail, Phone, Reply, Pin } from "lucide-react"
+import { Check, CheckCheck, Download, FileText, Image as ImageIcon, X, ZoomIn, ZoomOut, Mic, Play, Pause, FileAudio, Loader2, MessageSquare, Mail, Phone, Reply, Pin, Pencil, Trash2 } from "lucide-react"
 import { createClient } from "@/lib/supabase"
 import type { Message, Translation } from "./chat-view"
 
@@ -29,6 +29,9 @@ interface MessageItemProps {
   onUnpin?: (messageId: string) => void
   isPinned?: boolean
   replyToMessage?: Message | null
+  isRead?: boolean  // Se a mensagem foi lida pelo destinatário
+  onEdit?: (message: Message) => void
+  onDelete?: (messageId: string) => void
 }
 
 export function MessageItem({
@@ -43,6 +46,9 @@ export function MessageItem({
   onUnpin,
   isPinned = false,
   replyToMessage,
+  isRead = false,
+  onEdit,
+  onDelete,
 }: MessageItemProps) {
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({})
   const [audioUrls, setAudioUrls] = useState<Record<string, string>>({})
@@ -539,7 +545,9 @@ export function MessageItem({
           )}
           <span>{time}</span>
           {isOutbound && (
-            <Check className="h-3 w-3" />
+            isRead
+              ? <CheckCheck className="h-3 w-3 text-blue-500" title="Lida" />
+              : <Check className="h-3 w-3" title="Enviada" />
           )}
         </div>
           </div>
@@ -581,6 +589,28 @@ export function MessageItem({
             >
               <Pin className="h-4 w-4 text-zinc-500" />
               <span>Fixar</span>
+            </button>
+          )}
+
+          {/* Editar (só mensagens outbound com texto) */}
+          {isOutbound && message.text && onEdit && (
+            <button
+              onClick={() => { onEdit(message); setShowContextMenu(false) }}
+              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+            >
+              <Pencil className="h-4 w-4 text-zinc-500" />
+              <span>Editar</span>
+            </button>
+          )}
+
+          {/* Deletar (só mensagens outbound) */}
+          {isOutbound && onDelete && (
+            <button
+              onClick={() => { onDelete(message.id); setShowContextMenu(false) }}
+              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+            >
+              <Trash2 className="h-4 w-4" />
+              <span>Deletar</span>
             </button>
           )}
         </div>
