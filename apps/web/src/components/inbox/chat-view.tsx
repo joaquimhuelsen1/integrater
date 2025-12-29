@@ -172,6 +172,8 @@ export function ChatView({
 }: ChatViewProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+  const isNearBottomRef = useRef(true)
+  const prevMessagesLengthRef = useRef(0)
   const [showTranslation, setShowTranslation] = useState(false)
   const [translations, setTranslations] = useState<Record<string, Translation>>({})
   const [isTranslating, setIsTranslating] = useState(false)
@@ -443,10 +445,21 @@ export function ChatView({
     }
   }, [apiUrl, isDeleting, onMessageDelete])
 
-  // Scroll para o final das mensagens (sempre instantâneo, sem animação)
+  // Scroll condicional - só quando apropriado (não interrompe leitura)
   useEffect(() => {
     if (messages.length === 0) return
-    messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
+
+    const isFirstLoad = prevMessagesLengthRef.current === 0
+    const hasNewMessage = messages.length > prevMessagesLengthRef.current
+    const lastMessage = messages[messages.length - 1]
+    const isOwnMessage = lastMessage?.direction === "outbound"
+
+    // Scroll se: primeira carga, ou nova msg e (perto do final ou msg própria)
+    if (isFirstLoad || (hasNewMessage && (isNearBottomRef.current || isOwnMessage))) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
+    }
+
+    prevMessagesLengthRef.current = messages.length
   }, [messages])
 
   // Drag and drop handlers
@@ -1079,7 +1092,13 @@ export function ChatView({
       {/* Messages + Composer wrapper com background único */}
       <div className="chat-background flex min-h-0 flex-1 flex-col">
         {/* Messages (scroll area) */}
-        <div className="min-h-0 flex-1 overflow-y-auto p-4 md:px-12 lg:px-20">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto p-4 md:px-12 lg:px-20"
+          onScroll={(e) => {
+            const { scrollTop, scrollHeight, clientHeight } = e.currentTarget
+            isNearBottomRef.current = scrollHeight - scrollTop - clientHeight < 100
+          }}
+        >
           {isLoading ? (
             <div className="flex h-full items-center justify-center">
               <span className="text-zinc-500">Carregando...</span>
@@ -1103,7 +1122,7 @@ export function ChatView({
                   />
                 ) : (
                   <div
-                    key={item.message.id}
+                    key={`${item.message.id}-${showTranslation}-${translations[item.message.id]?.translated_text?.length || 0}`}
                     ref={(el) => {
                       if (el) messageRefs.current.set(item.message.id, el)
                       else messageRefs.current.delete(item.message.id)

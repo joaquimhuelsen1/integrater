@@ -545,15 +545,15 @@ export function MessageItem({
           )}
           <span>{time}</span>
           {isOutbound && (
-            // Status da mensagem: sending (spinner) → sent (✓) → read (✓✓ azul) | failed (X vermelho)
+            // Status da mensagem: sending (spinner) → sent (✓) → read (✓✓) | failed (X vermelho)
             message.sending_status === "sending" ? (
-              <Loader2 className="h-3 w-3 animate-spin text-zinc-400" />
+              <Loader2 className="h-4 w-4 animate-spin text-white/70" />
             ) : message.sending_status === "failed" ? (
-              <AlertCircle className="h-3 w-3 text-red-500" />
+              <AlertCircle className="h-4 w-4 text-red-400" />
             ) : isRead ? (
-              <CheckCheck className="h-3 w-3 text-blue-500" />
+              <CheckCheck className="h-4 w-4 text-white/70" />
             ) : (
-              <Check className="h-3 w-3" />
+              <Check className="h-4 w-4 text-white/70" />
             )
           )}
         </div>
