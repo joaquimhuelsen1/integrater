@@ -312,21 +312,42 @@ class TelegramWorker:
 
             telegram_user_id = int(identity_result.data[0]["value"])
 
-            # Resolver entidade (necessário para Telethon encontrar o usuário)
-            try:
-                entity = await client.get_entity(telegram_user_id)
-                print(f"Entidade resolvida: {entity.id}")
-            except Exception as entity_err:
-                print(f"Erro ao resolver entidade {telegram_user_id}: {entity_err}")
-                # Tenta usar InputPeerUser diretamente
-                from telethon.tl.types import InputPeerUser
+            # Buscar access_hash do metadata da identity
+            identity_meta = db.table("contact_identities").select("metadata").eq(
+                "id", message["identity_id"]
+            ).single().execute()
+            access_hash = None
+            if identity_meta.data and identity_meta.data.get("metadata"):
+                access_hash = identity_meta.data["metadata"].get("access_hash")
+
+            # Resolver entidade
+            entity = None
+            from telethon.tl.types import InputPeerUser
+
+            # Primeiro tenta com access_hash salvo (mais confiável)
+            if access_hash:
                 try:
-                    # Busca access_hash do cache se disponível
-                    entity = await client.get_input_entity(telegram_user_id)
-                    print(f"InputEntity obtida: {entity}")
-                except Exception:
-                    print(f"Não foi possível resolver usuário {telegram_user_id}")
-                    raise entity_err
+                    entity = InputPeerUser(telegram_user_id, access_hash)
+                    # Testa se funciona fazendo uma operação simples
+                    await client.get_input_entity(entity)
+                    print(f"Entidade resolvida via access_hash: {telegram_user_id}")
+                except Exception as e:
+                    print(f"access_hash inválido, tentando get_entity: {e}")
+                    entity = None
+
+            # Fallback: tenta resolver via Telethon
+            if not entity:
+                try:
+                    entity = await client.get_entity(telegram_user_id)
+                    print(f"Entidade resolvida via get_entity: {entity.id}")
+                except Exception as entity_err:
+                    print(f"Erro ao resolver entidade {telegram_user_id}: {entity_err}")
+                    try:
+                        entity = await client.get_input_entity(telegram_user_id)
+                        print(f"InputEntity obtida do cache: {entity}")
+                    except Exception:
+                        print(f"Não foi possível resolver usuário {telegram_user_id}")
+                        raise entity_err
 
             sent = None
 
@@ -946,7 +967,17 @@ class TelegramWorker:
         ).eq("value", telegram_user_id).execute()
 
         if result.data:
-            return result.data[0]
+            identity = result.data[0]
+            # Atualiza access_hash se estiver faltando (identidades antigas)
+            existing_meta = db.table("contact_identities").select("metadata").eq("id", identity["id"]).single().execute()
+            if existing_meta.data:
+                meta = existing_meta.data.get("metadata", {}) or {}
+                if not meta.get("access_hash") and hasattr(sender, "access_hash") and sender.access_hash:
+                    meta["telegram_user_id"] = int(telegram_user_id)
+                    meta["access_hash"] = sender.access_hash
+                    db.table("contact_identities").update({"metadata": meta}).eq("id", identity["id"]).execute()
+                    print(f"[IDENTITY] Atualizado access_hash para {telegram_user_id}")
+            return identity
 
         # Baixa avatar apenas para identity NOVA
         avatar_url = None
@@ -954,6 +985,7 @@ class TelegramWorker:
             avatar_url = await self._download_and_store_avatar(client, owner_id, sender)
 
         # Cria apenas identity (sem contato - PRD 5.4)
+        # IMPORTANTE: salvar access_hash para poder enviar mensagens depois
         identity_id = str(uuid4())
         db.table("contact_identities").insert({
             "id": identity_id,
@@ -966,6 +998,8 @@ class TelegramWorker:
                 "last_name": sender.last_name,
                 "username": sender.username,
                 "avatar_url": avatar_url,
+                "telegram_user_id": int(telegram_user_id),
+                "access_hash": sender.access_hash,  # Necessário para enviar msgs
             },
         }).execute()
 
