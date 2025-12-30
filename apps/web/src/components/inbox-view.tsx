@@ -383,7 +383,18 @@ export function InboxView({ userEmail }: InboxViewProps) {
 
     if (!error && data) {
       // Inverte para mostrar em ordem cronológica (antigas primeiro, novas embaixo)
-      setMessages(data.reverse() as Message[])
+      const dbMessages = data.reverse() as Message[]
+
+      // Preservar mensagens em "sending" ou "failed" (optimistic updates)
+      setMessages(prev => {
+        const pendingMsgs = prev.filter(m =>
+          m.sending_status === "sending" || m.sending_status === "failed"
+        )
+        // Remover duplicatas (se a mensagem já foi salva no banco)
+        const dbIds = new Set(dbMessages.map(m => m.id))
+        const uniquePending = pendingMsgs.filter(m => !dbIds.has(m.id))
+        return [...dbMessages, ...uniquePending]
+      })
     }
   }, [supabase])
 
@@ -438,7 +449,18 @@ export function InboxView({ userEmail }: InboxViewProps) {
 
     if (!msgError && msgs) {
       // Inverte para ordem cronológica
-      setMessages(msgs.reverse() as Message[])
+      const dbMessages = msgs.reverse() as Message[]
+
+      // Preservar mensagens em "sending" ou "failed" (optimistic updates)
+      setMessages(prev => {
+        const pendingMsgs = prev.filter(m =>
+          m.sending_status === "sending" || m.sending_status === "failed"
+        )
+        // Remover duplicatas (se a mensagem já foi salva no banco)
+        const dbIds = new Set(dbMessages.map(m => m.id))
+        const uniquePending = pendingMsgs.filter(m => !dbIds.has(m.id))
+        return [...dbMessages, ...uniquePending]
+      })
     }
   }, [supabase, selectedSendChannel])
 
