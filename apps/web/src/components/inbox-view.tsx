@@ -593,9 +593,8 @@ I'll be waiting.`
 
       const data = await response.json()
       const conversationId = data.conversation_id
-      const integrationAccountId = data.integration_account_id
 
-      if (!conversationId || !integrationAccountId) return false
+      if (!conversationId) return false
 
       // Enviar a mensagem de boas-vindas
       const sendResponse = await fetch(`${apiUrl}/messages/send`, {
@@ -608,7 +607,7 @@ I'll be waiting.`
           conversation_id: conversationId,
           text: welcomeTemplate,
           channel: "telegram",
-          integration_account_id: integrationAccountId,
+          // integration_account_id é resolvido pela API baseado no workspace
           attachments: [],
         }),
       })
@@ -838,39 +837,6 @@ I'll be waiting.`
 
     const convDetails = convDetailsList?.[0]
 
-    // Mapear channel para type de integration
-    const channelToType: Record<string, string> = {
-      telegram: "telegram_user",
-      email: "email_imap_smtp",
-      openphone_sms: "openphone",
-    }
-    const integrationType = channelToType[channel] || "telegram_user"
-
-    // Buscar integration_account ativa do tipo correto
-    const { data: integrationAccounts, error: intError } = await supabase
-      .from("integration_accounts")
-      .select("id")
-      .eq("is_active", true)
-      .eq("type", integrationType)
-      .limit(1)
-
-    if (intError) {
-      console.error("Error fetching integration account:", intError)
-      setMessages(prev => prev.map(m =>
-        m.id === tempId ? { ...m, sending_status: "failed" as const } : m
-      ))
-      return
-    }
-
-    const integrationAccount = integrationAccounts?.[0]
-    if (!integrationAccount) {
-      console.error(`No active ${integrationType} integration account found`)
-      setMessages(prev => prev.map(m =>
-        m.id === tempId ? { ...m, sending_status: "failed" as const } : m
-      ))
-      return
-    }
-
     // Usar primary_identity_id ou buscar uma
     let identityId = convDetails?.primary_identity_id
     if (!identityId && convDetails?.contact_id) {
@@ -917,7 +883,7 @@ I'll be waiting.`
           conversation_id: targetConversationId,
           text: text || "",
           channel: channel,
-          integration_account_id: integrationAccount.id,
+          // integration_account_id é resolvido pela API baseado no workspace
           attachments: [],
         }),
       })
