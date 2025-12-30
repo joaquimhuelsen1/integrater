@@ -227,6 +227,7 @@ export function ChatView({
     const outboundMsgIds = messages
       .filter(m => m.direction === "outbound")
       .map(m => m.id)
+      .filter(id => !id.startsWith("temp-"))  // Ignora IDs temporários
 
     if (outboundMsgIds.length === 0) {
       setReadMessageIds(new Set())

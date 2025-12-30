@@ -235,24 +235,6 @@ class TelegramWorker:
     async def _send_telegram_message(self, message: dict):
         """Envia uma mensagem via Telegram (com suporte a mídia)."""
         acc_id = message.get("integration_account_id")
-        msg_id = message.get("id")
-        conv_id = message.get("conversation_id")
-
-        # Debug: buscar workspace da conversa
-        conv_result = get_supabase().table("conversations").select("workspace_id").eq("id", conv_id).single().execute()
-        workspace_id = conv_result.data.get("workspace_id") if conv_result.data else "???"
-
-        # Debug: buscar qual conta está associada ao workspace
-        acc_for_ws = get_supabase().table("integration_accounts").select("id").eq(
-            "workspace_id", workspace_id
-        ).eq("type", "telegram_user").eq("is_active", True).limit(1).execute()
-        expected_acc = acc_for_ws.data[0]["id"] if acc_for_ws.data else "NENHUMA"
-
-        print(f"[SEND] Msg {msg_id[:8]}... conv={conv_id[:8]}...")
-        print(f"[SEND] Workspace: {workspace_id}")
-        print(f"[SEND] Conta na mensagem: {acc_id}")
-        print(f"[SEND] Conta esperada (do workspace): {expected_acc}")
-        print(f"[SEND] Contas disponíveis: {list(self.clients.keys())}")
 
         if not acc_id or acc_id not in self.clients:
             return  # Conta não conectada ainda, tenta novamente depois
