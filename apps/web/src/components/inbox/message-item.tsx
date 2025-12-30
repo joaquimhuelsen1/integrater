@@ -254,6 +254,35 @@ export function MessageItem({
   // Usa tradução se disponível, senão texto original
   const displayText = translation?.translated_text || message.text
 
+  // Regex para detectar URLs
+  const urlRegex = /(https?:\/\/[^\s<]+[^\s<.,;:!?\])}"'])/gi
+
+  // Renderiza texto com links clicáveis
+  const renderTextWithLinks = (text: string) => {
+    const parts = text.split(urlRegex)
+    return parts.map((part, index) => {
+      if (urlRegex.test(part)) {
+        // Reset regex lastIndex (stateful regex)
+        urlRegex.lastIndex = 0
+        return (
+          <a
+            key={index}
+            href={part}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className={`underline hover:opacity-80 ${
+              isOutbound ? "text-purple-100" : "text-blue-600 dark:text-blue-400"
+            }`}
+          >
+            {part}
+          </a>
+        )
+      }
+      return part
+    })
+  }
+
   return (
     <>
       {/* Modal de imagem expandida */}
@@ -494,7 +523,7 @@ export function MessageItem({
             message.channel === "email" && message.subject ? "mt-2 border-t border-dashed pt-2 " + (isOutbound ? "border-purple-400/30" : "border-zinc-300 dark:border-zinc-600") :
             message.attachments?.some(a => isImage(a.mime_type)) ? "mt-2" : ""
           }`}>
-            {displayText}
+            {renderTextWithLinks(displayText)}
           </p>
         )}
         {translation && (
