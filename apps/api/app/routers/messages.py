@@ -49,6 +49,26 @@ async def send_message(
     external_message_id = f"local-{message_id}"
     channel = data.channel.value if data.channel else conv.get("last_channel", "telegram")
 
+    # Buscar integration_account_id se não fornecido
+    integration_account_id = data.integration_account_id
+    if not integration_account_id and channel == "telegram":
+        # Buscar do workspace da conversa
+        workspace_id = conv.get("workspace_id")
+        if workspace_id:
+            int_result = db.table("integration_accounts").select("id").eq(
+                "workspace_id", workspace_id
+            ).eq("type", "telegram_user").eq("is_active", True).limit(1).execute()
+            if int_result.data:
+                integration_account_id = int_result.data[0]["id"]
+
+        # Fallback: primeira conta ativa do owner
+        if not integration_account_id:
+            int_result = db.table("integration_accounts").select("id").eq(
+                "owner_id", str(owner_id)
+            ).eq("type", "telegram_user").eq("is_active", True).limit(1).execute()
+            if int_result.data:
+                integration_account_id = int_result.data[0]["id"]
+
     # Para emails: buscar última mensagem inbound para threading correto
     email_reply_to = None
     email_subject = None
@@ -75,7 +95,7 @@ async def send_message(
         "id": str(message_id),
         "owner_id": str(owner_id),
         "conversation_id": str(data.conversation_id),
-        "integration_account_id": str(data.integration_account_id) if data.integration_account_id else None,
+        "integration_account_id": str(integration_account_id) if integration_account_id else None,
         "identity_id": identity_id,
         "channel": channel,
         "direction": MessageDirection.outbound.value,
