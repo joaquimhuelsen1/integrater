@@ -16,9 +16,9 @@ class MessageBase(BaseModel):
 
 class MessageSendRequest(BaseModel):
     conversation_id: UUID
-    channel: ChannelType
-    integration_account_id: UUID
-    text: str
+    channel: ChannelType | None = None
+    integration_account_id: UUID | None = None  # Resolvido pela API se não fornecido
+    text: str | None = None  # Pode ser vazio se só tem anexo
     attachments: list[UUID] = []
     reply_to_message_id: UUID | None = None
 
