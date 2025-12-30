@@ -891,9 +891,44 @@ I'll be waiting.`
     const { data: sessionData } = await supabase.auth.getSession()
     const token = sessionData?.session?.access_token
 
+    // 1. Upload attachments PRIMEIRO (antes de criar mensagem)
+    const attachmentIds: string[] = []
+    if (attachmentFiles && attachmentFiles.length > 0) {
+      console.log("Uploading attachments FIRST:", attachmentFiles.length)
+      for (const file of attachmentFiles) {
+        const path = await uploadAttachment(file, ownerId)
+        if (path) {
+          console.log("Creating attachment record for:", path)
+          const attachmentId = crypto.randomUUID()
+          const mimeType = inferMimeType(file)
+          console.log(`File ${file.name}: type=${file.type}, inferred=${mimeType}`)
+          const { error: attError } = await supabase
+            .from("attachments")
+            .insert({
+              id: attachmentId,
+              owner_id: ownerId,
+              message_id: null, // Será vinculado pela API
+              storage_bucket: "attachments",
+              storage_path: path,
+              file_name: file.name,
+              mime_type: mimeType,
+              byte_size: file.size,
+              metadata: {},
+            })
+
+          if (attError) {
+            console.error("Attachment insert error:", attError.message)
+          } else {
+            console.log("Attachment created:", attachmentId)
+            attachmentIds.push(attachmentId)
+          }
+        }
+      }
+    }
+
     let messageId: string | null = null
 
-    // 1. Criar mensagem no servidor
+    // 2. Criar mensagem no servidor (com attachment IDs já prontos)
     try {
       const response = await fetch(`${apiUrl}/messages/send`, {
         method: "POST",
@@ -906,7 +941,7 @@ I'll be waiting.`
           text: text || "",
           channel: channel,
           // integration_account_id é resolvido pela API baseado no workspace
-          attachments: [],
+          attachments: attachmentIds, // IDs dos attachments já criados
         }),
       })
 
@@ -928,51 +963,21 @@ I'll be waiting.`
       setMessages(prev => prev.map(m =>
         m.id === tempId ? { ...m, id: messageId!, sending_status: "sent" as const } : m
       ))
+
+      // Recarregar para pegar attachments vinculados
+      if (attachmentIds.length > 0) {
+        if (selectedContactId) {
+          loadContactMessages(selectedContactId)
+        } else {
+          loadMessages(selectedId)
+        }
+      }
     } catch (error) {
       console.error("Error sending message:", error)
       setMessages(prev => prev.map(m =>
         m.id === tempId ? { ...m, sending_status: "failed" as const } : m
       ))
       return
-    }
-
-    // 2. Upload attachments e criar registros (agora temos message_id)
-    if (messageId && attachmentFiles && attachmentFiles.length > 0) {
-      console.log("Processing attachments:", attachmentFiles.length)
-      for (const file of attachmentFiles) {
-        const path = await uploadAttachment(file, ownerId)
-        if (path) {
-          console.log("Creating attachment record for:", path)
-          const attachmentId = crypto.randomUUID()
-          const mimeType = inferMimeType(file)
-          console.log(`File ${file.name}: type=${file.type}, inferred=${mimeType}`)
-          const { error: attError } = await supabase
-            .from("attachments")
-            .insert({
-              id: attachmentId,
-              owner_id: ownerId,
-              message_id: messageId,
-              storage_bucket: "attachments",
-              storage_path: path,
-              file_name: file.name,
-              mime_type: mimeType,
-              byte_size: file.size,
-              metadata: {},
-            })
-
-          if (attError) {
-            console.error("Attachment insert error:", attError.message)
-          } else {
-            console.log("Attachment created:", attachmentId)
-          }
-        }
-      }
-      // Recarregar para pegar attachments
-      if (selectedContactId) {
-        loadContactMessages(selectedContactId)
-      } else {
-        loadMessages(selectedId)
-      }
     }
 
     // Atualizar lista de conversas
