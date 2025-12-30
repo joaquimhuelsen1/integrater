@@ -175,7 +175,13 @@ async def sync_conversation_history(
     conv = conv_result.data
     channel = conv.get("last_channel", "telegram")
 
-    # Busca integration_account para o canal
+    # Busca workspace_id da conversa primeiro
+    conv_ws = db.table("conversations").select("workspace_id").eq(
+        "id", str(conversation_id)
+    ).single().execute()
+    ws_id = conv_ws.data.get("workspace_id") if conv_ws.data else None
+
+    # Busca integration_account para o canal E workspace
     channel_to_type = {
         "telegram": "telegram_user",
         "email": "email_imap_smtp",
@@ -183,9 +189,21 @@ async def sync_conversation_history(
     }
     int_type = channel_to_type.get(channel, "telegram_user")
 
-    int_result = db.table("integration_accounts").select("id").eq(
+    # Primeiro tenta buscar conta do workspace específico
+    int_query = db.table("integration_accounts").select("id").eq(
         "type", int_type
-    ).eq("is_active", True).eq("owner_id", str(owner_id)).limit(1).execute()
+    ).eq("is_active", True).eq("owner_id", str(owner_id))
+
+    if ws_id:
+        int_result = int_query.eq("workspace_id", ws_id).limit(1).execute()
+    else:
+        int_result = int_query.limit(1).execute()
+
+    # Se não encontrou no workspace, tenta qualquer conta ativa (fallback)
+    if not int_result.data:
+        int_result = db.table("integration_accounts").select("id").eq(
+            "type", int_type
+        ).eq("is_active", True).eq("owner_id", str(owner_id)).limit(1).execute()
 
     int_account_id = int_result.data[0]["id"] if int_result.data else None
 
@@ -196,12 +214,6 @@ async def sync_conversation_history(
 
     if pending.data:
         return {"success": True, "message": "Sincronização já em andamento", "job_id": pending.data[0]["id"]}
-
-    # Busca workspace_id da conversa
-    conv_ws = db.table("conversations").select("workspace_id").eq(
-        "id", str(conversation_id)
-    ).single().execute()
-    ws_id = conv_ws.data.get("workspace_id") if conv_ws.data else None
 
     # Cria job de sync
     job_result = db.table("sync_history_jobs").insert({
