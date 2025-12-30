@@ -245,6 +245,18 @@ class TelegramWorker:
         text = message.get("text") or ""
         message_id = message["id"]
 
+        # Verifica idade da mensagem (para aguardar vinculação de attachments)
+        sent_at_str = message.get("sent_at")
+        age_seconds = 999
+        if sent_at_str:
+            from datetime import datetime
+            try:
+                sent_at = datetime.fromisoformat(sent_at_str.replace("Z", "+00:00"))
+                now = datetime.now(timezone.utc)
+                age_seconds = (now - sent_at).total_seconds()
+            except Exception:
+                pass
+
         # Busca attachments da mensagem
         att_result = db.table("attachments").select(
             "id, storage_bucket, storage_path, file_name, mime_type"
@@ -252,22 +264,17 @@ class TelegramWorker:
 
         attachments = att_result.data or []
 
-        # Se não tem texto nem attachments
+        # Se mensagem é muito nova (< 3s) e não tem attachments, aguarda vinculação
+        # (API pode não ter terminado de vincular ainda)
+        if not attachments and age_seconds < 3:
+            print(f"Mensagem {message_id} muito nova ({age_seconds:.1f}s), aguardando vinculação de attachments")
+            return  # Pula, tenta novamente no próximo ciclo
+
+        # Se não tem texto nem attachments após aguardar
         if not text.strip() and not attachments:
-            # Verifica se mensagem é recente (< 10s) - pode estar aguardando upload de attachments
-            sent_at_str = message.get("sent_at")
-            if sent_at_str:
-                from datetime import datetime
-                try:
-                    # Parse ISO format
-                    sent_at = datetime.fromisoformat(sent_at_str.replace("Z", "+00:00"))
-                    now = datetime.now(timezone.utc)
-                    age_seconds = (now - sent_at).total_seconds()
-                    if age_seconds < 10:
-                        print(f"Mensagem {message_id} sem conteúdo, aguardando attachments ({age_seconds:.1f}s)")
-                        return  # Pula, tenta novamente no próximo ciclo
-                except Exception:
-                    pass
+            if age_seconds < 10:
+                print(f"Mensagem {message_id} sem conteúdo, aguardando ({age_seconds:.1f}s)")
+                return  # Pula, tenta novamente no próximo ciclo
 
             print(f"Mensagem {message_id} sem texto nem mídia, marcando como erro")
             db.table("messages").update({

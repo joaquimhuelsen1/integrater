@@ -114,7 +114,7 @@ async def send_message(
         for att_id in data.attachments:
             db.table("attachments").update(
                 {"message_id": str(message_id)}
-            ).eq("id", str(att_id)).execute()
+            ).eq("id", str(att_id)).eq("owner_id", str(owner_id)).execute()
 
     # Atualizar last_message_at e preview da conversa
     preview = (data.text[:100] + "...") if data.text and len(data.text) > 100 else data.text
