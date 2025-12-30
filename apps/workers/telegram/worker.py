@@ -294,16 +294,32 @@ class TelegramWorker:
 
             telegram_user_id = int(identity_result.data[0]["value"])
 
+            # Resolver entidade (necessário para Telethon encontrar o usuário)
+            try:
+                entity = await client.get_entity(telegram_user_id)
+                print(f"Entidade resolvida: {entity.id}")
+            except Exception as entity_err:
+                print(f"Erro ao resolver entidade {telegram_user_id}: {entity_err}")
+                # Tenta usar InputPeerUser diretamente
+                from telethon.tl.types import InputPeerUser
+                try:
+                    # Busca access_hash do cache se disponível
+                    entity = await client.get_input_entity(telegram_user_id)
+                    print(f"InputEntity obtida: {entity}")
+                except Exception:
+                    print(f"Não foi possível resolver usuário {telegram_user_id}")
+                    raise entity_err
+
             sent = None
 
             # Se tem attachments, envia com mídia
             if attachments:
                 sent = await self._send_with_attachments(
-                    client, telegram_user_id, text, attachments, db
+                    client, entity, text, attachments, db
                 )
             else:
                 # Apenas texto
-                sent = await client.send_message(telegram_user_id, text)
+                sent = await client.send_message(entity, text)
 
             if sent:
                 # Atualiza external_message_id com ID real
@@ -373,7 +389,7 @@ class TelegramWorker:
             print(f"Erro na conversão: {e}")
             return None
 
-    async def _send_with_attachments(self, client, telegram_user_id: int, text: str, attachments: list, db):
+    async def _send_with_attachments(self, client, entity, text: str, attachments: list, db):
         """Envia mensagem com attachments (incluindo áudios como voice notes)."""
         from supabase import create_client
         import io
@@ -415,7 +431,7 @@ class TelegramWorker:
                 if is_audio:
                     # Envia como voice note
                     sent = await client.send_file(
-                        telegram_user_id,
+                        entity,
                         file_like,
                         caption=caption,
                         voice_note=True,  # Envia como voice note
@@ -424,7 +440,7 @@ class TelegramWorker:
                 elif is_image:
                     # Envia como foto
                     sent = await client.send_file(
-                        telegram_user_id,
+                        entity,
                         file_like,
                         caption=caption,
                         force_document=False,
@@ -433,7 +449,7 @@ class TelegramWorker:
                 else:
                     # Envia como documento
                     sent = await client.send_file(
-                        telegram_user_id,
+                        entity,
                         file_like,
                         caption=caption,
                         force_document=True,
@@ -445,7 +461,7 @@ class TelegramWorker:
 
         # Se tinha texto mas não conseguiu enviar com mídia, envia só texto
         if not sent and text.strip():
-            sent = await client.send_message(telegram_user_id, text)
+            sent = await client.send_message(entity, text)
 
         return sent
 
