@@ -183,11 +183,17 @@ class TelegramWorker:
                 await client.disconnect()
                 return
 
-            # Handler RAW para capturar msgs instantaneamente (incoming E outgoing)
+            # Handler RAW para capturar msgs instantaneamente (chats privados)
             # Mais rápido que events.NewMessage pois não aguarda parsing do Telethon
             @client.on(events.Raw)
             async def handler_raw(update, _acc_id=acc_id, _owner_id=owner_id, _client=client):
                 await self._handle_raw_update(_acc_id, _owner_id, _client, update)
+
+            # Fallback: eventos.NewMessage para GRUPOS e casos que RAW não pegou
+            # Verifica duplicata antes de processar (RAW pode ter processado primeiro)
+            @client.on(events.NewMessage)
+            async def handler_new_message(event, _acc_id=acc_id, _owner_id=owner_id):
+                await self._handle_new_message_fallback(_acc_id, _owner_id, event)
 
             # Handler para ações de chat (entrada/saída de membros, etc)
             @client.on(events.ChatAction)
@@ -568,6 +574,138 @@ class TelegramWorker:
         db.table("integration_accounts").update({
             "last_error": error,
         }).eq("id", acc_id).execute()
+
+    async def _handle_new_message_fallback(self, acc_id: str, owner_id: str, event):
+        """
+        Fallback handler para mensagens que RAW não pegou.
+
+        Principal uso: GRUPOS (RAW só pega chats privados bem).
+        Para chats privados: verifica se RAW já processou (duplicata).
+        """
+        try:
+            msg = event.message
+            ext_msg_id = str(msg.id)
+            is_outgoing = msg.out
+            direction = "outbound" if is_outgoing else "inbound"
+
+            db = get_supabase()
+
+            # Verifica se já existe (RAW pode ter processado primeiro)
+            existing = db.table("messages").select("id").eq(
+                "external_message_id", ext_msg_id
+            ).eq(
+                "integration_account_id", acc_id
+            ).eq(
+                "direction", direction
+            ).execute()
+
+            if existing.data:
+                return  # RAW já processou, pula
+
+            # Determina se é grupo ou chat privado
+            chat = await event.get_chat()
+            is_group = isinstance(chat, (Chat, Channel))
+
+            if is_group:
+                print(f"[GRUPO] Mensagem em grupo: {chat.title if hasattr(chat, 'title') else chat.id}")
+                await self._process_group_message(acc_id, owner_id, event, chat, is_outgoing)
+            else:
+                # Chat privado que RAW não pegou (raro, mas possível)
+                print(f"[FALLBACK] Chat privado não capturado por RAW: {msg.id}")
+                await self._handle_incoming_message(acc_id, owner_id, event)
+
+        except Exception as e:
+            import traceback
+            print(f"[FALLBACK] Erro: {e}")
+            traceback.print_exc()
+
+    async def _process_group_message(self, acc_id: str, owner_id: str, event, chat, is_outgoing: bool):
+        """Processa mensagem de grupo."""
+        try:
+            msg = event.message
+            text = msg.text or ""
+            has_media = msg.media is not None
+
+            db = get_supabase()
+            client = self.clients[acc_id]
+            workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
+
+            chat_id = str(chat.id)
+
+            # Busca ou cria identity para o grupo
+            identity = await self._get_or_create_group_identity(
+                db, owner_id, chat_id, chat, client, workspace_id
+            )
+
+            # Busca ou cria conversa
+            conversation = await self._get_or_create_conversation(
+                db, owner_id, identity["id"], identity.get("contact_id"), workspace_id
+            )
+
+            # Determina quem enviou (para msgs inbound em grupos)
+            sender_name = None
+            if not is_outgoing:
+                try:
+                    sender = await event.get_sender()
+                    if sender:
+                        sender_name = getattr(sender, 'first_name', None) or getattr(sender, 'username', None)
+                except:
+                    pass
+
+            # Cria mensagem
+            now = datetime.now(timezone.utc).isoformat()
+            message_id = str(uuid4())
+            direction = "outbound" if is_outgoing else "inbound"
+
+            # Adiciona nome do sender no texto para grupos (contexto)
+            display_text = text
+            if sender_name and not is_outgoing:
+                display_text = f"[{sender_name}] {text}" if text else f"[{sender_name}]"
+
+            db.table("messages").insert({
+                "id": message_id,
+                "owner_id": owner_id,
+                "conversation_id": conversation["id"],
+                "integration_account_id": acc_id,
+                "identity_id": identity["id"],
+                "channel": "telegram",
+                "direction": direction,
+                "text": display_text if display_text else None,
+                "sent_at": msg.date.isoformat(),
+                "external_message_id": str(msg.id),
+                "raw_payload": {"sender_name": sender_name} if sender_name else {},
+            }).execute()
+
+            # Processa mídia se houver
+            if has_media:
+                await self._process_incoming_media(client, db, owner_id, message_id, msg)
+
+            # Incrementa unread apenas para inbound
+            if not is_outgoing:
+                db.rpc("increment_unread", {"conv_id": conversation["id"]}).execute()
+
+            # Atualiza conversa
+            preview = (text[:100] + "...") if text and len(text) > 100 else (text or "[Mídia]")
+            if sender_name and not is_outgoing:
+                preview = f"{sender_name}: {preview}"
+
+            update_data = {
+                "last_message_at": now,
+                "last_channel": "telegram",
+                "last_message_preview": preview,
+            }
+            if is_outgoing:
+                update_data["last_outbound_at"] = msg.date.isoformat()
+
+            db.table("conversations").update(update_data).eq("id", conversation["id"]).execute()
+
+            display = text[:30] if text else "(mídia)"
+            print(f"[GRUPO] {'Enviado' if is_outgoing else 'Recebido'}: {display}...")
+
+        except Exception as e:
+            import traceback
+            print(f"[GRUPO] Erro ao processar: {e}")
+            traceback.print_exc()
 
     async def _handle_incoming_message(self, acc_id: str, owner_id: str, event):
         """Processa mensagem recebida."""
