@@ -168,9 +168,13 @@ class TelegramWorker:
                 StringSession(session_string),
                 self.api_id,
                 self.api_hash,
+                receive_updates=True,  # Recebe atualizações de TODAS as sessões
             )
 
             await client.connect()
+
+            # Captura mensagens perdidas de outras sessões
+            await client.catch_up()
 
             if not await client.is_user_authorized():
                 print(f"Conta {acc_id} não autorizada, removendo...")
