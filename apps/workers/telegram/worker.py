@@ -183,13 +183,8 @@ class TelegramWorker:
                 await client.disconnect()
                 return
 
-            # Registra handlers (usa default args para capturar valores)
-            @client.on(events.NewMessage(incoming=True))
-            async def handler_incoming(event, _acc_id=acc_id, _owner_id=owner_id):
-                print(f"[DEBUG] Mensagem recebida para conta {_acc_id}")
-                await self._handle_incoming_message(_acc_id, _owner_id, event)
-
-            # Handler RAW para capturar msgs de TODAS as sessões (inclusive app móvel)
+            # Handler RAW para capturar msgs instantaneamente (incoming E outgoing)
+            # Mais rápido que events.NewMessage pois não aguarda parsing do Telethon
             @client.on(events.Raw)
             async def handler_raw(update, _acc_id=acc_id, _owner_id=owner_id, _client=client):
                 await self._handle_raw_update(_acc_id, _owner_id, _client, update)
