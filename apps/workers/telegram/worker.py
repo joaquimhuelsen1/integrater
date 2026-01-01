@@ -668,18 +668,37 @@ class TelegramWorker:
                         date=update.date,
                         media=None
                     )
+                else:  # Recebida de alguém
+                    print(f"[RAW] UpdateShortMessage IN: id={update.id} user={update.user_id}")
+                    await self._process_raw_incoming_message(
+                        acc_id, owner_id, client,
+                        msg_id=update.id,
+                        user_id=update.user_id,
+                        text=update.message,
+                        date=update.date,
+                        media=None
+                    )
 
             # UpdateNewMessage = msg completa (pode ter mídia)
             elif isinstance(update, UpdateNewMessage):
                 msg = update.message
-                if hasattr(msg, 'out') and msg.out:  # Enviada por mim
-                    # Só processa chats privados
-                    if hasattr(msg, 'peer_id') and isinstance(msg.peer_id, PeerUser):
+                if hasattr(msg, 'peer_id') and isinstance(msg.peer_id, PeerUser):
+                    if hasattr(msg, 'out') and msg.out:  # Enviada por mim
                         print(f"[RAW] UpdateNewMessage OUT: id={msg.id} user={msg.peer_id.user_id}")
                         await self._process_raw_outgoing_message(
                             acc_id, owner_id, client,
                             msg_id=msg.id,
                             user_id=msg.peer_id.user_id,
+                            text=msg.message if hasattr(msg, 'message') else None,
+                            date=msg.date,
+                            media=getattr(msg, 'media', None)
+                        )
+                    elif hasattr(msg, 'from_id') and isinstance(msg.from_id, PeerUser):  # Recebida
+                        print(f"[RAW] UpdateNewMessage IN: id={msg.id} user={msg.from_id.user_id}")
+                        await self._process_raw_incoming_message(
+                            acc_id, owner_id, client,
+                            msg_id=msg.id,
+                            user_id=msg.from_id.user_id,
                             text=msg.message if hasattr(msg, 'message') else None,
                             date=msg.date,
                             media=getattr(msg, 'media', None)
@@ -809,6 +828,125 @@ class TelegramWorker:
 
         display_text = text[:50] if text else "(mídia)"
         print(f"[RAW] Msg outgoing salva: user={user_id} - {display_text}...")
+
+    async def _process_raw_incoming_message(
+        self, acc_id: str, owner_id: str, client: TelegramClient,
+        msg_id: int, user_id: int, text: str, date, media
+    ):
+        """Processa mensagem incoming capturada via Raw update (instantânea)."""
+        db = get_supabase()
+        ext_msg_id = str(msg_id)
+
+        # Verifica se já existe (evita duplicata com handler normal)
+        existing = db.table("messages").select("id").eq(
+            "external_message_id", ext_msg_id
+        ).eq(
+            "integration_account_id", acc_id
+        ).eq(
+            "direction", "inbound"
+        ).execute()
+
+        if existing.data:
+            return  # Já processada (provavelmente pelo handler events.NewMessage)
+
+        telegram_user_id = str(user_id)
+        workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
+
+        # Tenta buscar entity para pegar nome/foto
+        entity = None
+        try:
+            entity = await telegram_op(
+                client.get_entity(user_id),
+                TIMEOUT_TELEGRAM_ENTITY,
+                f"get_entity({user_id})"
+            )
+        except Exception as e:
+            print(f"[RAW-IN] get_entity falhou para {user_id}: {e}")
+
+        # Busca ou cria identity
+        if entity and isinstance(entity, User):
+            identity = await self._get_or_create_identity(
+                db, owner_id, telegram_user_id, entity, client, workspace_id
+            )
+        else:
+            # Fallback: busca existente ou cria mínima
+            identity_query = db.table("contact_identities").select(
+                "id, contact_id"
+            ).eq("value", telegram_user_id)
+            if workspace_id:
+                identity_query = identity_query.eq("workspace_id", workspace_id)
+            else:
+                identity_query = identity_query.eq("owner_id", owner_id)
+            existing_identity = identity_query.execute()
+
+            if existing_identity.data:
+                identity = existing_identity.data[0]
+            else:
+                # Cria identity mínima
+                identity_id = str(uuid4())
+                identity_data = {
+                    "id": identity_id,
+                    "owner_id": owner_id,
+                    "contact_id": None,
+                    "type": "telegram_user",
+                    "value": telegram_user_id,
+                    "metadata": {
+                        "telegram_user_id": int(telegram_user_id),
+                        "display_name": f"User {telegram_user_id}",
+                    },
+                }
+                if workspace_id:
+                    identity_data["workspace_id"] = workspace_id
+                db.table("contact_identities").insert(identity_data).execute()
+                identity = {"id": identity_id, "contact_id": None}
+                print(f"[RAW-IN] Identity mínima criada: {telegram_user_id}")
+
+        # Busca ou cria conversa
+        conversation = await self._get_or_create_conversation(
+            db, owner_id, identity["id"], identity.get("contact_id"), workspace_id
+        )
+
+        # Cria mensagem
+        now = datetime.now(timezone.utc).isoformat()
+        message_id = str(uuid4())
+        text = text or ""
+
+        db.table("messages").insert({
+            "id": message_id,
+            "owner_id": owner_id,
+            "conversation_id": conversation["id"],
+            "integration_account_id": acc_id,
+            "identity_id": identity["id"],
+            "channel": "telegram",
+            "direction": "inbound",
+            "text": text if text else None,
+            "sent_at": date.isoformat() if date else now,
+            "external_message_id": ext_msg_id,
+            "raw_payload": {},
+        }).execute()
+
+        # Processa mídia se houver
+        if media and entity:
+            try:
+                full_msg = await client.get_messages(entity, ids=msg_id)
+                if full_msg:
+                    await self._process_incoming_media(client, db, owner_id, message_id, full_msg)
+            except Exception as e:
+                print(f"[RAW-IN] Erro ao processar mídia: {e}")
+
+        # Incrementa unread_count
+        db.rpc("increment_unread", {"conv_id": conversation["id"]}).execute()
+
+        # Atualiza conversa
+        preview = (text[:100] + "...") if text and len(text) > 100 else (text or "[Mídia]")
+        db.table("conversations").update({
+            "last_message_at": now,
+            "last_channel": "telegram",
+            "last_message_preview": preview,
+        }).eq("id", conversation["id"]).execute()
+
+        display_text = text[:50] if text else "(mídia)"
+        print(f"[RAW-IN] Msg incoming salva: user={user_id} - {display_text}...")
 
     async def _handle_chat_action(self, acc_id: str, owner_id: str, event):
         """Processa ações de chat (entrada/saída de membros, etc)."""
