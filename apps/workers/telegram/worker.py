@@ -686,9 +686,9 @@ class TelegramWorker:
                         )
 
         except Exception as e:
-            # Não loga erro para updates irrelevantes
-            if "out" in str(e).lower() or "message" in str(e).lower():
-                print(f"[RAW] Erro ao processar update: {e}")
+            import traceback
+            print(f"[RAW] Erro ao processar update: {e}")
+            traceback.print_exc()
 
     async def _process_raw_outgoing_message(
         self, acc_id: str, owner_id: str, client: TelegramClient,
@@ -718,6 +718,7 @@ class TelegramWorker:
             "id, contact_id"
         ).eq("owner_id", owner_id).eq("value", telegram_user_id).execute()
 
+        entity = None  # Pode não precisar buscar se já existe
         if existing_identity.data:
             # Identity já existe - usa ela
             identity = existing_identity.data[0]
@@ -766,8 +767,8 @@ class TelegramWorker:
         }).execute()
 
         # Processa mídia se houver
-        if media:
-            # Busca mensagem completa para processar mídia
+        if media and entity:
+            # Busca mensagem completa para processar mídia (só se temos entity)
             try:
                 full_msg = await client.get_messages(entity, ids=msg_id)
                 if full_msg:
@@ -784,9 +785,8 @@ class TelegramWorker:
             "last_outbound_at": date.isoformat() if date else now,
         }).eq("id", conversation["id"]).execute()
 
-        display_name = getattr(entity, 'first_name', 'Unknown')
         display_text = text[:50] if text else "(mídia)"
-        print(f"[RAW] Msg outgoing salva: {display_name} - {display_text}...")
+        print(f"[RAW] Msg outgoing salva: user={user_id} - {display_text}...")
 
     async def _handle_chat_action(self, acc_id: str, owner_id: str, event):
         """Processa ações de chat (entrada/saída de membros, etc)."""
