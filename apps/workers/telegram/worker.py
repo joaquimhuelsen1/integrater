@@ -63,6 +63,17 @@ async def telegram_op(coro, timeout: float, op_name: str):
         return None
 
 
+async def db_async(query_fn):
+    """
+    Executa query do Supabase em thread separada.
+
+    supabase-py é síncrono - bloqueia o event loop.
+    Com to_thread(), executamos em outra thread,
+    liberando o event loop para outras tarefas.
+    """
+    return await asyncio.to_thread(query_fn)
+
+
 class TelegramWorker:
     def __init__(self):
         self.api_id = int(os.environ["TELEGRAM_API_ID"])
@@ -129,7 +140,7 @@ class TelegramWorker:
             try:
                 self.watchdog.ping("outbound")  # Indica que está vivo
                 await self._process_outbound_messages()
-                await asyncio.sleep(2)  # Verifica a cada 2s
+                await asyncio.sleep(1)  # Verifica a cada 1s (mais responsivo)
             except Exception as e:
                 print(f"Erro no outbound loop: {e}")
                 await asyncio.sleep(5)
@@ -325,10 +336,10 @@ class TelegramWorker:
 
         attachments = att_result.data or []
 
-        # Se mensagem é muito nova (< 3s) e não tem attachments, aguarda vinculação
-        # (API pode não ter terminado de vincular ainda)
-        if not attachments and age_seconds < 3:
-            print(f"Mensagem {message_id} muito nova ({age_seconds:.1f}s), aguardando vinculação de attachments")
+        # Se mensagem não tem texto (provavelmente mídia) e não tem attachments, aguarda
+        # Msgs com texto são processadas direto (não precisam esperar attachments)
+        if not text.strip() and not attachments and age_seconds < 3:
+            print(f"Mensagem {message_id} sem texto, aguardando attachments ({age_seconds:.1f}s)")
             return  # Pula, tenta novamente no próximo ciclo
 
         # Se não tem texto nem attachments após aguardar
@@ -742,7 +753,7 @@ class TelegramWorker:
             message_id = str(uuid4())
 
             try:
-                db.table("messages").insert({
+                await db_async(lambda: db.table("messages").insert({
                     "id": message_id,
                     "owner_id": owner_id,
                     "conversation_id": conversation["id"],
@@ -754,7 +765,7 @@ class TelegramWorker:
                     "sent_at": msg.date.isoformat(),
                     "external_message_id": str(msg.id),
                     "raw_payload": {},
-                }).execute()
+                }).execute())
                 print(f"[FALLBACK-PROC] ✅ Mensagem salva: {message_id}")
             except Exception as e:
                 print(f"[FALLBACK-PROC] ❌ ERRO insert: {e}")
@@ -764,18 +775,17 @@ class TelegramWorker:
             if has_media:
                 await self._process_incoming_media(client, db, owner_id, message_id, msg)
 
-            # Atualiza conversa e incrementa unread_count
-            # Usa RPC para incrementar atomicamente
-            db.rpc("increment_unread", {"conv_id": conversation["id"]}).execute()
+            # Incrementa unread_count (async)
+            await db_async(lambda: db.rpc("increment_unread", {"conv_id": conversation["id"]}).execute())
 
             # Preview da mensagem (trunca em 100 chars)
             preview = (text[:100] + "...") if text and len(text) > 100 else (text or "[Mídia]")
 
-            db.table("conversations").update({
+            await db_async(lambda: db.table("conversations").update({
                 "last_message_at": now,
                 "last_channel": "telegram",
                 "last_message_preview": preview,
-            }).eq("id", conversation["id"]).execute()
+            }).eq("id", conversation["id"]).execute())
 
             display_text = text[:50] if text else "(mídia)"
             print(f"Mensagem recebida de {sender.first_name}: {display_text}...")
@@ -931,7 +941,7 @@ class TelegramWorker:
         text = text or ""
 
         try:
-            result = db.table("messages").insert({
+            await db_async(lambda: db.table("messages").insert({
                 "id": message_id,
                 "owner_id": owner_id,
                 "conversation_id": conversation["id"],
@@ -943,7 +953,7 @@ class TelegramWorker:
                 "sent_at": date.isoformat() if date else now,
                 "external_message_id": ext_msg_id,
                 "raw_payload": {},
-            }).execute()
+            }).execute())
             print(f"[RAW] Mensagem inserida: {message_id}")
         except Exception as e:
             print(f"[RAW] ERRO ao inserir mensagem: {e}")
@@ -959,14 +969,14 @@ class TelegramWorker:
             except Exception as e:
                 print(f"[RAW] Erro ao processar mídia: {e}")
 
-        # Atualiza conversa
+        # Atualiza conversa (async)
         preview = (text[:100] + "...") if text and len(text) > 100 else (text or "[Mídia]")
-        db.table("conversations").update({
+        await db_async(lambda: db.table("conversations").update({
             "last_message_at": now,
             "last_channel": "telegram",
             "last_message_preview": preview,
             "last_outbound_at": date.isoformat() if date else now,
-        }).eq("id", conversation["id"]).execute()
+        }).eq("id", conversation["id"]).execute())
 
         display_text = text[:50] if text else "(mídia)"
         print(f"[RAW] Msg outgoing salva: user={user_id} - {display_text}...")
@@ -1054,7 +1064,7 @@ class TelegramWorker:
         text = text or ""
 
         try:
-            result = db.table("messages").insert({
+            await db_async(lambda: db.table("messages").insert({
                 "id": message_id,
                 "owner_id": owner_id,
                 "conversation_id": conversation["id"],
@@ -1066,7 +1076,7 @@ class TelegramWorker:
                 "sent_at": date.isoformat() if date else now,
                 "external_message_id": ext_msg_id,
                 "raw_payload": {},
-            }).execute()
+            }).execute())
             print(f"[RAW-IN] Mensagem inserida: {message_id}")
         except Exception as e:
             print(f"[RAW-IN] ERRO ao inserir mensagem: {e}")
@@ -1081,19 +1091,19 @@ class TelegramWorker:
             except Exception as e:
                 print(f"[RAW-IN] Erro ao processar mídia: {e}")
 
-        # Incrementa unread_count
+        # Incrementa unread_count (async)
         try:
-            db.rpc("increment_unread", {"conv_id": conversation["id"]}).execute()
+            await db_async(lambda: db.rpc("increment_unread", {"conv_id": conversation["id"]}).execute())
         except Exception as e:
             print(f"[RAW-IN] Erro increment_unread: {e}")
 
-        # Atualiza conversa
+        # Atualiza conversa (async)
         preview = (text[:100] + "...") if text and len(text) > 100 else (text or "[Mídia]")
-        db.table("conversations").update({
+        await db_async(lambda: db.table("conversations").update({
             "last_message_at": now,
             "last_channel": "telegram",
             "last_message_preview": preview,
-        }).eq("id", conversation["id"]).execute()
+        }).eq("id", conversation["id"]).execute())
 
         display_text = text[:50] if text else "(mídia)"
         print(f"[RAW-IN] Msg incoming salva: user={user_id} - {display_text}...")
