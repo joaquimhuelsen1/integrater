@@ -24,6 +24,7 @@ from telethon.tl.types import (
     MessageActionChatJoinedByLink, MessageActionChatAddUser,
     MessageActionChatDeleteUser, MessageActionChatJoinedByRequest,
     UserStatusOnline, UserStatusOffline, UserStatusRecently,
+    UpdateShortMessage, UpdateNewMessage, UpdateEditMessage,
 )
 from telethon.tl.functions.messages import ReadHistoryRequest
 
@@ -81,7 +82,6 @@ class TelegramWorker:
             "outbound": self._outbound_loop,
             "history": self._history_sync_loop,
             "jobs": self._message_jobs_loop,
-            "outgoing_sync": self._outgoing_sync_loop,  # Sincroniza msgs enviadas pelo app
         }
 
         for name, factory in loops.items():
@@ -189,13 +189,10 @@ class TelegramWorker:
                 print(f"[DEBUG] Mensagem recebida para conta {_acc_id}")
                 await self._handle_incoming_message(_acc_id, _owner_id, event)
 
-            # Handler para mensagens enviadas pelo próprio usuário (em outros apps)
-            @client.on(events.NewMessage(outgoing=True))
-            async def handler_outgoing(event, _acc_id=acc_id, _owner_id=owner_id):
-                msg = event.message
-                chat_id = event.chat_id
-                print(f"[OUTGOING] conta={_acc_id} chat={chat_id} msg_id={msg.id} private={event.is_private}")
-                await self._handle_outgoing_message(_acc_id, _owner_id, event)
+            # Handler RAW para capturar msgs de TODAS as sessões (inclusive app móvel)
+            @client.on(events.Raw)
+            async def handler_raw(update, _acc_id=acc_id, _owner_id=owner_id, _client=client):
+                await self._handle_raw_update(_acc_id, _owner_id, _client, update)
 
             # Handler para ações de chat (entrada/saída de membros, etc)
             @client.on(events.ChatAction)
@@ -647,83 +644,128 @@ class TelegramWorker:
             print(f"Erro ao processar mensagem: {e}")
             traceback.print_exc()
 
-    async def _handle_outgoing_message(self, acc_id: str, owner_id: str, event):
-        """Processa mensagem enviada pelo próprio usuário (em outros apps)."""
+    async def _handle_raw_update(self, acc_id: str, owner_id: str, client: TelegramClient, update):
+        """
+        Processa RAW updates do Telegram.
+
+        Captura mensagens enviadas de QUALQUER sessão (app móvel, desktop, web).
+        O handler events.NewMessage(outgoing=True) só pega da sessão atual.
+        """
         try:
-            msg = event.message
-            text = msg.text or ""
-            has_media = msg.media is not None
+            # UpdateShortMessage = msg de chat privado (otimizado pelo Telegram)
+            if isinstance(update, UpdateShortMessage):
+                if update.out:  # Enviada por mim
+                    print(f"[RAW] UpdateShortMessage OUT: id={update.id} user={update.user_id}")
+                    await self._process_raw_outgoing_message(
+                        acc_id, owner_id, client,
+                        msg_id=update.id,
+                        user_id=update.user_id,
+                        text=update.message,
+                        date=update.date,
+                        media=None
+                    )
 
-            # Ignora se for mensagem de grupo/canal
-            if not event.is_private:
-                return
-
-            # Verifica se já foi processada pela ferramenta (tem external_message_id real)
-            db = get_supabase()
-            existing = db.table("messages").select("id").eq(
-                "external_message_id", str(msg.id)
-            ).execute()
-
-            if existing.data:
-                print(f"[DEBUG] Mensagem outgoing {msg.id} já existe, ignorando")
-                return
-
-            client = self.clients[acc_id]
-
-            # O destinatário é o chat
-            chat = await event.get_chat()
-            if not isinstance(chat, User):
-                return
-
-            # Busca ou cria identity para o destinatário (com avatar se novo)
-            telegram_user_id = str(chat.id)
-            identity = await self._get_or_create_identity(
-                db, owner_id, telegram_user_id, chat, client
-            )
-
-            # Busca ou cria conversa
-            conversation = await self._get_or_create_conversation(
-                db, owner_id, identity["id"], identity["contact_id"]
-            )
-
-            # Cria mensagem como outbound
-            now = datetime.now(timezone.utc).isoformat()
-            message_id = str(uuid4())
-
-            db.table("messages").insert({
-                "id": message_id,
-                "owner_id": owner_id,
-                "conversation_id": conversation["id"],
-                "integration_account_id": acc_id,
-                "identity_id": identity["id"],
-                "channel": "telegram",
-                "direction": "outbound",
-                "text": text if text else None,
-                "sent_at": msg.date.isoformat(),
-                "external_message_id": str(msg.id),
-                "raw_payload": {},
-            }).execute()
-
-            # Processa mídia se houver
-            if has_media:
-                await self._process_incoming_media(client, db, owner_id, message_id, msg)
-
-            # Atualiza conversa (sem incrementar unread - é outbound)
-            # Também atualiza preview para mostrar última mensagem enviada
-            preview = (text[:100] + "...") if text and len(text) > 100 else (text or "[Mídia]")
-            db.table("conversations").update({
-                "last_message_at": now,
-                "last_channel": "telegram",
-                "last_message_preview": preview,
-            }).eq("id", conversation["id"]).execute()
-
-            display_text = text[:50] if text else "(mídia)"
-            print(f"Mensagem enviada para {chat.first_name}: {display_text}...")
+            # UpdateNewMessage = msg completa (pode ter mídia)
+            elif isinstance(update, UpdateNewMessage):
+                msg = update.message
+                if hasattr(msg, 'out') and msg.out:  # Enviada por mim
+                    # Só processa chats privados
+                    if hasattr(msg, 'peer_id') and isinstance(msg.peer_id, PeerUser):
+                        print(f"[RAW] UpdateNewMessage OUT: id={msg.id} user={msg.peer_id.user_id}")
+                        await self._process_raw_outgoing_message(
+                            acc_id, owner_id, client,
+                            msg_id=msg.id,
+                            user_id=msg.peer_id.user_id,
+                            text=msg.message if hasattr(msg, 'message') else None,
+                            date=msg.date,
+                            media=getattr(msg, 'media', None)
+                        )
 
         except Exception as e:
-            import traceback
-            print(f"Erro ao processar mensagem outgoing: {e}")
-            traceback.print_exc()
+            # Não loga erro para updates irrelevantes
+            if "out" in str(e).lower() or "message" in str(e).lower():
+                print(f"[RAW] Erro ao processar update: {e}")
+
+    async def _process_raw_outgoing_message(
+        self, acc_id: str, owner_id: str, client: TelegramClient,
+        msg_id: int, user_id: int, text: str, date, media
+    ):
+        """Processa mensagem outgoing capturada via Raw update."""
+        db = get_supabase()
+        ext_msg_id = str(msg_id)
+
+        # Verifica se já existe
+        existing = db.table("messages").select("id").eq(
+            "external_message_id", ext_msg_id
+        ).execute()
+
+        if existing.data:
+            return  # Já processada
+
+        # Busca info do usuário destinatário
+        try:
+            entity = await telegram_op(
+                client.get_entity(user_id),
+                TIMEOUT_TELEGRAM_ENTITY,
+                f"get_entity({user_id})"
+            )
+            if not entity or not isinstance(entity, User):
+                return
+        except Exception:
+            return
+
+        # Busca ou cria identity
+        telegram_user_id = str(user_id)
+        identity = await self._get_or_create_identity(
+            db, owner_id, telegram_user_id, entity, client
+        )
+
+        # Busca ou cria conversa
+        conversation = await self._get_or_create_conversation(
+            db, owner_id, identity["id"], identity["contact_id"]
+        )
+
+        # Cria mensagem
+        now = datetime.now(timezone.utc).isoformat()
+        message_id = str(uuid4())
+        text = text or ""
+
+        db.table("messages").insert({
+            "id": message_id,
+            "owner_id": owner_id,
+            "conversation_id": conversation["id"],
+            "integration_account_id": acc_id,
+            "identity_id": identity["id"],
+            "channel": "telegram",
+            "direction": "outbound",
+            "text": text if text else None,
+            "sent_at": date.isoformat() if date else now,
+            "external_message_id": ext_msg_id,
+            "raw_payload": {},
+        }).execute()
+
+        # Processa mídia se houver
+        if media:
+            # Busca mensagem completa para processar mídia
+            try:
+                full_msg = await client.get_messages(entity, ids=msg_id)
+                if full_msg:
+                    await self._process_incoming_media(client, db, owner_id, message_id, full_msg)
+            except Exception as e:
+                print(f"[RAW] Erro ao processar mídia: {e}")
+
+        # Atualiza conversa
+        preview = (text[:100] + "...") if text and len(text) > 100 else (text or "[Mídia]")
+        db.table("conversations").update({
+            "last_message_at": now,
+            "last_channel": "telegram",
+            "last_message_preview": preview,
+            "last_outbound_at": date.isoformat() if date else now,
+        }).eq("id", conversation["id"]).execute()
+
+        display_name = getattr(entity, 'first_name', 'Unknown')
+        display_text = text[:50] if text else "(mídia)"
+        print(f"[RAW] Msg outgoing salva: {display_name} - {display_text}...")
 
     async def _handle_chat_action(self, acc_id: str, owner_id: str, event):
         """Processa ações de chat (entrada/saída de membros, etc)."""
@@ -1604,155 +1646,6 @@ class TelegramWorker:
 
         except Exception as e:
             print(f"[PRESENCE] Erro ao processar evento: {e}")
-
-    async def _outgoing_sync_loop(self):
-        """
-        Loop que sincroniza mensagens enviadas pelo app Telegram.
-
-        Telethon não dispara eventos para msgs de outras sessões,
-        então precisamos checar periodicamente.
-        """
-        # Aguarda contas conectarem
-        await asyncio.sleep(15)
-        print("[OUTGOING-SYNC] Iniciando loop de sincronização")
-
-        while True:
-            try:
-                self.watchdog.ping("outgoing_sync")
-
-                if not self.clients:
-                    await asyncio.sleep(10)
-                    continue
-
-                await self._sync_recent_outgoing_messages()
-                await asyncio.sleep(10)  # A cada 10s
-
-            except Exception as e:
-                print(f"[OUTGOING-SYNC] Erro: {e}")
-                await asyncio.sleep(10)
-
-    async def _sync_recent_outgoing_messages(self):
-        """Sincroniza mensagens outgoing recentes de todas as conversas ativas."""
-        db = get_supabase()
-
-        # Busca conversas com atividade nos últimos 5 minutos
-        five_min_ago = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
-
-        result = db.table("conversations").select(
-            "id, owner_id, primary_identity_id"
-        ).gt("last_message_at", five_min_ago).execute()
-
-        for conv in result.data:
-            try:
-                await self._sync_conversation_outgoing(db, conv)
-            except Exception as e:
-                print(f"[OUTGOING-SYNC] Erro conversa {conv['id']}: {e}")
-
-    async def _sync_conversation_outgoing(self, db, conv: dict):
-        """Sincroniza mensagens outgoing de uma conversa específica."""
-        conv_id = conv["id"]
-        owner_id = conv["owner_id"]
-        identity_id = conv["primary_identity_id"]
-
-        if not identity_id:
-            return
-
-        # Busca telegram_id da identity
-        identity_res = db.table("contact_identities").select(
-            "value, metadata"
-        ).eq("id", identity_id).single().execute()
-
-        if not identity_res.data:
-            return
-
-        telegram_user_id = identity_res.data["value"]
-
-        # Encontra cliente correto (do owner)
-        client = None
-        acc_id = None
-        for aid, info in self.account_info.items():
-            if info["owner_id"] == owner_id and aid in self.clients:
-                client = self.clients[aid]
-                acc_id = aid
-                break
-
-        if not client:
-            return
-
-        # Busca últimas 20 mensagens do Telegram
-        try:
-            entity = await telegram_op(
-                client.get_entity(int(telegram_user_id)),
-                TIMEOUT_TELEGRAM_ENTITY,
-                f"get_entity({telegram_user_id})"
-            )
-            if not entity:
-                return
-
-            messages = await telegram_op(
-                client.get_messages(entity, limit=20),
-                TIMEOUT_TELEGRAM_SEND,
-                f"get_messages({telegram_user_id})"
-            )
-            if not messages:
-                return
-
-            # Filtra apenas outgoing (from_id é None = enviada por mim)
-            for msg in messages:
-                if msg.out:  # msg.out = True significa que EU enviei
-                    await self._ensure_outgoing_message_exists(
-                        db, owner_id, acc_id, conv_id, identity_id, msg, client
-                    )
-
-        except Exception as e:
-            print(f"[OUTGOING-SYNC] Erro ao buscar msgs de {telegram_user_id}: {e}")
-
-    async def _ensure_outgoing_message_exists(self, db, owner_id, acc_id, conv_id, identity_id, msg, client):
-        """Garante que mensagem outgoing existe no banco."""
-        ext_msg_id = str(msg.id)
-
-        # Verifica se já existe
-        existing = db.table("messages").select("id").eq(
-            "external_message_id", ext_msg_id
-        ).eq("conversation_id", conv_id).execute()
-
-        if existing.data:
-            return  # Já existe
-
-        # Cria mensagem
-        text = msg.text or ""
-        has_media = msg.media is not None
-        now = datetime.now(timezone.utc).isoformat()
-        message_id = str(uuid4())
-
-        print(f"[OUTGOING-SYNC] Nova msg outgoing: {ext_msg_id} - {text[:30]}...")
-
-        db.table("messages").insert({
-            "id": message_id,
-            "owner_id": owner_id,
-            "conversation_id": conv_id,
-            "integration_account_id": acc_id,
-            "identity_id": identity_id,
-            "channel": "telegram",
-            "direction": "outbound",
-            "text": text if text else None,
-            "sent_at": msg.date.isoformat(),
-            "external_message_id": ext_msg_id,
-            "raw_payload": {},
-        }).execute()
-
-        # Processa mídia se houver
-        if has_media:
-            await self._process_incoming_media(client, db, owner_id, message_id, msg)
-
-        # Atualiza conversa
-        preview = (text[:100] + "...") if text and len(text) > 100 else (text or "[Mídia]")
-        db.table("conversations").update({
-            "last_message_at": now,
-            "last_channel": "telegram",
-            "last_message_preview": preview,
-            "last_outbound_at": msg.date.isoformat(),
-        }).eq("id", conv_id).execute()
 
     async def _message_jobs_loop(self):
         """Loop para processar jobs de edição/deleção de mensagens."""
