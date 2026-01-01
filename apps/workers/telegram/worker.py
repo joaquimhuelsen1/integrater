@@ -81,6 +81,7 @@ class TelegramWorker:
             "outbound": self._outbound_loop,
             "history": self._history_sync_loop,
             "jobs": self._message_jobs_loop,
+            "outgoing_sync": self._outgoing_sync_loop,  # Sincroniza msgs enviadas pelo app
         }
 
         for name, factory in loops.items():
@@ -191,7 +192,9 @@ class TelegramWorker:
             # Handler para mensagens enviadas pelo próprio usuário (em outros apps)
             @client.on(events.NewMessage(outgoing=True))
             async def handler_outgoing(event, _acc_id=acc_id, _owner_id=owner_id):
-                print(f"[DEBUG] Mensagem enviada pelo usuário para conta {_acc_id}")
+                msg = event.message
+                chat_id = event.chat_id
+                print(f"[OUTGOING] conta={_acc_id} chat={chat_id} msg_id={msg.id} private={event.is_private}")
                 await self._handle_outgoing_message(_acc_id, _owner_id, event)
 
             # Handler para ações de chat (entrada/saída de membros, etc)
@@ -1602,6 +1605,154 @@ class TelegramWorker:
         except Exception as e:
             print(f"[PRESENCE] Erro ao processar evento: {e}")
 
+    async def _outgoing_sync_loop(self):
+        """
+        Loop que sincroniza mensagens enviadas pelo app Telegram.
+
+        Telethon não dispara eventos para msgs de outras sessões,
+        então precisamos checar periodicamente.
+        """
+        # Aguarda contas conectarem
+        await asyncio.sleep(15)
+        print("[OUTGOING-SYNC] Iniciando loop de sincronização")
+
+        while True:
+            try:
+                self.watchdog.ping("outgoing_sync")
+
+                if not self.clients:
+                    await asyncio.sleep(10)
+                    continue
+
+                await self._sync_recent_outgoing_messages()
+                await asyncio.sleep(10)  # A cada 10s
+
+            except Exception as e:
+                print(f"[OUTGOING-SYNC] Erro: {e}")
+                await asyncio.sleep(10)
+
+    async def _sync_recent_outgoing_messages(self):
+        """Sincroniza mensagens outgoing recentes de todas as conversas ativas."""
+        db = get_supabase()
+
+        # Busca conversas com atividade nos últimos 5 minutos
+        five_min_ago = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+
+        result = db.table("conversations").select(
+            "id, owner_id, primary_identity_id"
+        ).gt("last_message_at", five_min_ago).execute()
+
+        for conv in result.data:
+            try:
+                await self._sync_conversation_outgoing(db, conv)
+            except Exception as e:
+                print(f"[OUTGOING-SYNC] Erro conversa {conv['id']}: {e}")
+
+    async def _sync_conversation_outgoing(self, db, conv: dict):
+        """Sincroniza mensagens outgoing de uma conversa específica."""
+        conv_id = conv["id"]
+        owner_id = conv["owner_id"]
+        identity_id = conv["primary_identity_id"]
+
+        if not identity_id:
+            return
+
+        # Busca telegram_id da identity
+        identity_res = db.table("contact_identities").select(
+            "value, metadata"
+        ).eq("id", identity_id).single().execute()
+
+        if not identity_res.data:
+            return
+
+        telegram_user_id = identity_res.data["value"]
+
+        # Encontra cliente correto (do owner)
+        client = None
+        acc_id = None
+        for aid, info in self.account_info.items():
+            if info["owner_id"] == owner_id and aid in self.clients:
+                client = self.clients[aid]
+                acc_id = aid
+                break
+
+        if not client:
+            return
+
+        # Busca últimas 20 mensagens do Telegram
+        try:
+            entity = await telegram_op(
+                client.get_entity(int(telegram_user_id)),
+                TIMEOUT_TELEGRAM_ENTITY,
+                f"get_entity({telegram_user_id})"
+            )
+            if not entity:
+                return
+
+            messages = await telegram_op(
+                client.get_messages(entity, limit=20),
+                TIMEOUT_TELEGRAM_SEND,
+                f"get_messages({telegram_user_id})"
+            )
+            if not messages:
+                return
+
+            # Filtra apenas outgoing (from_id é None = enviada por mim)
+            for msg in messages:
+                if msg.out:  # msg.out = True significa que EU enviei
+                    await self._ensure_outgoing_message_exists(
+                        db, owner_id, acc_id, conv_id, identity_id, msg, client
+                    )
+
+        except Exception as e:
+            print(f"[OUTGOING-SYNC] Erro ao buscar msgs de {telegram_user_id}: {e}")
+
+    async def _ensure_outgoing_message_exists(self, db, owner_id, acc_id, conv_id, identity_id, msg, client):
+        """Garante que mensagem outgoing existe no banco."""
+        ext_msg_id = str(msg.id)
+
+        # Verifica se já existe
+        existing = db.table("messages").select("id").eq(
+            "external_message_id", ext_msg_id
+        ).eq("conversation_id", conv_id).execute()
+
+        if existing.data:
+            return  # Já existe
+
+        # Cria mensagem
+        text = msg.text or ""
+        has_media = msg.media is not None
+        now = datetime.now(timezone.utc).isoformat()
+        message_id = str(uuid4())
+
+        print(f"[OUTGOING-SYNC] Nova msg outgoing: {ext_msg_id} - {text[:30]}...")
+
+        db.table("messages").insert({
+            "id": message_id,
+            "owner_id": owner_id,
+            "conversation_id": conv_id,
+            "integration_account_id": acc_id,
+            "identity_id": identity_id,
+            "channel": "telegram",
+            "direction": "outbound",
+            "text": text if text else None,
+            "sent_at": msg.date.isoformat(),
+            "external_message_id": ext_msg_id,
+            "raw_payload": {},
+        }).execute()
+
+        # Processa mídia se houver
+        if has_media:
+            await self._process_incoming_media(client, db, owner_id, message_id, msg)
+
+        # Atualiza conversa
+        preview = (text[:100] + "...") if text and len(text) > 100 else (text or "[Mídia]")
+        db.table("conversations").update({
+            "last_message_at": now,
+            "last_channel": "telegram",
+            "last_message_preview": preview,
+            "last_outbound_at": msg.date.isoformat(),
+        }).eq("id", conv_id).execute()
 
     async def _message_jobs_loop(self):
         """Loop para processar jobs de edição/deleção de mensagens."""
