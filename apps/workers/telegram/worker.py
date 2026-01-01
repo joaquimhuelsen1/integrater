@@ -729,23 +729,40 @@ class TelegramWorker:
             identity = existing_identity.data[0]
             print(f"[RAW] Identity encontrada no banco: {telegram_user_id}")
         else:
-            # Identity não existe - precisa criar com dados do Telegram
+            # Identity não existe - tenta buscar entity do Telegram
             try:
                 entity = await telegram_op(
                     client.get_entity(user_id),
                     TIMEOUT_TELEGRAM_ENTITY,
                     f"get_entity({user_id})"
                 )
-                if not entity or not isinstance(entity, User):
-                    print(f"[RAW] Não conseguiu obter entity para {user_id}")
-                    return
             except Exception as e:
-                print(f"[RAW] Erro ao buscar entity {user_id}: {e}")
-                return
+                print(f"[RAW] get_entity falhou para {user_id}, criando identity mínima")
+                entity = None
 
-            identity = await self._get_or_create_identity(
-                db, owner_id, telegram_user_id, entity, client, workspace_id
-            )
+            if entity and isinstance(entity, User):
+                identity = await self._get_or_create_identity(
+                    db, owner_id, telegram_user_id, entity, client, workspace_id
+                )
+            else:
+                # Fallback: cria identity mínima sem dados do Telegram
+                identity_id = str(uuid4())
+                identity_data = {
+                    "id": identity_id,
+                    "owner_id": owner_id,
+                    "contact_id": None,
+                    "type": "telegram_user",
+                    "value": telegram_user_id,
+                    "metadata": {
+                        "telegram_user_id": int(telegram_user_id),
+                        "display_name": f"User {telegram_user_id}",
+                    },
+                }
+                if workspace_id:
+                    identity_data["workspace_id"] = workspace_id
+                db.table("contact_identities").insert(identity_data).execute()
+                identity = {"id": identity_id, "contact_id": None}
+                print(f"[RAW] Identity mínima criada: {telegram_user_id}")
 
         # Busca ou cria conversa
         conversation = await self._get_or_create_conversation(
