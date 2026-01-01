@@ -708,53 +708,57 @@ class TelegramWorker:
             traceback.print_exc()
 
     async def _handle_incoming_message(self, acc_id: str, owner_id: str, event):
-        """Processa mensagem recebida."""
+        """Processa mensagem recebida (usado pelo FALLBACK)."""
         try:
             msg = event.message
             text = msg.text or ""
             has_media = msg.media is not None
 
-            print(f"[DEBUG] Processando mensagem: {text[:50] if text else '(mídia)'}, has_media={has_media}")
+            print(f"[FALLBACK-PROC] Iniciando: {text[:30] if text else '(mídia)'}")
+
             sender = await event.get_sender()
-            print(f"[DEBUG] Sender: {sender}")
             if not isinstance(sender, User):
-                print(f"[DEBUG] Sender não é User, ignorando")
-                return  # Ignora mensagens de grupos/canais por enquanto
+                print(f"[FALLBACK-PROC] Sender não é User: {type(sender)}")
+                return
+
+            print(f"[FALLBACK-PROC] Sender: {sender.first_name} ({sender.id})")
 
             db = get_supabase()
             client = self.clients[acc_id]
-
-            # Busca workspace_id da conta ANTES de criar identity
             workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
 
-            # Busca ou cria contact_identity (com avatar se novo)
             telegram_user_id = str(sender.id)
             identity = await self._get_or_create_identity(
                 db, owner_id, telegram_user_id, sender, client, workspace_id
             )
+            print(f"[FALLBACK-PROC] Identity: {identity['id']}")
 
-            # Busca ou cria conversa
             conversation = await self._get_or_create_conversation(
                 db, owner_id, identity["id"], identity["contact_id"], workspace_id
             )
+            print(f"[FALLBACK-PROC] Conversation: {conversation['id']}")
 
-            # Cria mensagem
             now = datetime.now(timezone.utc).isoformat()
             message_id = str(uuid4())
 
-            db.table("messages").insert({
-                "id": message_id,
-                "owner_id": owner_id,
-                "conversation_id": conversation["id"],
-                "integration_account_id": acc_id,
-                "identity_id": identity["id"],
-                "channel": "telegram",
-                "direction": "inbound",
-                "text": text if text else None,
-                "sent_at": msg.date.isoformat(),
-                "external_message_id": str(msg.id),
-                "raw_payload": {},
-            }).execute()
+            try:
+                db.table("messages").insert({
+                    "id": message_id,
+                    "owner_id": owner_id,
+                    "conversation_id": conversation["id"],
+                    "integration_account_id": acc_id,
+                    "identity_id": identity["id"],
+                    "channel": "telegram",
+                    "direction": "inbound",
+                    "text": text if text else None,
+                    "sent_at": msg.date.isoformat(),
+                    "external_message_id": str(msg.id),
+                    "raw_payload": {},
+                }).execute()
+                print(f"[FALLBACK-PROC] ✅ Mensagem salva: {message_id}")
+            except Exception as e:
+                print(f"[FALLBACK-PROC] ❌ ERRO insert: {e}")
+                return
 
             # Processa mídia se houver
             if has_media:
