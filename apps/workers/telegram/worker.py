@@ -33,9 +33,33 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared.db import get_supabase
 from shared.crypto import decrypt
 from shared.heartbeat import Heartbeat
+from shared.watchdog import LoopWatchdog
 from supabase import create_client as create_supabase_client
 
 load_dotenv()
+
+# Timeouts em segundos - operações que passarem disso são canceladas
+TIMEOUT_TELEGRAM_SEND = 30      # Enviar mensagem
+TIMEOUT_TELEGRAM_ENTITY = 15    # Resolver entidade (get_entity)
+TIMEOUT_TELEGRAM_MEDIA = 60     # Upload de mídia/arquivo
+TIMEOUT_DB = 10                 # Operações no Supabase
+
+
+async def telegram_op(coro, timeout: float, op_name: str):
+    """
+    Executa operação Telegram com timeout.
+
+    Se passar do tempo, cancela e retorna None.
+    Isso evita que o worker trave esperando o Telegram.
+    """
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except asyncio.TimeoutError:
+        print(f"[TIMEOUT] {op_name} excedeu {timeout}s")
+        return None
+    except Exception as e:
+        print(f"[ERROR] {op_name}: {e}")
+        return None
 
 
 class TelegramWorker:
@@ -46,22 +70,52 @@ class TelegramWorker:
         self.client_tasks: dict[str, asyncio.Task] = {}  # Tasks para run_until_disconnected
         self.heartbeats: dict[str, Heartbeat] = {}
         self.account_info: dict[str, dict] = {}  # acc_id -> {owner_id, ...}
+        self.watchdog = LoopWatchdog(max_silence=60)  # Reinicia loops travados >60s
 
     async def start(self):
         print("Telegram Worker iniciando...")
 
-        # Inicia loop de sincronização, envio, sync histórico e jobs em paralelo
+        # Cria e registra os loops no watchdog
+        loops = {
+            "sync": self._sync_loop,
+            "outbound": self._outbound_loop,
+            "history": self._history_sync_loop,
+            "jobs": self._message_jobs_loop,
+        }
+
+        for name, factory in loops.items():
+            task = asyncio.create_task(factory())
+            self.watchdog.register(name, task, factory)
+
+        # Roda watchdog + heartbeat global (nunca termina)
         await asyncio.gather(
-            self._sync_loop(),
-            self._outbound_loop(),
-            self._history_sync_loop(),
-            self._message_jobs_loop(),
+            self.watchdog.monitor(),
+            self._global_heartbeat_loop(),
         )
+
+    async def _global_heartbeat_loop(self):
+        """Heartbeat global independente dos loops."""
+        db = get_supabase()
+        while True:
+            try:
+                status = self.watchdog.get_status()
+                db.table("worker_heartbeats").upsert({
+                    "integration_account_id": "00000000-0000-0000-0000-000000000000",
+                    "owner_id": "00000000-0000-0000-0000-000000000000",
+                    "worker_type": "telegram-global",
+                    "status": "online",
+                    "last_heartbeat_at": datetime.now(timezone.utc).isoformat(),
+                    "metadata": {"loops": status},
+                }, on_conflict="integration_account_id,worker_type").execute()
+            except Exception as e:
+                print(f"[HEARTBEAT-GLOBAL] Erro: {e}")
+            await asyncio.sleep(15)
 
     async def _sync_loop(self):
         """Loop de sincronização de contas."""
         while True:
             try:
+                self.watchdog.ping("sync")  # Indica que está vivo
                 await self._sync_accounts()
                 await asyncio.sleep(60)
             except Exception as e:
@@ -72,6 +126,7 @@ class TelegramWorker:
         """Loop de envio de mensagens outbound."""
         while True:
             try:
+                self.watchdog.ping("outbound")  # Indica que está vivo
                 await self._process_outbound_messages()
                 await asyncio.sleep(2)  # Verifica a cada 2s
             except Exception as e:
@@ -302,7 +357,7 @@ class TelegramWorker:
             if identity_meta.data and identity_meta.data.get("metadata"):
                 access_hash = identity_meta.data["metadata"].get("access_hash")
 
-            # Resolver entidade
+            # Resolver entidade (COM TIMEOUT para não travar)
             entity = None
             from telethon.tl.types import InputPeerUser
 
@@ -310,37 +365,58 @@ class TelegramWorker:
             if access_hash:
                 try:
                     entity = InputPeerUser(telegram_user_id, access_hash)
-                    # Testa se funciona fazendo uma operação simples
-                    await client.get_input_entity(entity)
-                    print(f"Entidade resolvida via access_hash: {telegram_user_id}")
+                    # Testa se funciona com timeout
+                    test = await telegram_op(
+                        client.get_input_entity(entity),
+                        TIMEOUT_TELEGRAM_ENTITY,
+                        f"get_input_entity({telegram_user_id})"
+                    )
+                    if test:
+                        print(f"Entidade resolvida via access_hash: {telegram_user_id}")
+                    else:
+                        entity = None
                 except Exception as e:
                     print(f"access_hash inválido, tentando get_entity: {e}")
                     entity = None
 
-            # Fallback: tenta resolver via Telethon
+            # Fallback: tenta resolver via Telethon (COM TIMEOUT)
             if not entity:
-                try:
-                    entity = await client.get_entity(telegram_user_id)
+                entity = await telegram_op(
+                    client.get_entity(telegram_user_id),
+                    TIMEOUT_TELEGRAM_ENTITY,
+                    f"get_entity({telegram_user_id})"
+                )
+                if entity:
                     print(f"Entidade resolvida via get_entity: {entity.id}")
-                except Exception as entity_err:
-                    print(f"Erro ao resolver entidade {telegram_user_id}: {entity_err}")
-                    try:
-                        entity = await client.get_input_entity(telegram_user_id)
+                else:
+                    # Última tentativa: cache
+                    entity = await telegram_op(
+                        client.get_input_entity(telegram_user_id),
+                        TIMEOUT_TELEGRAM_ENTITY,
+                        f"get_input_entity_cache({telegram_user_id})"
+                    )
+                    if entity:
                         print(f"InputEntity obtida do cache: {entity}")
-                    except Exception:
+                    else:
                         print(f"Não foi possível resolver usuário {telegram_user_id}")
-                        raise entity_err
+                        return  # Tenta novamente no próximo ciclo
 
             sent = None
 
-            # Se tem attachments, envia com mídia
+            # Se tem attachments, envia com mídia (COM TIMEOUT)
             if attachments:
-                sent = await self._send_with_attachments(
-                    client, entity, text, attachments, db
+                sent = await telegram_op(
+                    self._send_with_attachments(client, entity, text, attachments, db),
+                    TIMEOUT_TELEGRAM_MEDIA,
+                    f"send_with_attachments({telegram_user_id})"
                 )
             else:
-                # Apenas texto
-                sent = await client.send_message(entity, text)
+                # Apenas texto (COM TIMEOUT)
+                sent = await telegram_op(
+                    client.send_message(entity, text),
+                    TIMEOUT_TELEGRAM_SEND,
+                    f"send_message({telegram_user_id})"
+                )
 
             if sent:
                 # Atualiza external_message_id com ID real
@@ -1027,6 +1103,7 @@ class TelegramWorker:
 
         while True:
             try:
+                self.watchdog.ping("history")  # Indica que está vivo
                 # Só processa se tiver pelo menos 1 conta conectada
                 if not self.clients:
                     await asyncio.sleep(5)
@@ -1529,6 +1606,7 @@ class TelegramWorker:
 
         while True:
             try:
+                self.watchdog.ping("jobs")  # Indica que está vivo
                 # Só processa se tiver conta conectada
                 if not self.clients:
                     await asyncio.sleep(2)
