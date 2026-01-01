@@ -698,9 +698,13 @@ class TelegramWorker:
         db = get_supabase()
         ext_msg_id = str(msg_id)
 
-        # Verifica se já existe
+        # Verifica se já existe (filtra por conta E direção - msg_id não é único global)
         existing = db.table("messages").select("id").eq(
             "external_message_id", ext_msg_id
+        ).eq(
+            "integration_account_id", acc_id
+        ).eq(
+            "direction", "outbound"
         ).execute()
 
         if existing.data:
