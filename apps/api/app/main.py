@@ -1,4 +1,6 @@
 import os
+import logging
+import sys
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -35,6 +37,28 @@ from app.routers import (
 )
 
 settings = get_settings()
+
+# === Configuração de Logging ===
+# Nível baseado em DEV_MODE: DEBUG em dev, INFO em produção
+log_level = logging.DEBUG if settings.dev_mode else logging.INFO
+
+logging.basicConfig(
+    level=log_level,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+# Reduz verbosidade de libs externas
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("supabase").setLevel(logging.WARNING)
+logging.getLogger("telethon").setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
+logger.info(f"API iniciando - DEV_MODE={settings.dev_mode}")
 
 # Rate Limiter (100 req/min por IP)
 limiter = Limiter(key_func=get_remote_address)

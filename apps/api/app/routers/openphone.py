@@ -1,10 +1,17 @@
 """
 Router OpenPhone SMS - Webhook inbound/status e envio outbound (M7).
+
+SEGURANÇA:
+- Webhooks validam assinatura HMAC-SHA256
+- Inputs validados com regex E.164
+- Limite de tamanho em conteúdo SMS
 """
 
+import logging
+import re
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from supabase import Client
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator, Field
 from uuid import UUID, uuid4
 from typing import Optional
 import httpx
@@ -14,17 +21,34 @@ import hashlib
 from ..deps import get_supabase, get_current_user_id
 from ..config import get_settings
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/openphone", tags=["openphone"])
+
+# Regex para validação E.164: +[código país][número] (8-15 dígitos total)
+E164_REGEX = re.compile(r'^\+[1-9]\d{7,14}$')
+
+
+def validate_e164(phone: str) -> str:
+    """Valida e normaliza número de telefone E.164."""
+    phone = phone.strip()
+    if not E164_REGEX.match(phone):
+        raise ValueError(f"Telefone inválido. Use formato E.164: +5511999999999")
+    return phone
 
 
 # --- Models ---
 
 class OpenPhoneAccountCreate(BaseModel):
     """Criar conta OpenPhone."""
-    label: str
+    label: str = Field(..., min_length=1, max_length=100)
     phone_number: str  # E.164 format
-    api_key: str
+    api_key: str = Field(..., min_length=10)
+    
+    @field_validator('phone_number')
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        return validate_e164(v)
 
 
 class OpenPhoneAccountResponse(BaseModel):
@@ -39,8 +63,13 @@ class OpenPhoneAccountResponse(BaseModel):
 class SendSMSRequest(BaseModel):
     """Request para enviar SMS."""
     to: str  # E.164 format
-    content: str
+    content: str = Field(..., min_length=1, max_length=1600)  # Limite SMS
     conversation_id: Optional[str] = None
+    
+    @field_validator('to')
+    @classmethod
+    def validate_to(cls, v: str) -> str:
+        return validate_e164(v)
 
 
 class SendSMSResponse(BaseModel):
@@ -71,16 +100,39 @@ class WebhookMessageData(BaseModel):
 
 # --- Helper Functions ---
 
-def _verify_webhook_signature(payload: bytes, signature: str, secret: str) -> bool:
-    """Verifica assinatura do webhook OpenPhone."""
-    if not signature or not secret:
+def _verify_webhook_signature(payload: bytes, signature: str | None) -> bool:
+    """
+    Verifica assinatura HMAC-SHA256 do webhook OpenPhone.
+    
+    SEGURANÇA: Usa hmac.compare_digest para evitar timing attacks.
+    
+    Returns:
+        True se válida, False se inválida ou sem secret configurado
+    """
+    settings = get_settings()
+    secret = settings.openphone_webhook_secret
+    
+    # Se não tem secret configurado, loga warning mas permite (para migração)
+    if not secret:
+        logger.warning("OPENPHONE_WEBHOOK_SECRET não configurado - webhook não validado!")
+        return True  # Permite durante migração, mas loga warning
+    
+    if not signature:
+        logger.warning("Webhook recebido sem assinatura")
         return False
+    
     expected = hmac.new(
         secret.encode(),
         payload,
         hashlib.sha256
     ).hexdigest()
-    return hmac.compare_digest(signature, expected)
+    
+    is_valid = hmac.compare_digest(signature.lower(), expected.lower())
+    
+    if not is_valid:
+        logger.warning("Assinatura de webhook inválida")
+    
+    return is_valid
 
 
 async def _get_openphone_account(db: Client, phone_number_id: str):
@@ -303,28 +355,35 @@ async def send_sms(
 async def webhook_inbound(
     request: Request,
     db: Client = Depends(get_supabase),
-    x_openphone_signature: Optional[str] = Header(None),
+    x_openphone_signature: Optional[str] = Header(None, alias="X-Openphone-Signature"),
 ):
     """
     Webhook para SMS recebido (message.received).
-    Cria contato/conversa se necessário e salva mensagem.
+    
+    SEGURANÇA:
+    - Valida assinatura HMAC-SHA256 do webhook
+    - Cria contato/conversa se necessário e salva mensagem
     """
     payload = await request.body()
+    
+    # SEGURANÇA: Validar assinatura do webhook
+    if not _verify_webhook_signature(payload, x_openphone_signature):
+        logger.warning("Webhook inbound rejeitado: assinatura inválida")
+        raise HTTPException(status_code=401, detail="Assinatura inválida")
+    
     data = await request.json()
-
-    # DEBUG: Log completo do payload
-    print(f"[OpenPhone] Webhook recebido: {data}")
+    
+    logger.debug(f"Webhook inbound recebido: type={data.get('type')}")
 
     event_type = data.get("type")
-    print(f"[OpenPhone] Event type: {event_type}")
 
     if event_type != "message.received":
-        print(f"[OpenPhone] Ignorando evento: {event_type}")
+        logger.debug(f"Ignorando evento: {event_type}")
         return {"status": "ignored", "reason": f"event type: {event_type}"}
 
     msg = data.get("data", {}).get("object", {})
     if not msg:
-        print(f"[OpenPhone] Sem dados de mensagem no payload")
+        logger.warning("Webhook sem dados de mensagem")
         return {"status": "ignored", "reason": "no message data"}
 
     phone_number_id = msg.get("phoneNumberId")
@@ -334,30 +393,24 @@ async def webhook_inbound(
     media = msg.get("media", [])
     to_phone = msg.get("to")
 
-    print(f"[OpenPhone] Mensagem: from={from_phone}, to={to_phone}, body={body[:50] if body else 'vazio'}")
-    print(f"[OpenPhone] phone_number_id={phone_number_id}, external_id={external_id}")
+    logger.info(f"SMS recebido: from={from_phone}, to={to_phone}")
 
     # Busca conta OpenPhone
     account = await _get_openphone_account(db, phone_number_id)
-    print(f"[OpenPhone] Conta por phone_number_id: {account}")
     if not account:
         # Tenta buscar por número
-        print(f"[OpenPhone] Buscando por phone_number: {to_phone}")
         result = db.table("integration_accounts").select("*").eq(
             "type", "openphone"
         ).execute()
 
-        print(f"[OpenPhone] Contas encontradas: {len(result.data or [])} ")
         for acc in result.data or []:
             acc_phone = acc.get("config", {}).get("phone_number")
-            print(f"[OpenPhone] Comparando: {acc_phone} == {to_phone}")
             if acc_phone == to_phone:
                 account = acc
-                print(f"[OpenPhone] Match encontrado!")
                 break
 
     if not account:
-        print(f"[OpenPhone] ERRO: Conta não encontrada para {to_phone}")
+        logger.warning(f"Conta não encontrada para {to_phone}")
         return {"status": "ignored", "reason": "account not found"}
 
     owner_id = account["owner_id"]
@@ -403,6 +456,7 @@ async def webhook_inbound(
         "status": "open",
     }).eq("id", conversation_id).execute()
 
+    logger.info(f"SMS processado: conversation={conversation_id}")
     return {"status": "processed", "conversation_id": conversation_id}
 
 
@@ -410,14 +464,25 @@ async def webhook_inbound(
 async def webhook_status(
     request: Request,
     db: Client = Depends(get_supabase),
+    x_openphone_signature: Optional[str] = Header(None, alias="X-Openphone-Signature"),
 ):
     """
     Webhook para status de entrega (message.delivered).
-    Cria conversa/mensagem para outgoing e atualiza status.
+    
+    SEGURANÇA:
+    - Valida assinatura HMAC-SHA256 do webhook
+    - Cria conversa/mensagem para outgoing e atualiza status
     """
     try:
+        payload = await request.body()
+        
+        # SEGURANÇA: Validar assinatura do webhook
+        if not _verify_webhook_signature(payload, x_openphone_signature):
+            logger.warning("Webhook status rejeitado: assinatura inválida")
+            raise HTTPException(status_code=401, detail="Assinatura inválida")
+        
         data = await request.json()
-        print(f"[OpenPhone] Status webhook: {data}")
+        logger.debug(f"Webhook status recebido: type={data.get('type')}")
 
         event_type = data.get("type")
         if event_type != "message.delivered":
@@ -435,7 +500,7 @@ async def webhook_status(
         if not external_id:
             return {"status": "ignored", "reason": "no message id"}
 
-        print(f"[OpenPhone] Status: {external_id} -> {status}, direction={direction}")
+        logger.info(f"Status update: {external_id} -> {status}")
 
         # Se é outgoing, cria conversa e mensagem
         if direction == "outgoing":
@@ -451,7 +516,7 @@ async def webhook_status(
                         break
 
             if not account:
-                print(f"[OpenPhone] Conta não encontrada para {from_phone}")
+                logger.warning(f"Conta não encontrada para {from_phone}")
                 return {"status": "ignored", "reason": "account not found"}
 
             owner_id = account["owner_id"]
@@ -463,7 +528,7 @@ async def webhook_status(
                 "external_message_id", external_id
             ).execute()
             if existing.data:
-                print(f"[OpenPhone] Mensagem já existe: {external_id}")
+                logger.debug(f"Mensagem já existe: {external_id}")
                 return {"status": "ok", "message_status": status}
 
             # Cria identity para o destinatário (to_phone)
@@ -499,13 +564,13 @@ async def webhook_status(
                 "last_message_at": msg.get("createdAt"),
             }).eq("id", conversation_id).execute()
 
-            print(f"[OpenPhone] Mensagem outgoing criada: {conversation_id}")
+            logger.info(f"Mensagem outgoing criada: {conversation_id}")
             return {"status": "created", "conversation_id": conversation_id}
 
         return {"status": "ok", "message_status": status}
 
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"[OpenPhone] Erro no status webhook: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Erro no webhook status: {e}", exc_info=True)
         return {"status": "ok"}

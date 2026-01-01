@@ -1,7 +1,10 @@
+import logging
 from supabase import create_client, Client
 from fastapi import Depends, HTTPException, Header
 from uuid import UUID
 from .config import get_settings
+
+logger = logging.getLogger(__name__)
 
 _supabase_client: Client | None = None
 
@@ -29,19 +32,27 @@ async def get_current_user_id(
 ) -> UUID:
     """
     Extrai user_id do token JWT.
-    Para desenvolvimento, aceita header X-User-Id como fallback.
+    
+    SEGURANÇA:
+    - Em produção (DEV_MODE=false): SEMPRE valida token JWT
+    - Em desenvolvimento (DEV_MODE=true): aceita owner_id do settings
     """
     settings = get_settings()
 
-    # Dev mode: aceita owner_id direto do settings
-    if settings.owner_id:
+    # APENAS em dev mode explícito: aceita owner_id direto
+    if settings.dev_mode and settings.owner_id:
+        logger.debug("DEV_MODE: usando owner_id do settings")
         return UUID(settings.owner_id)
 
+    # Produção: requer token válido
     if not authorization:
         raise HTTPException(status_code=401, detail="Token não fornecido")
 
     # Remove "Bearer " prefix
-    token = authorization.replace("Bearer ", "")
+    token = authorization.replace("Bearer ", "").strip()
+    
+    if not token:
+        raise HTTPException(status_code=401, detail="Token vazio")
 
     # Verifica token com Supabase
     try:
@@ -49,5 +60,8 @@ async def get_current_user_id(
         if not user or not user.user:
             raise HTTPException(status_code=401, detail="Token inválido")
         return UUID(user.user.id)
-    except Exception:
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"Falha na validação do token: {e}")
         raise HTTPException(status_code=401, detail="Token inválido")

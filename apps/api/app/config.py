@@ -14,6 +14,7 @@ class Settings(BaseSettings):
 
     # Auth
     owner_id: str
+    dev_mode: bool = False  # Se True, bypassa JWT validation (APENAS para dev local)
 
     # Criptografia
     encryption_key: str
@@ -26,6 +27,9 @@ class Settings(BaseSettings):
     gemini_api_key: str
     gemini_flash_model: str = "gemini-3-flash-preview"
     gemini_pro_model: str = "gemini-3-pro-preview"
+
+    # OpenPhone
+    openphone_webhook_secret: str = ""  # Secret para validar webhooks
 
     # CORS (URL do frontend)
     frontend_url: str = "http://localhost:3000"

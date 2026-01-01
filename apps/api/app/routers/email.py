@@ -1,10 +1,16 @@
 """
 Router Email IMAP/SMTP - Gerenciamento de contas e envio (M8).
+
+SEGURANÇA:
+- Validação de email, hostname e portas
+- Senhas criptografadas com AES-256-GCM
+- Logging estruturado sem dados sensíveis
 """
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from uuid import UUID, uuid4
 from typing import Optional, Literal
 from datetime import datetime, timezone, timedelta
@@ -13,7 +19,9 @@ from email.utils import parsedate_to_datetime
 
 from ..deps import get_supabase, get_current_user_id
 from ..utils.crypto import encrypt, decrypt
+from ..utils.validators import validate_email, validate_hostname, validate_port
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/email", tags=["email"])
 
@@ -22,14 +30,29 @@ router = APIRouter(prefix="/email", tags=["email"])
 
 class EmailAccountCreate(BaseModel):
     """Criar conta Email."""
-    label: str
+    label: str = Field(..., min_length=1, max_length=100)
     email: str
-    password: str
+    password: str = Field(..., min_length=1)
     workspace_id: UUID
     imap_host: str = "imap.gmail.com"
     imap_port: int = 993
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
+    
+    @field_validator('email')
+    @classmethod
+    def validate_email_field(cls, v: str) -> str:
+        return validate_email(v)
+    
+    @field_validator('imap_host', 'smtp_host')
+    @classmethod
+    def validate_host(cls, v: str) -> str:
+        return validate_hostname(v)
+    
+    @field_validator('imap_port', 'smtp_port')
+    @classmethod
+    def validate_port_field(cls, v: int) -> int:
+        return validate_port(v)
 
 
 class EmailAccountResponse(BaseModel):
