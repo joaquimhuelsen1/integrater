@@ -139,7 +139,7 @@ class TelegramWorker:
         db = get_supabase()
 
         result = db.table("integration_accounts").select(
-            "id, owner_id, secrets_encrypted, config"
+            "id, owner_id, secrets_encrypted, config, workspace_id"
         ).eq("type", "telegram_user").eq("is_active", True).execute()
 
         active_ids = set()
@@ -223,6 +223,7 @@ class TelegramWorker:
             self.account_info[acc_id] = {
                 "owner_id": owner_id,
                 "config": account.get("config", {}),
+                "workspace_id": account.get("workspace_id"),
             }
 
             # Inicia task para receber eventos
@@ -596,9 +597,12 @@ class TelegramWorker:
                 db, owner_id, telegram_user_id, sender, client
             )
 
+            # Busca workspace_id da conta
+            workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
+
             # Busca ou cria conversa
             conversation = await self._get_or_create_conversation(
-                db, owner_id, identity["id"], identity["contact_id"]
+                db, owner_id, identity["id"], identity["contact_id"], workspace_id
             )
 
             # Cria mensagem
@@ -720,9 +724,12 @@ class TelegramWorker:
             db, owner_id, telegram_user_id, entity, client
         )
 
+        # Busca workspace_id da conta
+        workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
+
         # Busca ou cria conversa
         conversation = await self._get_or_create_conversation(
-            db, owner_id, identity["id"], identity["contact_id"]
+            db, owner_id, identity["id"], identity["contact_id"], workspace_id
         )
 
         # Cria mensagem
@@ -815,9 +822,12 @@ class TelegramWorker:
                 db, owner_id, chat_id, chat, client
             )
 
+            # Busca workspace_id da conta
+            workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
+
             # Busca ou cria conversa
             conversation = await self._get_or_create_conversation(
-                db, owner_id, identity["id"], identity["contact_id"]
+                db, owner_id, identity["id"], identity["contact_id"], workspace_id
             )
 
             # Cria mensagem de serviço
@@ -1112,7 +1122,7 @@ class TelegramWorker:
 
         return {"id": identity_id, "contact_id": None}
 
-    async def _get_or_create_conversation(self, db, owner_id: str, identity_id: str, contact_id: str | None) -> dict:
+    async def _get_or_create_conversation(self, db, owner_id: str, identity_id: str, contact_id: str | None, workspace_id: str = None) -> dict:
         """Busca ou cria conversa. Se contact_id existe, busca por contato. Senão, busca por identity."""
         # Se tem contact_id, busca conversa do contato
         if contact_id:
@@ -1132,7 +1142,7 @@ class TelegramWorker:
 
         # Cria conversa não vinculada (apenas com identity)
         conv_id = str(uuid4())
-        db.table("conversations").insert({
+        conv_data = {
             "id": conv_id,
             "owner_id": owner_id,
             "contact_id": contact_id,  # None para não vinculadas
@@ -1140,7 +1150,10 @@ class TelegramWorker:
             "status": "open",
             "last_channel": "telegram",
             "last_message_at": datetime.now(timezone.utc).isoformat(),
-        }).execute()
+        }
+        if workspace_id:
+            conv_data["workspace_id"] = workspace_id
+        db.table("conversations").insert(conv_data).execute()
 
         return {"id": conv_id}
 
