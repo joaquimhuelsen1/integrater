@@ -926,19 +926,24 @@ class TelegramWorker:
         message_id = str(uuid4())
         text = text or ""
 
-        db.table("messages").insert({
-            "id": message_id,
-            "owner_id": owner_id,
-            "conversation_id": conversation["id"],
-            "integration_account_id": acc_id,
-            "identity_id": identity["id"],
-            "channel": "telegram",
-            "direction": "outbound",
-            "text": text if text else None,
-            "sent_at": date.isoformat() if date else now,
-            "external_message_id": ext_msg_id,
-            "raw_payload": {},
-        }).execute()
+        try:
+            result = db.table("messages").insert({
+                "id": message_id,
+                "owner_id": owner_id,
+                "conversation_id": conversation["id"],
+                "integration_account_id": acc_id,
+                "identity_id": identity["id"],
+                "channel": "telegram",
+                "direction": "outbound",
+                "text": text if text else None,
+                "sent_at": date.isoformat() if date else now,
+                "external_message_id": ext_msg_id,
+                "raw_payload": {},
+            }).execute()
+            print(f"[RAW] Mensagem inserida: {message_id}")
+        except Exception as e:
+            print(f"[RAW] ERRO ao inserir mensagem: {e}")
+            return
 
         # Processa mídia se houver
         if media and entity:
@@ -1044,19 +1049,24 @@ class TelegramWorker:
         message_id = str(uuid4())
         text = text or ""
 
-        db.table("messages").insert({
-            "id": message_id,
-            "owner_id": owner_id,
-            "conversation_id": conversation["id"],
-            "integration_account_id": acc_id,
-            "identity_id": identity["id"],
-            "channel": "telegram",
-            "direction": "inbound",
-            "text": text if text else None,
-            "sent_at": date.isoformat() if date else now,
-            "external_message_id": ext_msg_id,
-            "raw_payload": {},
-        }).execute()
+        try:
+            result = db.table("messages").insert({
+                "id": message_id,
+                "owner_id": owner_id,
+                "conversation_id": conversation["id"],
+                "integration_account_id": acc_id,
+                "identity_id": identity["id"],
+                "channel": "telegram",
+                "direction": "inbound",
+                "text": text if text else None,
+                "sent_at": date.isoformat() if date else now,
+                "external_message_id": ext_msg_id,
+                "raw_payload": {},
+            }).execute()
+            print(f"[RAW-IN] Mensagem inserida: {message_id}")
+        except Exception as e:
+            print(f"[RAW-IN] ERRO ao inserir mensagem: {e}")
+            return
 
         # Processa mídia se houver
         if media and entity:
@@ -1068,7 +1078,10 @@ class TelegramWorker:
                 print(f"[RAW-IN] Erro ao processar mídia: {e}")
 
         # Incrementa unread_count
-        db.rpc("increment_unread", {"conv_id": conversation["id"]}).execute()
+        try:
+            db.rpc("increment_unread", {"conv_id": conversation["id"]}).execute()
+        except Exception as e:
+            print(f"[RAW-IN] Erro increment_unread: {e}")
 
         # Atualiza conversa
         preview = (text[:100] + "...") if text and len(text) > 100 else (text or "[Mídia]")
