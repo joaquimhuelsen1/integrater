@@ -710,30 +710,40 @@ class TelegramWorker:
         if existing.data:
             return  # Já processada
 
-        # Busca info do usuário destinatário
-        try:
-            entity = await telegram_op(
-                client.get_entity(user_id),
-                TIMEOUT_TELEGRAM_ENTITY,
-                f"get_entity({user_id})"
-            )
-            if not entity or not isinstance(entity, User):
-                return
-        except Exception:
-            return
-
-        # Busca ou cria identity
         telegram_user_id = str(user_id)
-        identity = await self._get_or_create_identity(
-            db, owner_id, telegram_user_id, entity, client
-        )
-
-        # Busca workspace_id da conta
         workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
+
+        # Primeiro tenta buscar identity existente no banco (mais rápido e confiável)
+        existing_identity = db.table("contact_identities").select(
+            "id, contact_id"
+        ).eq("owner_id", owner_id).eq("value", telegram_user_id).execute()
+
+        if existing_identity.data:
+            # Identity já existe - usa ela
+            identity = existing_identity.data[0]
+            print(f"[RAW] Identity encontrada no banco: {telegram_user_id}")
+        else:
+            # Identity não existe - precisa criar com dados do Telegram
+            try:
+                entity = await telegram_op(
+                    client.get_entity(user_id),
+                    TIMEOUT_TELEGRAM_ENTITY,
+                    f"get_entity({user_id})"
+                )
+                if not entity or not isinstance(entity, User):
+                    print(f"[RAW] Não conseguiu obter entity para {user_id}")
+                    return
+            except Exception as e:
+                print(f"[RAW] Erro ao buscar entity {user_id}: {e}")
+                return
+
+            identity = await self._get_or_create_identity(
+                db, owner_id, telegram_user_id, entity, client
+            )
 
         # Busca ou cria conversa
         conversation = await self._get_or_create_conversation(
-            db, owner_id, identity["id"], identity["contact_id"], workspace_id
+            db, owner_id, identity["id"], identity.get("contact_id"), workspace_id
         )
 
         # Cria mensagem
