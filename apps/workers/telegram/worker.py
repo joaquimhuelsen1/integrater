@@ -1138,18 +1138,20 @@ class TelegramWorker:
 
     async def _get_or_create_conversation(self, db, owner_id: str, identity_id: str, contact_id: str | None, workspace_id: str = None) -> dict:
         """Busca ou cria conversa. Se contact_id existe, busca por contato. Senão, busca por identity."""
-        # Se tem contact_id, busca conversa do contato
+        # Se tem contact_id, busca conversa do contato (filtra por workspace se fornecido)
         if contact_id:
-            result = db.table("conversations").select(
-                "id"
-            ).eq("owner_id", owner_id).eq("contact_id", contact_id).execute()
+            query = db.table("conversations").select("id").eq("owner_id", owner_id).eq("contact_id", contact_id)
+            if workspace_id:
+                query = query.eq("workspace_id", workspace_id)
+            result = query.execute()
             if result.data:
                 return result.data[0]
 
-        # Busca conversa não vinculada pela identity
-        result = db.table("conversations").select(
-            "id"
-        ).eq("owner_id", owner_id).eq("primary_identity_id", identity_id).is_("contact_id", "null").execute()
+        # Busca conversa não vinculada pela identity (FILTRA POR WORKSPACE!)
+        query = db.table("conversations").select("id").eq("owner_id", owner_id).eq("primary_identity_id", identity_id).is_("contact_id", "null")
+        if workspace_id:
+            query = query.eq("workspace_id", workspace_id)
+        result = query.execute()
 
         if result.data:
             return result.data[0]
