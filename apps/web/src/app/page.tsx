@@ -19,7 +19,9 @@ export default async function RootPage() {
   if (workspaces && workspaces.length > 0) {
     // Redireciona para o default ou primeiro workspace
     const defaultWs = workspaces.find((ws) => ws.is_default) ?? workspaces[0]
-    redirect(`/${defaultWs.id}`)
+    if (defaultWs) {
+      redirect(`/${defaultWs.id}`)
+    }
   }
 
   // Fallback: mostra mensagem se não tem workspaces
