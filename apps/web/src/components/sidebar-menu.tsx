@@ -13,6 +13,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase"
+import { useWorkspace } from "@/contexts/workspace-context"
 
 interface Tag {
   id: string
@@ -35,6 +36,10 @@ export function SidebarMenu({ userEmail, filterTags, onFilterTagsChange, onLogou
   const buttonRef = useRef<HTMLButtonElement>(null)
 
   const supabase = createClient()
+  const { currentWorkspace } = useWorkspace()
+
+  // Base path para links (com workspace na URL)
+  const basePath = currentWorkspace ? `/${currentWorkspace.id}` : ""
 
   const loadTags = useCallback(async () => {
     const { data } = await supabase
@@ -173,7 +178,7 @@ export function SidebarMenu({ userEmail, filterTags, onFilterTagsChange, onLogou
 
             {/* Contacts */}
             <Link
-              href="/contacts"
+              href={`${basePath}/contacts`}
               onClick={() => setIsOpen(false)}
               className="flex items-center gap-3 px-3 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             >
@@ -183,7 +188,7 @@ export function SidebarMenu({ userEmail, filterTags, onFilterTagsChange, onLogou
 
             {/* CRM */}
             <Link
-              href="/crm"
+              href={`${basePath}/crm`}
               onClick={() => setIsOpen(false)}
               className="flex items-center gap-3 px-3 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             >
@@ -193,7 +198,7 @@ export function SidebarMenu({ userEmail, filterTags, onFilterTagsChange, onLogou
 
             {/* Settings */}
             <Link
-              href="/settings"
+              href={`${basePath}/settings`}
               onClick={() => setIsOpen(false)}
               className="flex items-center gap-3 px-3 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             >
@@ -201,7 +206,7 @@ export function SidebarMenu({ userEmail, filterTags, onFilterTagsChange, onLogou
               <span className="text-sm">Configurações</span>
             </Link>
 
-            {/* Logs */}
+            {/* Logs - mantém global */}
             <Link
               href="/logs"
               onClick={() => setIsOpen(false)}

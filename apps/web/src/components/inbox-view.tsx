@@ -62,17 +62,42 @@ function inferMimeType(file: File): string {
 
 interface InboxViewProps {
   userEmail: string
+  workspaceId?: string
 }
 
-export function InboxView({ userEmail }: InboxViewProps) {
+/**
+ * Lê o ID da conversa do hash da URL.
+ * Formato: #conv-123 ou simplesmente #123
+ */
+function getConversationIdFromHash(): string | null {
+  if (typeof window === "undefined") return null
+  const hash = window.location.hash.slice(1) // Remove #
+  if (!hash) return null
+  // Remove prefixo "conv-" se existir
+  return hash.startsWith("conv-") ? hash.slice(5) : hash
+}
+
+/**
+ * Atualiza o hash da URL com o ID da conversa.
+ * Não recarrega a página (instantâneo).
+ */
+function setConversationIdInHash(id: string | null) {
+  if (typeof window === "undefined") return
+  if (id) {
+    window.location.hash = id
+  } else {
+    // Remove hash sem adicionar ao histórico
+    history.replaceState(null, "", window.location.pathname)
+  }
+}
+
+export function InboxView({ userEmail, workspaceId }: InboxViewProps) {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [messages, setMessages] = useState<Message[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
+  // Usa hash da URL para conversa selecionada (não localStorage)
   const [selectedId, setSelectedId] = useState<string | null>(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("selectedConversationId")
-    }
-    return null
+    return getConversationIdFromHash()
   })
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null)
   const [cachedSelectedConversation, setCachedSelectedConversation] = useState<Conversation | null>(null)
@@ -297,13 +322,21 @@ export function InboxView({ userEmail }: InboxViewProps) {
     }
   }, [supabase, selectedId])
 
-  // Persistir conversa selecionada no localStorage
+  // Sincroniza hash da URL com selectedId
   useEffect(() => {
-    if (selectedId) {
-      localStorage.setItem("selectedConversationId", selectedId)
-    } else {
-      localStorage.removeItem("selectedConversationId")
+    setConversationIdInHash(selectedId)
+  }, [selectedId])
+
+  // Escuta mudanças no hash (back/forward do browser)
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hashId = getConversationIdFromHash()
+      if (hashId !== selectedId) {
+        setSelectedId(hashId)
+      }
     }
+    window.addEventListener("hashchange", handleHashChange)
+    return () => window.removeEventListener("hashchange", handleHashChange)
   }, [selectedId])
 
   // Busca com debounce no banco de dados

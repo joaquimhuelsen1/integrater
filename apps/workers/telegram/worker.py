@@ -591,14 +591,14 @@ class TelegramWorker:
             db = get_supabase()
             client = self.clients[acc_id]
 
+            # Busca workspace_id da conta ANTES de criar identity
+            workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
+
             # Busca ou cria contact_identity (com avatar se novo)
             telegram_user_id = str(sender.id)
             identity = await self._get_or_create_identity(
-                db, owner_id, telegram_user_id, sender, client
+                db, owner_id, telegram_user_id, sender, client, workspace_id
             )
-
-            # Busca workspace_id da conta
-            workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
 
             # Busca ou cria conversa
             conversation = await self._get_or_create_conversation(
@@ -713,10 +713,15 @@ class TelegramWorker:
         telegram_user_id = str(user_id)
         workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
 
-        # Primeiro tenta buscar identity existente no banco (mais rápido e confiável)
-        existing_identity = db.table("contact_identities").select(
+        # Primeiro tenta buscar identity existente no banco (FILTRA POR WORKSPACE!)
+        identity_query = db.table("contact_identities").select(
             "id, contact_id"
-        ).eq("owner_id", owner_id).eq("value", telegram_user_id).execute()
+        ).eq("value", telegram_user_id)
+        if workspace_id:
+            identity_query = identity_query.eq("workspace_id", workspace_id)
+        else:
+            identity_query = identity_query.eq("owner_id", owner_id)
+        existing_identity = identity_query.execute()
 
         entity = None  # Pode não precisar buscar se já existe
         if existing_identity.data:
@@ -739,7 +744,7 @@ class TelegramWorker:
                 return
 
             identity = await self._get_or_create_identity(
-                db, owner_id, telegram_user_id, entity, client
+                db, owner_id, telegram_user_id, entity, client, workspace_id
             )
 
         # Busca ou cria conversa
@@ -831,13 +836,13 @@ class TelegramWorker:
                 print(f"[DEBUG] Chat action ignorada (tipo não suportado)")
                 return
 
+            # Busca workspace_id da conta ANTES de criar identity
+            workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
+
             # Busca ou cria identity para o grupo
             identity = await self._get_or_create_group_identity(
-                db, owner_id, chat_id, chat, client
+                db, owner_id, chat_id, chat, client, workspace_id
             )
-
-            # Busca workspace_id da conta
-            workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
 
             # Busca ou cria conversa
             conversation = await self._get_or_create_conversation(
@@ -936,12 +941,17 @@ class TelegramWorker:
         # Ação não suportada
         return None, None, None
 
-    async def _get_or_create_group_identity(self, db, owner_id: str, chat_id: str, chat, client):
+    async def _get_or_create_group_identity(self, db, owner_id: str, chat_id: str, chat, client, workspace_id: str = None):
         """Busca ou cria identity para um grupo do Telegram."""
-        # Verifica se já existe (usa telegram_user com is_group no metadata)
-        existing = db.table("contact_identities").select(
+        # Verifica se já existe (FILTRA POR WORKSPACE!)
+        query = db.table("contact_identities").select(
             "id, contact_id"
-        ).eq("type", "telegram_user").eq("value", chat_id).eq("owner_id", owner_id).execute()
+        ).eq("type", "telegram_user").eq("value", chat_id)
+        if workspace_id:
+            query = query.eq("workspace_id", workspace_id)
+        else:
+            query = query.eq("owner_id", owner_id)
+        existing = query.execute()
 
         if existing.data:
             return existing.data[0]
@@ -951,16 +961,19 @@ class TelegramWorker:
 
         # Cria contato para o grupo
         contact_id = str(uuid4())
-        db.table("contacts").insert({
+        contact_data = {
             "id": contact_id,
             "owner_id": owner_id,
             "display_name": title,
             "metadata": {"is_group": True},
-        }).execute()
+        }
+        if workspace_id:
+            contact_data["workspace_id"] = workspace_id
+        db.table("contacts").insert(contact_data).execute()
 
         # Cria identity (sempre telegram_user, is_group no metadata)
         identity_id = str(uuid4())
-        db.table("contact_identities").insert({
+        identity_data = {
             "id": identity_id,
             "owner_id": owner_id,
             "contact_id": contact_id,
@@ -971,7 +984,10 @@ class TelegramWorker:
                 "title": title,
                 "is_group": True,
             },
-        }).execute()
+        }
+        if workspace_id:
+            identity_data["workspace_id"] = workspace_id
+        db.table("contact_identities").insert(identity_data).execute()
 
         return {"id": identity_id, "contact_id": contact_id}
 
@@ -1088,14 +1104,19 @@ class TelegramWorker:
             print(f"[AVATAR] Erro ao baixar avatar para {entity.id}: {e}")
             return None
 
-    async def _get_or_create_identity(self, db, owner_id: str, telegram_user_id: str, sender: User, client: TelegramClient = None) -> dict:
+    async def _get_or_create_identity(self, db, owner_id: str, telegram_user_id: str, sender: User, client: TelegramClient = None, workspace_id: str = None) -> dict:
         """Busca ou cria identity para o usuário Telegram (com avatar para novos)."""
-        # Busca identity existente
-        result = db.table("contact_identities").select(
+        # Busca identity existente (FILTRA POR WORKSPACE!)
+        query = db.table("contact_identities").select(
             "id, contact_id"
-        ).eq("owner_id", owner_id).eq(
-            "type", "telegram_user"
-        ).eq("value", telegram_user_id).execute()
+        ).eq("type", "telegram_user").eq("value", telegram_user_id)
+
+        if workspace_id:
+            query = query.eq("workspace_id", workspace_id)
+        else:
+            query = query.eq("owner_id", owner_id)
+
+        result = query.execute()
 
         if result.data:
             identity = result.data[0]
@@ -1118,7 +1139,7 @@ class TelegramWorker:
         # Cria apenas identity (sem contato - PRD 5.4)
         # IMPORTANTE: salvar access_hash para poder enviar mensagens depois
         identity_id = str(uuid4())
-        db.table("contact_identities").insert({
+        identity_data = {
             "id": identity_id,
             "owner_id": owner_id,
             "contact_id": None,
@@ -1132,7 +1153,11 @@ class TelegramWorker:
                 "telegram_user_id": int(telegram_user_id),
                 "access_hash": sender.access_hash,  # Necessário para enviar msgs
             },
-        }).execute()
+        }
+        # Adiciona workspace_id (obrigatório após migration)
+        if workspace_id:
+            identity_data["workspace_id"] = workspace_id
+        db.table("contact_identities").insert(identity_data).execute()
 
         return {"id": identity_id, "contact_id": None}
 
@@ -1248,18 +1273,21 @@ class TelegramWorker:
         print(f"[SYNC] Entidade {telegram_id} não encontrada em nenhum método")
         return None
 
-    async def _get_or_create_sync_identity(self, db, owner_id: str, telegram_id: int, entity, is_group: bool, client):
+    async def _get_or_create_sync_identity(self, db, owner_id: str, telegram_id: int, entity, is_group: bool, client, workspace_id: str = None):
         """Busca ou cria identity para sync (função unificada)."""
         telegram_id_str = str(telegram_id)
         # Sempre usa telegram_user, distingue por metadata.is_group
         identity_type = "telegram_user"
 
-        # Busca existente
-        existing = db.table("contact_identities").select(
+        # Busca existente (FILTRA POR WORKSPACE!)
+        query = db.table("contact_identities").select(
             "id, metadata, type"
-        ).eq("owner_id", owner_id).eq("value", telegram_id_str).eq(
-            "type", "telegram_user"
-        ).execute()
+        ).eq("value", telegram_id_str).eq("type", "telegram_user")
+        if workspace_id:
+            query = query.eq("workspace_id", workspace_id)
+        else:
+            query = query.eq("owner_id", owner_id)
+        existing = query.execute()
 
         if existing.data:
             identity = existing.data[0]
@@ -1291,14 +1319,17 @@ class TelegramWorker:
             metadata["avatar_url"] = avatar_url
 
         identity_id = str(uuid4())
-        db.table("contact_identities").insert({
+        identity_data = {
             "id": identity_id,
             "owner_id": owner_id,
             "contact_id": None,
             "type": identity_type,
             "value": telegram_id_str,
             "metadata": metadata,
-        }).execute()
+        }
+        if workspace_id:
+            identity_data["workspace_id"] = workspace_id
+        db.table("contact_identities").insert(identity_data).execute()
 
         print(f"[SYNC] Identity criada: {identity_id}")
         return identity_id, metadata
@@ -1369,9 +1400,9 @@ class TelegramWorker:
                 # Verifica se é grupo pela entidade real
                 is_group = isinstance(entity, (Chat, Channel))
 
-                # Cria ou busca identity
+                # Cria ou busca identity (COM workspace_id!)
                 identity_id, identity_metadata = await self._get_or_create_sync_identity(
-                    db, owner_id, telegram_user_id, entity, is_group, client
+                    db, owner_id, telegram_user_id, entity, is_group, client, workspace_id
                 )
 
                 # Cria ou busca conversa

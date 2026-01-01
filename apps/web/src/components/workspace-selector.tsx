@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react"
 import { ChevronDown, Plus, Settings, BarChart3, Check, Briefcase } from "lucide-react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useWorkspace, Workspace } from "@/contexts/workspace-context"
 
 interface WorkspaceSelectorProps {
@@ -18,6 +19,7 @@ export function WorkspaceSelector({ compact = false }: WorkspaceSelectorProps) {
     createWorkspace,
   } = useWorkspace()
 
+  const router = useRouter()
   const [isOpen, setIsOpen] = useState(false)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [newName, setNewName] = useState("")
@@ -52,6 +54,8 @@ export function WorkspaceSelector({ compact = false }: WorkspaceSelectorProps) {
       setNewName("")
       setNewColor("#3b82f6")
       setIsOpen(false)
+      // Navega para o novo workspace
+      router.push(`/${created.id}`)
     } catch (error) {
       console.error("Erro ao criar workspace:", error)
     } finally {
@@ -106,6 +110,8 @@ export function WorkspaceSelector({ compact = false }: WorkspaceSelectorProps) {
                 onClick={() => {
                   setCurrentWorkspace(ws)
                   setIsOpen(false)
+                  // Navega para a URL do workspace (sem reload!)
+                  router.push(`/${ws.id}`)
                 }}
                 className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-700 ${
                   ws.id === currentWorkspace.id ? "bg-zinc-100 dark:bg-zinc-700" : ""
@@ -158,7 +164,7 @@ export function WorkspaceSelector({ compact = false }: WorkspaceSelectorProps) {
             </button>
 
             <Link
-              href="/settings/workspaces"
+              href={`/${currentWorkspace?.id}/settings`}
               onClick={() => setIsOpen(false)}
               className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-700"
             >
