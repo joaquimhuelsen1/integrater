@@ -1275,15 +1275,41 @@ class TelegramWorker:
 
         if result.data:
             identity = result.data[0]
-            # Atualiza access_hash se estiver faltando (identidades antigas)
+            # Enriquece identity se dados estiverem faltando (identidades mínimas)
             existing_meta = db.table("contact_identities").select("metadata").eq("id", identity["id"]).single().execute()
             if existing_meta.data:
                 meta = existing_meta.data.get("metadata", {}) or {}
+                needs_update = False
+
+                # Atualiza access_hash se faltando
                 if not meta.get("access_hash") and hasattr(sender, "access_hash") and sender.access_hash:
                     meta["telegram_user_id"] = int(telegram_user_id)
                     meta["access_hash"] = sender.access_hash
+                    needs_update = True
+
+                # Atualiza nome se faltando ou é placeholder
+                if not meta.get("first_name") or meta.get("display_name", "").startswith("User "):
+                    if sender.first_name:
+                        meta["first_name"] = sender.first_name
+                        meta["last_name"] = sender.last_name
+                        meta["username"] = sender.username
+                        # Remove display_name placeholder se existir
+                        if "display_name" in meta and meta["display_name"].startswith("User "):
+                            del meta["display_name"]
+                        needs_update = True
+                        print(f"[IDENTITY] Atualizando nome: {sender.first_name} {sender.last_name or ''}")
+
+                # Baixa avatar se faltando
+                if not meta.get("avatar_url") and client:
+                    avatar_url = await self._download_and_store_avatar(client, owner_id, sender)
+                    if avatar_url:
+                        meta["avatar_url"] = avatar_url
+                        needs_update = True
+                        print(f"[IDENTITY] Avatar baixado para {telegram_user_id}")
+
+                if needs_update:
                     db.table("contact_identities").update({"metadata": meta}).eq("id", identity["id"]).execute()
-                    print(f"[IDENTITY] Atualizado access_hash para {telegram_user_id}")
+
             return identity
 
         # Baixa avatar apenas para identity NOVA
