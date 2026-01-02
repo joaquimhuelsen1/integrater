@@ -8,6 +8,7 @@ import { WorkspaceSelector } from "./workspace-selector"
 import { ThemeToggle } from "./theme-toggle"
 import { useWorkspace } from "@/contexts/workspace-context"
 import { createClient } from "@/lib/supabase"
+import { apiFetch } from "@/lib/api"
 
 interface SettingsViewProps {
   userEmail: string
@@ -143,13 +144,12 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
   const [syncPeriod, setSyncPeriod] = useState<string>("1d")
   const [syncResult, setSyncResult] = useState<{ jobs: number; success: boolean } | null>(null)
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
   const { currentWorkspace } = useWorkspace()
 
   const loadAccounts = useCallback(async () => {
     if (!currentWorkspace) return
     try {
-      const res = await fetch(`${API_URL}/telegram/accounts?workspace_id=${currentWorkspace.id}`)
+      const res = await apiFetch(`/telegram/accounts?workspace_id=${currentWorkspace.id}`)
       if (res.ok) {
         const data = await res.json()
         setAccounts(data)
@@ -159,11 +159,11 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
     } finally {
       setIsLoading(false)
     }
-  }, [API_URL, currentWorkspace])
+  }, [currentWorkspace])
 
   const loadWorkerStatus = async () => {
     try {
-      const res = await fetch(`${API_URL}/telegram/workers/status`)
+      const res = await apiFetch(`/telegram/workers/status`)
       if (res.ok) {
         const data = await res.json()
         // Merge worker status with accounts
@@ -181,7 +181,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
     if (!confirm("Remover esta conta Telegram?")) return
 
     try {
-      const res = await fetch(`${API_URL}/telegram/accounts/${accountId}`, {
+      const res = await apiFetch(`/telegram/accounts/${accountId}`, {
         method: "DELETE",
       })
       if (res.ok) {
@@ -202,7 +202,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
     setSyncingAccount(accountId)
     setSyncResult(null)
     try {
-      const res = await fetch(`${API_URL}/telegram/sync-history`, {
+      const res = await apiFetch(`/telegram/sync-history`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ account_id: accountId, period, workspace_id: currentWorkspace.id }),
@@ -223,7 +223,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
   // Prompts functions
   const loadPrompts = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/prompts/`)
+      const res = await apiFetch(`/prompts/`)
       if (res.ok) {
         const data = await res.json()
         setPrompts(data)
@@ -233,11 +233,11 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
     } finally {
       setPromptsLoading(false)
     }
-  }, [API_URL])
+  }, [])
 
   const loadVersions = async (promptId: string) => {
     try {
-      const res = await fetch(`${API_URL}/prompts/${promptId}/versions`)
+      const res = await apiFetch(`/prompts/${promptId}/versions`)
       if (res.ok) {
         const data = await res.json()
         setVersions(prev => ({ ...prev, [promptId]: data }))
@@ -259,7 +259,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
 
   const savePrompt = async (promptId: string) => {
     try {
-      const res = await fetch(`${API_URL}/prompts/${promptId}`, {
+      const res = await apiFetch(`/prompts/${promptId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: editContent }),
@@ -277,7 +277,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
   const revertVersion = async (promptId: string, version: number) => {
     if (!confirm(`Reverter para versão ${version}?`)) return
     try {
-      const res = await fetch(`${API_URL}/prompts/${promptId}/revert/${version}`, {
+      const res = await apiFetch(`/prompts/${promptId}/revert/${version}`, {
         method: "POST",
       })
       if (res.ok) {
@@ -294,7 +294,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
     setTestLoading(true)
     setTestResult(null)
     try {
-      const res = await fetch(`${API_URL}/prompts/${promptId}/test`, {
+      const res = await apiFetch(`/prompts/${promptId}/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ conversation_text: testConversation }),
@@ -325,7 +325,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
   const loadOpenPhoneAccounts = useCallback(async () => {
     if (!currentWorkspace) return
     try {
-      const res = await fetch(`${API_URL}/openphone/accounts?workspace_id=${currentWorkspace.id}`)
+      const res = await apiFetch(`/openphone/accounts?workspace_id=${currentWorkspace.id}`)
       if (res.ok) {
         const data = await res.json()
         setOpenPhoneAccounts(data)
@@ -335,13 +335,13 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
     } finally {
       setOpenPhoneLoading(false)
     }
-  }, [API_URL, currentWorkspace])
+  }, [currentWorkspace])
 
   const addOpenPhoneAccount = async () => {
     if (!newOpenPhone.label || !newOpenPhone.phone_number || !newOpenPhone.api_key) return
     setAddingOpenPhone(true)
     try {
-      const res = await fetch(`${API_URL}/openphone/accounts`, {
+      const res = await apiFetch(`/openphone/accounts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newOpenPhone),
@@ -363,7 +363,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
   const deleteOpenPhoneAccount = async (accountId: string) => {
     if (!confirm("Remover esta conta OpenPhone?")) return
     try {
-      const res = await fetch(`${API_URL}/openphone/accounts/${accountId}`, {
+      const res = await apiFetch(`/openphone/accounts/${accountId}`, {
         method: "DELETE",
       })
       if (res.ok) {
@@ -378,7 +378,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
   const loadEmailAccounts = useCallback(async () => {
     if (!currentWorkspace) return
     try {
-      const res = await fetch(`${API_URL}/email/accounts?workspace_id=${currentWorkspace.id}`)
+      const res = await apiFetch(`/email/accounts?workspace_id=${currentWorkspace.id}`)
       if (res.ok) {
         const data = await res.json()
         setEmailAccounts(data)
@@ -388,13 +388,13 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
     } finally {
       setEmailLoading(false)
     }
-  }, [API_URL, currentWorkspace])
+  }, [currentWorkspace])
 
   const addEmailAccount = async () => {
     if (!newEmail.label || !newEmail.email || !newEmail.password || !currentWorkspace) return
     setAddingEmail(true)
     try {
-      const res = await fetch(`${API_URL}/email/accounts`, {
+      const res = await apiFetch(`/email/accounts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...newEmail, workspace_id: currentWorkspace.id }),
@@ -424,7 +424,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
   const deleteEmailAccount = async (accountId: string) => {
     if (!confirm("Remover esta conta Email?")) return
     try {
-      const res = await fetch(`${API_URL}/email/accounts/${accountId}`, {
+      const res = await apiFetch(`/email/accounts/${accountId}`, {
         method: "DELETE",
       })
       if (res.ok) {
@@ -438,7 +438,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
   const testEmailAccount = async (accountId: string) => {
     setTestingEmail(accountId)
     try {
-      const res = await fetch(`${API_URL}/email/accounts/${accountId}/test`, {
+      const res = await apiFetch(`/email/accounts/${accountId}/test`, {
         method: "POST",
       })
       if (res.ok) {
@@ -464,7 +464,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
       const { data: sessionData } = await supabase.auth.getSession()
       const token = sessionData?.session?.access_token
 
-      const res = await fetch(`${API_URL}/email/sync-history`, {
+      const res = await apiFetch(`/email/sync-history`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -492,8 +492,8 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
   const loadAiModels = useCallback(async () => {
     try {
       const [modelsRes, configRes] = await Promise.all([
-        fetch(`${API_URL}/ai-config/models`),
-        fetch(`${API_URL}/ai-config/config`),
+        apiFetch(`/ai-config/models`),
+        apiFetch(`/ai-config/config`),
       ])
       if (modelsRes.ok) {
         setAiModels(await modelsRes.json())
@@ -506,13 +506,13 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
     } finally {
       setAiModelsLoading(false)
     }
-  }, [API_URL])
+  }, [])
 
   const addAiModel = async () => {
     if (!newModel.model_id || !newModel.name) return
     setAddingModel(true)
     try {
-      const res = await fetch(`${API_URL}/ai-config/models`, {
+      const res = await apiFetch(`/ai-config/models`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newModel),
@@ -535,7 +535,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
   const deleteAiModel = async (modelUuid: string) => {
     if (!confirm("Remover este modelo?")) return
     try {
-      const res = await fetch(`${API_URL}/ai-config/models/${modelUuid}`, {
+      const res = await apiFetch(`/ai-config/models/${modelUuid}`, {
         method: "DELETE",
       })
       if (res.ok) {
@@ -549,7 +549,7 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
   const updateFunctionConfig = async (functionKey: string, modelId: string) => {
     setUpdatingConfig(functionKey)
     try {
-      const res = await fetch(`${API_URL}/ai-config/config/${functionKey}`, {
+      const res = await apiFetch(`/ai-config/config/${functionKey}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model_id: modelId }),

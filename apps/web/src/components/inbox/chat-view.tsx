@@ -3,6 +3,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from "react"
 import { Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical, Unlink, MessageSquare, Phone, Briefcase } from "lucide-react"
 import { createClient } from "@/lib/supabase"
+import { apiFetch } from "@/lib/api"
 import { MessageItem } from "./message-item"
 import { DateDivider } from "./date-divider"
 import { ServiceMessage } from "./service-message"
@@ -363,7 +364,7 @@ export function ChatView({
   // Handlers para pin/unpin (atualiza no banco)
   const handlePin = useCallback(async (messageId: string) => {
     try {
-      const resp = await fetch(`${apiUrl}/messages/${messageId}/pin`, { method: "POST" })
+      const resp = await apiFetch(`/messages/${messageId}/pin`, { method: "POST" })
       if (resp.ok) {
         // Mensagem pinada - realtime vai atualizar
       }
@@ -374,7 +375,7 @@ export function ChatView({
 
   const handleUnpin = useCallback(async (messageId: string) => {
     try {
-      const resp = await fetch(`${apiUrl}/messages/${messageId}/unpin`, { method: "POST" })
+      const resp = await apiFetch(`/messages/${messageId}/unpin`, { method: "POST" })
       if (resp.ok) {
         // Mensagem desafixada - realtime vai atualizar
       }
@@ -399,7 +400,7 @@ export function ChatView({
 
     setIsEditing(true)
     try {
-      const resp = await fetch(`${apiUrl}/messages/${editingMessage.id}?text=${encodeURIComponent(editText.trim())}`, {
+      const resp = await apiFetch(`/messages/${editingMessage.id}?text=${encodeURIComponent(editText.trim())}`, {
         method: "PUT",
       })
       if (resp.ok) {
@@ -430,7 +431,7 @@ export function ChatView({
 
     setIsDeleting(true)
     try {
-      const resp = await fetch(`${apiUrl}/messages/${messageId}?for_everyone=true`, {
+      const resp = await apiFetch(`/messages/${messageId}?for_everyone=true`, {
         method: "DELETE",
       })
       if (resp.ok) {
@@ -563,7 +564,7 @@ export function ChatView({
       // Translate each new message
       for (const msg of untranslated) {
         try {
-          const resp = await fetch(`${apiUrl}/translate/message/${msg.id}`, {
+          const resp = await apiFetch(`/translate/message/${msg.id}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ target_lang: "pt-BR" }),
@@ -596,7 +597,7 @@ export function ChatView({
     setIsTranslating(true)
     try {
       // Traduz conversa inteira e recebe todas traduções de volta
-      const response = await fetch(`${apiUrl}/translate/conversation/${conversationId}`, {
+      const response = await apiFetch(`/translate/conversation/${conversationId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ target_lang: "pt-BR" }),
@@ -632,7 +633,7 @@ export function ChatView({
     setIsSuggesting(true)
     onSuggestionChange?.(null)
     try {
-      const response = await fetch(`${apiUrl}/ai/conversation/${conversationId}/suggest`, {
+      const response = await apiFetch(`/ai/conversation/${conversationId}/suggest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       })
@@ -655,7 +656,7 @@ export function ChatView({
     setIsSummarizing(true)
     onSummaryChange?.(null)
     try {
-      const response = await fetch(`${apiUrl}/ai/conversation/${conversationId}/summarize`, {
+      const response = await apiFetch(`/ai/conversation/${conversationId}/summarize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       })
@@ -676,7 +677,7 @@ export function ChatView({
     if (suggestion) {
       onDraftChange?.(suggestion.content)
       // Registrar feedback
-      fetch(`${apiUrl}/ai/suggestion/${suggestion.id}/feedback`, {
+      apiFetch(`/ai/suggestion/${suggestion.id}/feedback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "accepted" }),
@@ -688,7 +689,7 @@ export function ChatView({
   // Rejeitar sugestão
   const rejectSuggestion = useCallback(() => {
     if (suggestion) {
-      fetch(`${apiUrl}/ai/suggestion/${suggestion.id}/feedback`, {
+      apiFetch(`/ai/suggestion/${suggestion.id}/feedback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "rejected" }),

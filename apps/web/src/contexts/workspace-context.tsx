@@ -1,6 +1,7 @@
 "use client"
 
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react"
+import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api"
 
 export interface Workspace {
   id: string
@@ -47,19 +48,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-
   const loadWorkspaces = useCallback(async () => {
     try {
       setIsLoading(true)
       setError(null)
 
-      const res = await fetch(`${API_URL}/workspaces`)
-      if (!res.ok) {
-        throw new Error("Falha ao carregar workspaces")
-      }
-
-      const data: Workspace[] = await res.json()
+      const data = await apiGet<Workspace[]>("/workspaces")
       setWorkspaces(data)
 
       // Tenta restaurar workspace salvo
@@ -82,7 +76,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false)
     }
-  }, [API_URL])
+  }, [])
 
   useEffect(() => {
     loadWorkspaces()
@@ -95,36 +89,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const createWorkspace = useCallback(
     async (data: CreateWorkspaceData): Promise<Workspace> => {
-      const res = await fetch(`${API_URL}/workspaces`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      })
-
-      if (!res.ok) {
-        throw new Error("Falha ao criar workspace")
-      }
-
-      const newWorkspace: Workspace = await res.json()
+      const newWorkspace = await apiPost<Workspace>("/workspaces", data)
       setWorkspaces((prev) => [...prev, newWorkspace])
       return newWorkspace
     },
-    [API_URL]
+    []
   )
 
   const updateWorkspace = useCallback(
     async (id: string, data: UpdateWorkspaceData): Promise<Workspace> => {
-      const res = await fetch(`${API_URL}/workspaces/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      })
-
-      if (!res.ok) {
-        throw new Error("Falha ao atualizar workspace")
-      }
-
-      const updated: Workspace = await res.json()
+      const updated = await apiPatch<Workspace>(`/workspaces/${id}`, data)
       setWorkspaces((prev) => prev.map((ws) => (ws.id === id ? updated : ws)))
 
       if (currentWorkspace?.id === id) {
@@ -133,19 +107,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
       return updated
     },
-    [API_URL, currentWorkspace]
+    [currentWorkspace]
   )
 
   const deleteWorkspace = useCallback(
     async (id: string): Promise<void> => {
-      const res = await fetch(`${API_URL}/workspaces/${id}`, {
-        method: "DELETE",
-      })
-
-      if (!res.ok) {
-        const error = await res.json()
-        throw new Error(error.detail || "Falha ao deletar workspace")
-      }
+      await apiDelete(`/workspaces/${id}`)
 
       setWorkspaces((prev) => prev.filter((ws) => ws.id !== id))
 
@@ -158,18 +125,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [API_URL, currentWorkspace, workspaces, setCurrentWorkspace]
+    [currentWorkspace, workspaces, setCurrentWorkspace]
   )
 
   const setDefaultWorkspace = useCallback(
     async (id: string): Promise<void> => {
-      const res = await fetch(`${API_URL}/workspaces/${id}/set-default`, {
-        method: "POST",
-      })
-
-      if (!res.ok) {
-        throw new Error("Falha ao definir workspace padrão")
-      }
+      await apiPost(`/workspaces/${id}/set-default`)
 
       // Atualiza lista local
       setWorkspaces((prev) =>
@@ -179,7 +140,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }))
       )
     },
-    [API_URL]
+    []
   )
 
   const refresh = useCallback(async () => {

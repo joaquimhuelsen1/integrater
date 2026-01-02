@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react"
 import { Send, Paperclip, X, FileText, Mic, Square, Play, Pause, Image as ImageIcon, FileAudio, File as FileIcon, Smile, Reply, Languages, Loader2, ChevronDown } from "lucide-react"
+import { apiFetch } from "@/lib/api"
 
 interface AttachmentPreview {
   file: File
@@ -210,7 +211,7 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
 
     setIsTranslating(true)
     try {
-      const response = await fetch(`${apiUrl}/translate/draft`, {
+      const response = await apiFetch(`/translate/draft`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: text.trim(), target_lang: "en" }),

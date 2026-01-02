@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { X, Loader2, Phone, KeyRound, Lock } from "lucide-react"
+import { apiFetch } from "@/lib/api"
 
 interface TelegramAuthFlowProps {
   onComplete: (integrationId: string) => void
@@ -22,17 +23,14 @@ export function TelegramAuthFlow({ onComplete, onCancel, workspaceId }: Telegram
   const [code, setCode] = useState("")
   const [password, setPassword] = useState("")
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-
   const handleStartAuth = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
     setError(null)
 
     try {
-      const res = await fetch(`${API_URL}/telegram/auth/start`, {
+      const res = await apiFetch(`/telegram/auth/start`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone_number: phoneNumber, workspace_id: workspaceId }),
       })
 
@@ -57,9 +55,8 @@ export function TelegramAuthFlow({ onComplete, onCancel, workspaceId }: Telegram
     setError(null)
 
     try {
-      const res = await fetch(`${API_URL}/telegram/auth/verify-code`, {
+      const res = await apiFetch(`/telegram/auth/verify-code`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           phone_number: phoneNumber,
           phone_code_hash: phoneCodeHash,
@@ -93,9 +90,8 @@ export function TelegramAuthFlow({ onComplete, onCancel, workspaceId }: Telegram
     setError(null)
 
     try {
-      const res = await fetch(`${API_URL}/telegram/auth/verify-2fa`, {
+      const res = await apiFetch(`/telegram/auth/verify-2fa`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           phone_number: phoneNumber,
           password,
