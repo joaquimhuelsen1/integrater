@@ -417,16 +417,18 @@ export function InboxView({ userEmail, workspaceId }: InboxViewProps) {
     if (!error && data) {
       // Inverte para mostrar em ordem cronológica (antigas primeiro, novas embaixo)
       const dbMessages = data.reverse() as Message[]
+      const dbIds = new Set(dbMessages.map(m => m.id))
 
-      // Preservar mensagens em "sending" ou "failed" (optimistic updates)
+      // Preservar APENAS mensagens "sending" ou "failed" que não estão no banco
+      // Mensagens "sent" temporárias são removidas pois o banco já tem a real
       setMessages(prev => {
-        const pendingMsgs = prev.filter(m =>
-          m.sending_status === "sending" || m.sending_status === "failed"
-        )
-        // Remover duplicatas (se a mensagem já foi salva no banco)
-        const dbIds = new Set(dbMessages.map(m => m.id))
-        const uniquePending = pendingMsgs.filter(m => !dbIds.has(m.id))
-        return [...dbMessages, ...uniquePending]
+        const toKeep = prev.filter(m => {
+          if (m.sending_status === "sending" || m.sending_status === "failed") {
+            return !dbIds.has(m.id)
+          }
+          return false
+        })
+        return [...dbMessages, ...toKeep]
       })
     }
   }, [supabase])
@@ -483,16 +485,18 @@ export function InboxView({ userEmail, workspaceId }: InboxViewProps) {
     if (!msgError && msgs) {
       // Inverte para ordem cronológica
       const dbMessages = msgs.reverse() as Message[]
+      const dbIds = new Set(dbMessages.map(m => m.id))
 
-      // Preservar mensagens em "sending" ou "failed" (optimistic updates)
+      // Preservar APENAS mensagens "sending" ou "failed" que não estão no banco
+      // Mensagens "sent" temporárias são removidas pois o banco já tem a real
       setMessages(prev => {
-        const pendingMsgs = prev.filter(m =>
-          m.sending_status === "sending" || m.sending_status === "failed"
-        )
-        // Remover duplicatas (se a mensagem já foi salva no banco)
-        const dbIds = new Set(dbMessages.map(m => m.id))
-        const uniquePending = pendingMsgs.filter(m => !dbIds.has(m.id))
-        return [...dbMessages, ...uniquePending]
+        const toKeep = prev.filter(m => {
+          if (m.sending_status === "sending" || m.sending_status === "failed") {
+            return !dbIds.has(m.id)
+          }
+          return false
+        })
+        return [...dbMessages, ...toKeep]
       })
     }
   }, [supabase, selectedSendChannel])
@@ -992,9 +996,10 @@ I'll be waiting.`
       messageId = messageData.id
       console.log("Message created with ID:", messageId)
 
-      // Sucesso: atualizar ID real e status para "sent"
+      // Sucesso: marcar como "sent" mas MANTER ID temporário
+      // O polling vai trazer a mensagem real e loadMessages vai substituir
       setMessages(prev => prev.map(m =>
-        m.id === tempId ? { ...m, id: messageId!, sending_status: "sent" as const } : m
+        m.id === tempId ? { ...m, sending_status: "sent" as const } : m
       ))
 
       // Recarregar para pegar attachments vinculados
