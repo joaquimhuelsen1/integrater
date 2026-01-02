@@ -488,14 +488,17 @@ class TelegramWorker:
             "access_hash": None,
         }
         
+        # 1. Verifica cache
         cached = self._get_cached_entity(user_id)
         if cached and isinstance(cached, User):
             sender_data["first_name"] = cached.first_name
             sender_data["last_name"] = cached.last_name
             sender_data["username"] = cached.username
             sender_data["access_hash"] = cached.access_hash
+            print(f"[SENDER] Cache hit: {user_id} = {cached.first_name}")
             return sender_data
         
+        # 2. Tenta get_entity
         if not self._is_entity_failed(user_id):
             try:
                 entity = await telegram_op(
@@ -509,11 +512,31 @@ class TelegramWorker:
                     sender_data["last_name"] = entity.last_name
                     sender_data["username"] = entity.username
                     sender_data["access_hash"] = entity.access_hash
+                    print(f"[SENDER] get_entity ok: {user_id} = {entity.first_name}")
+                    return sender_data
                 else:
-                    self._mark_entity_failed(user_id)
+                    print(f"[SENDER] get_entity retornou None ou não é User: {user_id}")
             except Exception as e:
-                print(f"[SENDER] Erro: {e}")
-                self._mark_entity_failed(user_id)
+                print(f"[SENDER] get_entity erro: {user_id} - {e}")
+        
+        # 3. Tenta buscar nos dialogs (fallback)
+        try:
+            async for dialog in client.iter_dialogs(limit=100):
+                if dialog.entity and hasattr(dialog.entity, 'id') and dialog.entity.id == user_id:
+                    if isinstance(dialog.entity, User):
+                        self._cache_entity(user_id, dialog.entity)
+                        sender_data["first_name"] = dialog.entity.first_name
+                        sender_data["last_name"] = dialog.entity.last_name
+                        sender_data["username"] = dialog.entity.username
+                        sender_data["access_hash"] = dialog.entity.access_hash
+                        print(f"[SENDER] dialog fallback ok: {user_id} = {dialog.entity.first_name}")
+                        return sender_data
+        except Exception as e:
+            print(f"[SENDER] iter_dialogs erro: {e}")
+        
+        # 4. Se tudo falhar, marca como failed
+        self._mark_entity_failed(user_id)
+        print(f"[SENDER] Não conseguiu dados para: {user_id}")
         
         return sender_data
 
