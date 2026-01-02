@@ -74,11 +74,12 @@ async def notify_inbound_message(
     workspace_id: str | None,
     telegram_user_id: int,
     telegram_msg_id: int,
-    sender: dict,
+    sender: dict | None,
     content: dict,
     timestamp: datetime,
     is_group: bool = False,
     group_info: dict | None = None,
+    message_type: str = "text",
 ) -> dict | None:
     """
     Notifica n8n sobre mensagem recebida (inbound).
@@ -107,9 +108,10 @@ async def notify_inbound_message(
         "timestamp": timestamp.isoformat() if timestamp else datetime.now(timezone.utc).isoformat(),
         "is_group": is_group,
         "group_info": group_info,
+        "message_type": message_type,
     }
     
-    print(f"[WEBHOOK] Enviando inbound: user={telegram_user_id}, msg={telegram_msg_id}")
+    print(f"[WEBHOOK] Enviando inbound: {'group' if is_group else 'user'}={telegram_user_id}, msg={telegram_msg_id}, type={message_type}")
     return await send_to_n8n(N8N_WEBHOOK_INBOUND, payload)
 
 
@@ -123,6 +125,7 @@ async def notify_outbound_message(
     timestamp: datetime,
     is_group: bool = False,
     recipient: dict | None = None,
+    group_info: dict | None = None,
 ) -> dict | None:
     """
     Notifica n8n sobre mensagem enviada (outbound) capturada do Telegram.
@@ -152,9 +155,10 @@ async def notify_outbound_message(
         "content": content,
         "timestamp": timestamp.isoformat() if timestamp else datetime.now(timezone.utc).isoformat(),
         "is_group": is_group,
+        "group_info": group_info,
     }
     
-    print(f"[WEBHOOK] Enviando outbound: user={telegram_user_id}, msg={telegram_msg_id}")
+    print(f"[WEBHOOK] Enviando outbound: {'group' if is_group else 'user'}={telegram_user_id}, msg={telegram_msg_id}")
     return await send_to_n8n(N8N_WEBHOOK_OUTBOUND, payload)
 
 

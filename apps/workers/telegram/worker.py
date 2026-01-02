@@ -579,6 +579,92 @@ class TelegramWorker:
             print(f"[PHOTO] Erro ao baixar foto de {user_id}: {e}")
             return None
 
+    async def _get_group_data(self, client: TelegramClient, chat) -> dict:
+        """Busca dados do grupo/canal incluindo foto."""
+        group_data = {
+            "telegram_id": chat.id,
+            "title": getattr(chat, 'title', None) or f"Grupo {chat.id}",
+            "username": getattr(chat, 'username', None),
+            "participant_count": None,
+            "photo_url": None,
+            "is_megagroup": getattr(chat, 'megagroup', False),
+            "is_channel": isinstance(chat, Channel) and not getattr(chat, 'megagroup', False),
+        }
+        
+        # Tenta buscar contagem de participantes
+        try:
+            participants = await client.get_participants(chat, limit=0)
+            group_data["participant_count"] = participants.total
+        except Exception as e:
+            print(f"[GROUP] Erro ao buscar participantes: {e}")
+        
+        # Baixa foto do grupo
+        try:
+            photo_bytes = await client.download_profile_photo(chat, file=bytes)
+            if photo_bytes:
+                storage_path = f"avatars/telegram/group_{chat.id}.jpg"
+                
+                supabase_url = os.environ["SUPABASE_URL"]
+                supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+                storage_client = create_supabase_client(supabase_url, supabase_key)
+                
+                try:
+                    storage_client.storage.from_("avatars").remove([storage_path])
+                except Exception:
+                    pass
+                
+                storage_client.storage.from_("avatars").upload(
+                    storage_path,
+                    photo_bytes,
+                    {"content-type": "image/jpeg", "upsert": "true"}
+                )
+                
+                group_data["photo_url"] = f"{supabase_url}/storage/v1/object/public/avatars/{storage_path}"
+                print(f"[GROUP] Foto do grupo {chat.id} salva")
+        except Exception as e:
+            print(f"[GROUP] Erro ao baixar foto do grupo: {e}")
+        
+        return group_data
+
+    async def _process_service_message(self, msg) -> dict | None:
+        """Processa mensagens de servico (join, leave, title change, etc)."""
+        if not isinstance(msg, MessageService):
+            return None
+        
+        action = msg.action
+        service_data = {
+            "service_type": None,
+            "user_ids": [],
+            "text": None,
+        }
+        
+        if isinstance(action, MessageActionChatJoinedByLink):
+            service_data["service_type"] = "join"
+            if hasattr(msg, 'from_id') and msg.from_id:
+                service_data["user_ids"] = [msg.from_id.user_id]
+            service_data["text"] = "entrou no grupo via link"
+            
+        elif isinstance(action, MessageActionChatAddUser):
+            service_data["service_type"] = "join"
+            service_data["user_ids"] = list(action.users)
+            service_data["text"] = "foi adicionado ao grupo"
+            
+        elif isinstance(action, MessageActionChatJoinedByRequest):
+            service_data["service_type"] = "join"
+            if hasattr(msg, 'from_id') and msg.from_id:
+                service_data["user_ids"] = [msg.from_id.user_id]
+            service_data["text"] = "entrou no grupo por solicitacao"
+            
+        elif isinstance(action, MessageActionChatDeleteUser):
+            service_data["service_type"] = "leave"
+            service_data["user_ids"] = [action.user_id]
+            service_data["text"] = "saiu do grupo"
+            
+        else:
+            return None
+        
+        return service_data
+
     async def _process_media_for_webhook(self, client: TelegramClient, media, msg_id: int) -> dict | None:
         """Processa mídia e faz upload para Supabase."""
         try:
@@ -637,7 +723,7 @@ class TelegramWorker:
             return None
 
     async def _handle_new_message_fallback(self, acc_id: str, owner_id: str, event):
-        """Fallback para grupos - envia para n8n."""
+        """Fallback para grupos - envia para n8n com dados completos."""
         try:
             msg = event.message
             is_outgoing = msg.out
@@ -646,10 +732,44 @@ class TelegramWorker:
             chat = await event.get_chat()
             is_group = isinstance(chat, (Chat, Channel))
             
-            if is_group:
-                sender = await event.get_sender() if not is_outgoing else None
-                sender_data = {}
-                
+            if not is_group:
+                return  # 1:1 handled by Raw handler
+            
+            client = self.clients[acc_id]
+            
+            # Detecta MessageService (join/leave/etc)
+            if isinstance(msg, MessageService):
+                service_data = await self._process_service_message(msg)
+                if service_data:
+                    group_data = await self._get_group_data(client, chat)
+                    
+                    content = {
+                        "text": service_data.get("text"),
+                        "service_event": service_data,
+                    }
+                    
+                    await notify_inbound_message(
+                        account_id=acc_id,
+                        owner_id=owner_id,
+                        workspace_id=workspace_id,
+                        telegram_user_id=chat.id,
+                        telegram_msg_id=msg.id,
+                        sender=None,
+                        content=content,
+                        timestamp=msg.date,
+                        is_group=True,
+                        group_info=group_data,
+                        message_type="service",
+                    )
+                return
+            
+            # Mensagem normal de grupo
+            group_data = await self._get_group_data(client, chat)
+            
+            # Busca dados do remetente (se inbound)
+            sender_data = None
+            if not is_outgoing:
+                sender = await event.get_sender()
                 if sender:
                     sender_data = {
                         "telegram_user_id": sender.id,
@@ -657,53 +777,56 @@ class TelegramWorker:
                         "last_name": getattr(sender, 'last_name', None),
                         "username": getattr(sender, 'username', None),
                     }
-                
-                media_info = await self._process_media_for_webhook(
-                    self.clients[acc_id], msg.media, msg.id
-                ) if msg.media else None
-                
-                content = {
-                    "text": msg.text or "",
-                    "media_url": media_info.get("url") if media_info else None,
-                    "media_type": media_info.get("type") if media_info else None,
-                    "media_name": media_info.get("name") if media_info else None,
-                }
-                
-                group_info = {
-                    "title": getattr(chat, 'title', None),
-                    "username": getattr(chat, 'username', None),
-                }
-                
-                if is_outgoing:
-                    await notify_outbound_message(
-                        account_id=acc_id,
-                        owner_id=owner_id,
-                        workspace_id=workspace_id,
-                        telegram_user_id=chat.id,
-                        telegram_msg_id=msg.id,
-                        content=content,
-                        timestamp=msg.date,
-                        is_group=True,
-                    )
-                else:
-                    await notify_inbound_message(
-                        account_id=acc_id,
-                        owner_id=owner_id,
-                        workspace_id=workspace_id,
-                        telegram_user_id=chat.id,
-                        telegram_msg_id=msg.id,
-                        sender=sender_data,
-                        content=content,
-                        timestamp=msg.date,
-                        is_group=True,
-                        group_info=group_info,
-                    )
+                    # Busca foto do sender
+                    photo_url = await self._download_profile_photo(client, sender, sender.id)
+                    if photo_url:
+                        sender_data["photo_url"] = photo_url
+            
+            # Processa midia
+            media_info = await self._process_media_for_webhook(
+                client, msg.media, msg.id
+            ) if msg.media else None
+            
+            message_type = "media" if media_info else "text"
+            
+            content = {
+                "text": msg.text or "",
+                "media_url": media_info.get("url") if media_info else None,
+                "media_type": media_info.get("type") if media_info else None,
+                "media_name": media_info.get("name") if media_info else None,
+            }
+            
+            if is_outgoing:
+                await notify_outbound_message(
+                    account_id=acc_id,
+                    owner_id=owner_id,
+                    workspace_id=workspace_id,
+                    telegram_user_id=chat.id,
+                    telegram_msg_id=msg.id,
+                    content=content,
+                    timestamp=msg.date,
+                    is_group=True,
+                    group_info=group_data,
+                )
+            else:
+                await notify_inbound_message(
+                    account_id=acc_id,
+                    owner_id=owner_id,
+                    workspace_id=workspace_id,
+                    telegram_user_id=chat.id,
+                    telegram_msg_id=msg.id,
+                    sender=sender_data,
+                    content=content,
+                    timestamp=msg.date,
+                    is_group=True,
+                    group_info=group_data,
+                    message_type=message_type,
+                )
                     
         except Exception as e:
             import traceback
             print(f"[FALLBACK] Erro: {e}")
             traceback.print_exc()
-
     # =============================================
     # PRESENCE - MANTÉM NO WORKER (direto Supabase)
     # =============================================
@@ -869,13 +992,19 @@ class TelegramWorker:
                 if not entity:
                     raise Exception(f"Entidade {telegram_user_id} não encontrada")
 
-            # Busca dados do contato (incluindo foto)
-            sender_data = await self._get_sender_data(client, telegram_user_id)
-            
-            # Se for grupo, adiciona info do grupo
+            # Busca dados do contato ou grupo (incluindo foto)
             if is_group:
-                sender_data["title"] = getattr(entity, 'title', None) or f"Grupo {telegram_user_id}"
-                sender_data["is_group"] = True
+                group_data = await self._get_group_data(client, entity)
+                sender_data = {
+                    "telegram_user_id": telegram_user_id,
+                    "title": group_data.get("title"),
+                    "username": group_data.get("username"),
+                    "photo_url": group_data.get("photo_url"),
+                    "participant_count": group_data.get("participant_count"),
+                    "is_group": True,
+                }
+            else:
+                sender_data = await self._get_sender_data(client, telegram_user_id)
 
             # Coleta mensagens do Telegram
             messages_batch = []
@@ -885,15 +1014,50 @@ class TelegramWorker:
                 if msg.date.replace(tzinfo=timezone.utc) < three_months_ago:
                     continue
 
+                # Processa MessageService para grupos (join/leave)
+                if isinstance(msg, MessageService) and is_group:
+                    service_data = await self._process_service_message(msg)
+                    if service_data:
+                        messages_batch.append({
+                            "id": str(uuid4()),
+                            "telegram_msg_id": msg.id,
+                            "text": service_data.get("text"),
+                            "date": msg.date.isoformat(),
+                            "direction": "inbound",
+                            "message_type": "service",
+                            "service_event": service_data,
+                            "sender_telegram_id": service_data["user_ids"][0] if service_data.get("user_ids") else None,
+                            "sender_name": None,
+                        })
+                    continue
+
                 if not msg.text and not msg.media:
                     continue
 
                 direction = "outbound" if msg.out else "inbound"
                 
-                # Processa mídia se houver
+                # Para grupos: captura sender de cada mensagem
+                sender_telegram_id = None
+                sender_name = None
+                if is_group and not msg.out:
+                    if hasattr(msg, 'from_id') and msg.from_id:
+                        sender_telegram_id = msg.from_id.user_id if hasattr(msg.from_id, 'user_id') else None
+                        # Tenta buscar nome do sender
+                        try:
+                            sender_entity = await client.get_entity(sender_telegram_id)
+                            if sender_entity:
+                                sender_name = getattr(sender_entity, 'first_name', '') or ''
+                                if getattr(sender_entity, 'last_name', None):
+                                    sender_name += f" {sender_entity.last_name}"
+                        except Exception:
+                            pass
+                
+                # Processa midia se houver
                 media_info = None
                 if msg.media:
                     media_info = await self._process_media_for_webhook(client, msg.media, msg.id)
+
+                message_type = "media" if media_info else "text"
 
                 messages_batch.append({
                     "id": str(uuid4()),
@@ -901,9 +1065,12 @@ class TelegramWorker:
                     "text": msg.text or None,
                     "date": msg.date.isoformat(),
                     "direction": direction,
+                    "message_type": message_type,
                     "media_url": media_info.get("url") if media_info else None,
                     "media_type": media_info.get("type") if media_info else None,
                     "media_name": media_info.get("name") if media_info else None,
+                    "sender_telegram_id": sender_telegram_id,
+                    "sender_name": sender_name,
                 })
 
             if not messages_batch:
