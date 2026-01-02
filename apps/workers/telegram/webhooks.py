@@ -121,6 +121,7 @@ async def notify_outbound_message(
     content: dict,
     timestamp: datetime,
     is_group: bool = False,
+    recipient: dict | None = None,
 ) -> dict | None:
     """
     Notifica n8n sobre mensagem enviada (outbound) capturada do Telegram.
@@ -137,6 +138,7 @@ async def notify_outbound_message(
         content: Conteúdo {text, media_url, media_type, media_name}
         timestamp: Data/hora da mensagem
         is_group: Se é mensagem de grupo
+        recipient: Dados do destinatário {first_name, last_name, username}
     """
     payload = {
         "event": "outbound",
@@ -145,6 +147,7 @@ async def notify_outbound_message(
         "workspace_id": workspace_id,
         "telegram_user_id": telegram_user_id,
         "telegram_msg_id": telegram_msg_id,
+        "recipient": recipient or {},
         "content": content,
         "timestamp": timestamp.isoformat() if timestamp else datetime.now(timezone.utc).isoformat(),
         "is_group": is_group,

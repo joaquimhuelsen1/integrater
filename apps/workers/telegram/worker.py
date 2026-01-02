@@ -128,11 +128,12 @@ class TelegramWorker:
         self.entity_fail_cache[user_id] = time.time()
 
     def _mark_pending_send(self, user_id: int):
-        """Marca que há envio em progresso para este user (chamar ANTES de enviar)."""
+        """Marca envio em progresso para user (chamar ANTES de enviar)."""
         import time
         self.pending_sends[user_id] = time.time()
-        # Limpa pendentes antigos (mais de 10s)
-        cutoff = time.time() - 10
+        print(f"[API] Marcando pending send para user {user_id}")
+        # Limpa antigos (mais de 30s)
+        cutoff = time.time() - 30
         self.pending_sends = {k: v for k, v in self.pending_sends.items() if v > cutoff}
 
     def _mark_sent_via_api(self, msg_id: int, user_id: int):
@@ -453,6 +454,9 @@ class TelegramWorker:
         client: TelegramClient, msg_id: int, user_id: int, text: str, date, media
     ):
         """Notifica n8n sobre mensagem enviada (capturada do Telegram)."""
+        # Busca dados do destinatário (nome, username, etc)
+        recipient_data = await self._get_sender_data(client, user_id)
+        
         media_info = await self._process_media_for_webhook(client, media, msg_id) if media else None
         
         content = {
@@ -468,6 +472,7 @@ class TelegramWorker:
             workspace_id=workspace_id,
             telegram_user_id=user_id,
             telegram_msg_id=msg_id,
+            recipient=recipient_data,
             content=content,
             timestamp=date if date else datetime.now(timezone.utc),
             is_group=False,
