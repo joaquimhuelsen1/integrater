@@ -64,6 +64,9 @@ async def send_message(
             )
             n8n_api_key = os.environ.get("N8N_API_KEY", "")
             
+            # Usar ID do frontend se fornecido, senão gerar novo
+            message_id = str(data.id) if data.id else str(uuid4())
+            
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(
                     n8n_webhook_url,
@@ -72,6 +75,7 @@ async def send_message(
                         "Content-Type": "application/json",
                     },
                     json={
+                        "id": message_id,  # ID do frontend para evitar duplicata
                         "conversation_id": str(data.conversation_id),
                         "text": data.text or "",
                         "attachments": attachment_urls,
@@ -82,9 +86,9 @@ async def send_message(
                 resp_data = response.json()
                 if resp_data.get("status") == "ok":
                     print(f"[Telegram] Enviado via n8n com sucesso: {resp_data.get('telegram_msg_id')}")
-                    # Retorna dados do n8n (mensagem inserida pelo n8n)
+                    # Retorna dados - ID é o mesmo que enviamos para o n8n
                     return {
-                        "id": resp_data.get("message_id"),
+                        "id": message_id,  # Mesmo ID do frontend
                         "conversation_id": str(data.conversation_id),
                         "direction": "outbound",
                         "text": data.text,
