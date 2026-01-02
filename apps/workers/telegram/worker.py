@@ -41,9 +41,14 @@ load_dotenv()
 
 # Timeouts em segundos - operações que passarem disso são canceladas
 TIMEOUT_TELEGRAM_SEND = 30      # Enviar mensagem
-TIMEOUT_TELEGRAM_ENTITY = 15    # Resolver entidade (get_entity)
+TIMEOUT_TELEGRAM_ENTITY = 3     # Resolver entidade (get_entity) - reduzido de 15s para 3s
 TIMEOUT_TELEGRAM_MEDIA = 60     # Upload de mídia/arquivo
 TIMEOUT_DB = 10                 # Operações no Supabase
+
+# Cache settings
+ENTITY_CACHE_TTL = 3600         # Cache de entities válido por 1 hora
+ENTITY_FAIL_CACHE_TTL = 300     # Cache negativo (falhas) válido por 5 minutos
+PRESENCE_THROTTLE_SECONDS = 5   # Só grava presence se mudou ou passou 5s
 
 
 async def telegram_op(coro, timeout: float, op_name: str):
@@ -83,6 +88,57 @@ class TelegramWorker:
         self.heartbeats: dict[str, Heartbeat] = {}
         self.account_info: dict[str, dict] = {}  # acc_id -> {owner_id, ...}
         self.watchdog = LoopWatchdog(max_silence=60)  # Reinicia loops travados >60s
+        
+        # Caches para performance (evita timeouts repetidos)
+        self.entity_cache: dict[int, tuple] = {}  # telegram_user_id -> (entity, timestamp)
+        self.entity_fail_cache: dict[int, float] = {}  # telegram_user_id -> timestamp_falha
+        self.presence_cache: dict[int, tuple] = {}  # telegram_user_id -> (estado, is_typing, timestamp)
+
+    def _get_cached_entity(self, user_id: int):
+        """Retorna entity do cache se válida, None se expirou ou não existe."""
+        import time
+        if user_id in self.entity_cache:
+            entity, ts = self.entity_cache[user_id]
+            if time.time() - ts < ENTITY_CACHE_TTL:
+                return entity
+            del self.entity_cache[user_id]
+        return None
+
+    def _cache_entity(self, user_id: int, entity):
+        """Salva entity no cache."""
+        import time
+        self.entity_cache[user_id] = (entity, time.time())
+
+    def _is_entity_failed(self, user_id: int) -> bool:
+        """Verifica se get_entity falhou recentemente para este user."""
+        import time
+        if user_id in self.entity_fail_cache:
+            if time.time() - self.entity_fail_cache[user_id] < ENTITY_FAIL_CACHE_TTL:
+                return True
+            del self.entity_fail_cache[user_id]
+        return False
+
+    def _mark_entity_failed(self, user_id: int):
+        """Marca que get_entity falhou para este user."""
+        import time
+        self.entity_fail_cache[user_id] = time.time()
+
+    def _should_update_presence(self, user_id: int, is_online: bool, is_typing: bool) -> bool:
+        """Retorna True se deve gravar no DB (mudou estado ou passou throttle)."""
+        import time
+        now = time.time()
+        cache_key = user_id
+        
+        if cache_key in self.presence_cache:
+            cached_online, cached_typing, ts = self.presence_cache[cache_key]
+            # Se estado igual e não passou throttle, não grava
+            if cached_online == is_online and cached_typing == is_typing:
+                if now - ts < PRESENCE_THROTTLE_SECONDS:
+                    return False
+        
+        # Atualiza cache
+        self.presence_cache[cache_key] = (is_online, is_typing, now)
+        return True
 
     async def start(self):
         print("Telegram Worker iniciando...")
@@ -106,22 +162,21 @@ class TelegramWorker:
         )
 
     async def _global_heartbeat_loop(self):
-        """Heartbeat global independente dos loops."""
-        db = get_supabase()
+        """Heartbeat global - apenas monitora status dos loops (não grava no DB).
+        
+        Cada conta individual já tem seu próprio heartbeat via classe Heartbeat.
+        Este loop apenas loga status periodicamente para diagnóstico.
+        """
         while True:
             try:
                 status = self.watchdog.get_status()
-                db.table("worker_heartbeats").upsert({
-                    "integration_account_id": "00000000-0000-0000-0000-000000000000",
-                    "owner_id": "00000000-0000-0000-0000-000000000000",
-                    "worker_type": "telegram-global",
-                    "status": "online",
-                    "last_heartbeat_at": datetime.now(timezone.utc).isoformat(),
-                    "metadata": {"loops": status},
-                }, on_conflict="integration_account_id,worker_type").execute()
+                # Log apenas em caso de problema (algum loop não está alive)
+                for loop_name, loop_status in status.items():
+                    if not loop_status.get("alive", True):
+                        print(f"[WATCHDOG-STATUS] Loop '{loop_name}' não está ativo: {loop_status}")
             except Exception as e:
                 print(f"[HEARTBEAT-GLOBAL] Erro: {e}")
-            await asyncio.sleep(15)
+            await asyncio.sleep(30)  # Reduzido de 15s para 30s
 
     async def _sync_loop(self):
         """Loop de sincronização de contas."""
@@ -149,9 +204,10 @@ class TelegramWorker:
         """Sincroniza contas ativas do banco."""
         db = get_supabase()
 
-        result = db.table("integration_accounts").select(
+        # Query async para não bloquear event loop
+        result = await db_async(lambda: db.table("integration_accounts").select(
             "id, owner_id, secrets_encrypted, config, workspace_id"
-        ).eq("type", "telegram_user").eq("is_active", True).execute()
+        ).eq("type", "telegram_user").eq("is_active", True).execute())
 
         active_ids = set()
 
@@ -245,12 +301,12 @@ class TelegramWorker:
 
             print(f"Conta {acc_id} conectada")
 
-            # Atualiza last_sync_at
+            # Atualiza last_sync_at (async para não bloquear)
             db = get_supabase()
-            db.table("integration_accounts").update({
+            await db_async(lambda: db.table("integration_accounts").update({
                 "last_sync_at": datetime.now(timezone.utc).isoformat(),
                 "last_error": None,
-            }).eq("id", acc_id).execute()
+            }).eq("id", acc_id).execute())
 
         except Exception as e:
             print(f"Erro ao conectar conta {acc_id}: {e}")
@@ -293,13 +349,12 @@ class TelegramWorker:
         """Processa mensagens outbound pendentes."""
         db = get_supabase()
 
-        # Busca mensagens outbound não enviadas (sem external_message_id real)
-        # Mensagens do frontend têm external_message_id começando com "local-"
-        result = db.table("messages").select(
+        # Busca mensagens outbound não enviadas (async para não bloquear)
+        result = await db_async(lambda: db.table("messages").select(
             "id, conversation_id, integration_account_id, identity_id, text, channel, sent_at"
         ).eq("direction", "outbound").eq(
             "channel", "telegram"
-        ).like("external_message_id", "local-%").limit(10).execute()
+        ).like("external_message_id", "local-%").limit(10).execute())
 
         for msg in result.data:
             await self._send_telegram_message(msg)
@@ -329,10 +384,10 @@ class TelegramWorker:
             except Exception:
                 pass
 
-        # Busca attachments da mensagem
-        att_result = db.table("attachments").select(
+        # Busca attachments da mensagem (async)
+        att_result = await db_async(lambda: db.table("attachments").select(
             "id, storage_bucket, storage_path, file_name, mime_type"
-        ).eq("message_id", message_id).execute()
+        ).eq("message_id", message_id).execute())
 
         attachments = att_result.data or []
 
@@ -349,74 +404,60 @@ class TelegramWorker:
                 return  # Pula, tenta novamente no próximo ciclo
 
             print(f"Mensagem {message_id} sem texto nem mídia, marcando como erro")
-            db.table("messages").update({
+            await db_async(lambda: db.table("messages").update({
                 "external_message_id": f"error-empty-{message_id}",
-            }).eq("id", message_id).execute()
+            }).eq("id", message_id).execute())
             return
 
         try:
-            # Busca telegram_user_id do destinatário
-            identity_result = db.table("contact_identities").select(
-                "value"
-            ).eq("id", message["identity_id"]).execute()
+            # Busca telegram_user_id e access_hash do destinatário (async)
+            identity_result = await db_async(lambda: db.table("contact_identities").select(
+                "value, metadata"
+            ).eq("id", message["identity_id"]).single().execute())
 
             if not identity_result.data:
                 print(f"Identity {message['identity_id']} não encontrada")
                 return
 
-            telegram_user_id = int(identity_result.data[0]["value"])
+            telegram_user_id = int(identity_result.data["value"])
+            metadata = identity_result.data.get("metadata") or {}
+            access_hash = metadata.get("access_hash")
 
-            # Buscar access_hash do metadata da identity
-            identity_meta = db.table("contact_identities").select("metadata").eq(
-                "id", message["identity_id"]
-            ).single().execute()
-            access_hash = None
-            if identity_meta.data and identity_meta.data.get("metadata"):
-                access_hash = identity_meta.data["metadata"].get("access_hash")
-
-            # Resolver entidade (COM TIMEOUT para não travar)
-            entity = None
             from telethon.tl.types import InputPeerUser
+            entity = None
 
-            # Primeiro tenta com access_hash salvo (mais confiável)
-            if access_hash:
-                try:
-                    entity = InputPeerUser(telegram_user_id, access_hash)
-                    # Testa se funciona com timeout
-                    test = await telegram_op(
-                        client.get_input_entity(entity),
-                        TIMEOUT_TELEGRAM_ENTITY,
-                        f"get_input_entity({telegram_user_id})"
-                    )
-                    if test:
-                        print(f"Entidade resolvida via access_hash: {telegram_user_id}")
-                    else:
-                        entity = None
-                except Exception as e:
-                    print(f"access_hash inválido, tentando get_entity: {e}")
-                    entity = None
+            # 1. Verifica cache de entities primeiro (instantâneo)
+            cached = self._get_cached_entity(telegram_user_id)
+            if cached:
+                entity = cached
+                print(f"[CACHE] Entity do cache: {telegram_user_id}")
 
-            # Fallback: tenta resolver via Telethon (COM TIMEOUT)
-            if not entity:
+            # 2. Se tem access_hash, usa DIRETO sem validar (evita timeout)
+            elif access_hash:
+                entity = InputPeerUser(telegram_user_id, access_hash)
+                self._cache_entity(telegram_user_id, entity)
+                print(f"[FAST] Entity via access_hash: {telegram_user_id}")
+
+            # 3. Verifica se get_entity falhou recentemente (cache negativo)
+            elif self._is_entity_failed(telegram_user_id):
+                print(f"[SKIP] get_entity falhou recentemente para {telegram_user_id}")
+                return  # Tenta novamente depois que cache negativo expirar
+
+            # 4. Última opção: get_entity (pode dar timeout)
+            else:
                 entity = await telegram_op(
                     client.get_entity(telegram_user_id),
                     TIMEOUT_TELEGRAM_ENTITY,
                     f"get_entity({telegram_user_id})"
                 )
                 if entity:
-                    print(f"Entidade resolvida via get_entity: {entity.id}")
+                    self._cache_entity(telegram_user_id, entity)
+                    print(f"[SLOW] Entity via get_entity: {telegram_user_id}")
                 else:
-                    # Última tentativa: cache
-                    entity = await telegram_op(
-                        client.get_input_entity(telegram_user_id),
-                        TIMEOUT_TELEGRAM_ENTITY,
-                        f"get_input_entity_cache({telegram_user_id})"
-                    )
-                    if entity:
-                        print(f"InputEntity obtida do cache: {entity}")
-                    else:
-                        print(f"Não foi possível resolver usuário {telegram_user_id}")
-                        return  # Tenta novamente no próximo ciclo
+                    # Marca falha no cache negativo
+                    self._mark_entity_failed(telegram_user_id)
+                    print(f"[FAIL] Não foi possível resolver {telegram_user_id}")
+                    return  # Tenta novamente no próximo ciclo
 
             sent = None
 
@@ -436,10 +477,10 @@ class TelegramWorker:
                 )
 
             if sent:
-                # Atualiza external_message_id com ID real
-                db.table("messages").update({
+                # Atualiza external_message_id com ID real (async)
+                await db_async(lambda: db.table("messages").update({
                     "external_message_id": str(sent.id),
-                }).eq("id", message_id).execute()
+                }).eq("id", message_id).execute())
                 print(f"Mensagem enviada para {telegram_user_id}")
             else:
                 raise Exception("Falha ao enviar mensagem")
@@ -448,10 +489,10 @@ class TelegramWorker:
             print(f"Erro ao enviar mensagem {message_id}: {e}")
             import traceback
             traceback.print_exc()
-            # Marca erro na mensagem
-            db.table("messages").update({
+            # Marca erro na mensagem (async)
+            await db_async(lambda: db.table("messages").update({
                 "external_message_id": f"error-{message_id}",
-            }).eq("id", message_id).execute()
+            }).eq("id", message_id).execute())
 
     def _convert_webm_to_ogg(self, webm_bytes: bytes) -> bytes | None:
         """Converte WebM para OGG Opus usando FFmpeg (requerido para voice notes Telegram)."""
@@ -864,14 +905,14 @@ class TelegramWorker:
         db = get_supabase()
         ext_msg_id = str(msg_id)
 
-        # Verifica se já existe (filtra por conta E direção - msg_id não é único global)
-        existing = db.table("messages").select("id").eq(
+        # Verifica se já existe (async para não bloquear)
+        existing = await db_async(lambda: db.table("messages").select("id").eq(
             "external_message_id", ext_msg_id
         ).eq(
             "integration_account_id", acc_id
         ).eq(
             "direction", "outbound"
-        ).execute()
+        ).execute())
 
         if existing.data:
             return  # Já processada
@@ -879,15 +920,16 @@ class TelegramWorker:
         telegram_user_id = str(user_id)
         workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
 
-        # Primeiro tenta buscar identity existente no banco (FILTRA POR WORKSPACE!)
-        identity_query = db.table("contact_identities").select(
-            "id, contact_id"
-        ).eq("value", telegram_user_id)
-        if workspace_id:
-            identity_query = identity_query.eq("workspace_id", workspace_id)
-        else:
-            identity_query = identity_query.eq("owner_id", owner_id)
-        existing_identity = identity_query.execute()
+        # Primeiro tenta buscar identity existente no banco (async)
+        def query_identity():
+            q = db.table("contact_identities").select("id, contact_id").eq("value", telegram_user_id)
+            if workspace_id:
+                q = q.eq("workspace_id", workspace_id)
+            else:
+                q = q.eq("owner_id", owner_id)
+            return q.execute()
+        
+        existing_identity = await db_async(query_identity)
 
         entity = None  # Pode não precisar buscar se já existe
         if existing_identity.data:
@@ -895,16 +937,32 @@ class TelegramWorker:
             identity = existing_identity.data[0]
             print(f"[RAW] Identity encontrada no banco: {telegram_user_id}")
         else:
-            # Identity não existe - tenta buscar entity do Telegram
-            try:
-                entity = await telegram_op(
-                    client.get_entity(user_id),
-                    TIMEOUT_TELEGRAM_ENTITY,
-                    f"get_entity({user_id})"
-                )
-            except Exception as e:
-                print(f"[RAW] get_entity falhou para {user_id}, criando identity mínima")
+            # Identity não existe - tenta buscar entity do Telegram (COM CACHE)
+            # 1. Verifica cache primeiro
+            cached = self._get_cached_entity(user_id)
+            if cached and isinstance(cached, User):
+                entity = cached
+                print(f"[RAW] Entity do cache: {user_id}")
+            # 2. Verifica cache negativo
+            elif self._is_entity_failed(user_id):
+                print(f"[RAW] Skipping get_entity (falhou recentemente): {user_id}")
                 entity = None
+            # 3. Busca via Telegram
+            else:
+                try:
+                    entity = await telegram_op(
+                        client.get_entity(user_id),
+                        TIMEOUT_TELEGRAM_ENTITY,
+                        f"get_entity({user_id})"
+                    )
+                    if entity:
+                        self._cache_entity(user_id, entity)
+                    else:
+                        self._mark_entity_failed(user_id)
+                except Exception as e:
+                    print(f"[RAW] get_entity falhou para {user_id}, criando identity mínima")
+                    self._mark_entity_failed(user_id)
+                    entity = None
 
             if entity and isinstance(entity, User):
                 identity = await self._get_or_create_identity(
@@ -989,14 +1047,14 @@ class TelegramWorker:
         db = get_supabase()
         ext_msg_id = str(msg_id)
 
-        # Verifica se já existe (evita duplicata com handler normal)
-        existing = db.table("messages").select("id").eq(
+        # Verifica se já existe (async para não bloquear)
+        existing = await db_async(lambda: db.table("messages").select("id").eq(
             "external_message_id", ext_msg_id
         ).eq(
             "integration_account_id", acc_id
         ).eq(
             "direction", "inbound"
-        ).execute()
+        ).execute())
 
         if existing.data:
             return  # Já processada (provavelmente pelo handler events.NewMessage)
@@ -1004,16 +1062,33 @@ class TelegramWorker:
         telegram_user_id = str(user_id)
         workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
 
-        # Tenta buscar entity para pegar nome/foto
+        # Tenta buscar entity para pegar nome/foto (COM CACHE)
         entity = None
-        try:
-            entity = await telegram_op(
-                client.get_entity(user_id),
-                TIMEOUT_TELEGRAM_ENTITY,
-                f"get_entity({user_id})"
-            )
-        except Exception as e:
-            print(f"[RAW-IN] get_entity falhou para {user_id}: {e}")
+        
+        # 1. Verifica cache primeiro (instantâneo)
+        cached = self._get_cached_entity(user_id)
+        if cached and isinstance(cached, User):
+            entity = cached
+            print(f"[RAW-IN] Entity do cache: {user_id}")
+        # 2. Verifica cache negativo (falhou recentemente)
+        elif self._is_entity_failed(user_id):
+            print(f"[RAW-IN] Skipping get_entity (falhou recentemente): {user_id}")
+            entity = None
+        # 3. Busca via Telegram
+        else:
+            try:
+                entity = await telegram_op(
+                    client.get_entity(user_id),
+                    TIMEOUT_TELEGRAM_ENTITY,
+                    f"get_entity({user_id})"
+                )
+                if entity:
+                    self._cache_entity(user_id, entity)
+                else:
+                    self._mark_entity_failed(user_id)
+            except Exception as e:
+                print(f"[RAW-IN] get_entity falhou para {user_id}: {e}")
+                self._mark_entity_failed(user_id)
 
         # Busca ou cria identity
         if entity and isinstance(entity, User):
@@ -1021,20 +1096,21 @@ class TelegramWorker:
                 db, owner_id, telegram_user_id, entity, client, workspace_id
             )
         else:
-            # Fallback: busca existente ou cria mínima
-            identity_query = db.table("contact_identities").select(
-                "id, contact_id"
-            ).eq("value", telegram_user_id)
-            if workspace_id:
-                identity_query = identity_query.eq("workspace_id", workspace_id)
-            else:
-                identity_query = identity_query.eq("owner_id", owner_id)
-            existing_identity = identity_query.execute()
+            # Fallback: busca existente ou cria mínima (async)
+            def query_identity():
+                q = db.table("contact_identities").select("id, contact_id").eq("value", telegram_user_id)
+                if workspace_id:
+                    q = q.eq("workspace_id", workspace_id)
+                else:
+                    q = q.eq("owner_id", owner_id)
+                return q.execute()
+            
+            existing_identity = await db_async(query_identity)
 
             if existing_identity.data:
                 identity = existing_identity.data[0]
             else:
-                # Cria identity mínima
+                # Cria identity mínima (async)
                 identity_id = str(uuid4())
                 identity_data = {
                     "id": identity_id,
@@ -1049,7 +1125,7 @@ class TelegramWorker:
                 }
                 if workspace_id:
                     identity_data["workspace_id"] = workspace_id
-                db.table("contact_identities").insert(identity_data).execute()
+                await db_async(lambda: db.table("contact_identities").insert(identity_data).execute())
                 identity = {"id": identity_id, "contact_id": None}
                 print(f"[RAW-IN] Identity mínima criada: {telegram_user_id}")
 
@@ -1979,30 +2055,10 @@ class TelegramWorker:
     async def _handle_user_update(self, acc_id: str, owner_id: str, event):
         """Processa eventos de atualização do usuário (typing, online)."""
         try:
-            db = get_supabase()
             user_id = event.user_id
             now = datetime.now(timezone.utc)
 
-            # Busca identity do usuário
-            identity_result = db.table("contact_identities").select(
-                "id"
-            ).eq("owner_id", owner_id).eq(
-                "type", "telegram_user"
-            ).eq("value", str(user_id)).execute()
-
-            if not identity_result.data:
-                return  # Usuário não está em nossos contatos
-
-            identity_id = identity_result.data[0]["id"]
-
-            # Busca conversa do usuário
-            conv_result = db.table("conversations").select("id").eq(
-                "primary_identity_id", identity_id
-            ).execute()
-
-            conversation_id = conv_result.data[0]["id"] if conv_result.data else None
-
-            # Verifica se é evento de typing
+            # Determina estado atual
             is_typing = False
             is_online = None
             last_seen = None
@@ -2013,7 +2069,6 @@ class TelegramWorker:
             else:
                 typing_expires = None
 
-            # Verifica status online
             if hasattr(event, 'status'):
                 status = event.status
                 if isinstance(status, UserStatusOnline):
@@ -2025,10 +2080,35 @@ class TelegramWorker:
                         last_seen = status.was_online.isoformat()
                 elif isinstance(status, UserStatusRecently):
                     is_online = False
-                    last_seen = now.isoformat()  # Aproximado
+                    last_seen = now.isoformat()
 
-            # Upsert em presence_status
-            db.table("presence_status").upsert({
+            # THROTTLE: só grava se estado mudou ou passou tempo suficiente
+            if not self._should_update_presence(user_id, is_online or False, is_typing):
+                return  # Skip - estado igual e dentro do throttle
+
+            db = get_supabase()
+
+            # Busca identity do usuário (async para não bloquear)
+            identity_result = await db_async(lambda: db.table("contact_identities").select(
+                "id"
+            ).eq("owner_id", owner_id).eq(
+                "type", "telegram_user"
+            ).eq("value", str(user_id)).execute())
+
+            if not identity_result.data:
+                return  # Usuário não está em nossos contatos
+
+            identity_id = identity_result.data[0]["id"]
+
+            # Busca conversa do usuário (async)
+            conv_result = await db_async(lambda: db.table("conversations").select("id").eq(
+                "primary_identity_id", identity_id
+            ).execute())
+
+            conversation_id = conv_result.data[0]["id"] if conv_result.data else None
+
+            # Upsert em presence_status (async)
+            await db_async(lambda: db.table("presence_status").upsert({
                 "owner_id": owner_id,
                 "contact_identity_id": identity_id,
                 "conversation_id": conversation_id,
@@ -2037,7 +2117,7 @@ class TelegramWorker:
                 "last_seen_at": last_seen,
                 "typing_expires_at": typing_expires,
                 "updated_at": now.isoformat(),
-            }, on_conflict="owner_id,contact_identity_id").execute()
+            }, on_conflict="owner_id,contact_identity_id").execute())
 
             if is_typing:
                 print(f"[PRESENCE] Usuário {user_id} está digitando")
