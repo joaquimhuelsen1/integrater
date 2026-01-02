@@ -174,17 +174,15 @@ async def send_message(
                             "Content-Type": "application/json",
                         },
                         json={
-                            "account_id": str(integration_account_id),
-                            "telegram_user_id": telegram_user_id,
-                            "text": data.text,
+                            "conversation_id": str(data.conversation_id),
+                            "text": data.text or "",
                             "attachments": attachment_urls,
-                            "message_id": str(message_id),  # ID da mensagem no banco
                         },
                     )
                 
                 if response.status_code == 200:
                     resp_data = response.json()
-                    if resp_data.get("success"):
+                    if resp_data.get("status") == "ok":
                         external_id = str(resp_data.get("telegram_msg_id"))
                         send_status = "sent"
                         print(f"[Telegram] Enviado via n8n com sucesso: {external_id}")
