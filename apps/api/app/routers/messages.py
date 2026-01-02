@@ -127,7 +127,76 @@ async def send_message(
     send_status = "sent"
     external_id = None
 
-    if channel == "openphone_sms":
+    if channel == "telegram":
+        print(f"[Telegram] Enviando mensagem para conversa {data.conversation_id}")
+        
+        # Buscar telegram_user_id da identity
+        telegram_user_id = None
+        if identity_id:
+            identity_result = db.table("contact_identities").select("value, type").eq(
+                "id", identity_id
+            ).single().execute()
+            if identity_result.data and identity_result.data.get("type") == "telegram_user":
+                telegram_user_id = int(identity_result.data.get("value"))
+                print(f"[Telegram] telegram_user_id via identity: {telegram_user_id}")
+        
+        if telegram_user_id and integration_account_id:
+            # Buscar attachments URLs se houver
+            attachment_urls = []
+            if data.attachments:
+                for att_id in data.attachments:
+                    att_result = db.table("attachments").select(
+                        "storage_bucket, storage_path"
+                    ).eq("id", str(att_id)).single().execute()
+                    if att_result.data:
+                        bucket = att_result.data.get("storage_bucket", "attachments")
+                        path = att_result.data.get("storage_path")
+                        if path:
+                            from ..config import get_settings
+                            settings = get_settings()
+                            url = f"{settings.supabase_url}/storage/v1/object/public/{bucket}/{path}"
+                            attachment_urls.append(url)
+            
+            # Chamar API do Worker Telegram
+            try:
+                import os
+                worker_url = os.environ.get("TELEGRAM_WORKER_URL", "http://telegram-worker:8001")
+                worker_api_key = os.environ.get("WORKER_API_KEY", "")
+                
+                async with httpx.AsyncClient(timeout=30) as client:
+                    response = await client.post(
+                        f"{worker_url}/send",
+                        headers={
+                            "X-API-KEY": worker_api_key,
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "account_id": str(integration_account_id),
+                            "telegram_user_id": telegram_user_id,
+                            "text": data.text,
+                            "attachments": attachment_urls,
+                        },
+                    )
+                
+                if response.status_code == 200:
+                    resp_data = response.json()
+                    if resp_data.get("success"):
+                        external_id = str(resp_data.get("telegram_msg_id"))
+                        send_status = "sent"
+                        print(f"[Telegram] Enviado com sucesso: {external_id}")
+                    else:
+                        send_status = "failed"
+                        print(f"[Telegram] Erro do Worker: {resp_data.get('error')}")
+                else:
+                    send_status = "failed"
+                    print(f"[Telegram] Erro HTTP: {response.status_code} {response.text}")
+            except Exception as e:
+                send_status = "failed"
+                print(f"[Telegram] Exceção ao enviar: {e}")
+        else:
+            print(f"[Telegram] telegram_user_id ou integration_account_id não encontrado")
+
+    elif channel == "openphone_sms":
         print(f"[OpenPhone] Enviando SMS para conversa {data.conversation_id}")
 
         # Buscar conta de integração (da request ou primeira ativa)

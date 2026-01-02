@@ -93,3 +93,17 @@ Tarefas relacionadas ao backend FastAPI (apps/api).
 - `apps/api/app/routers/telegram.py:280-342` - endpoints sync
 - `apps/api/app/models/integrations.py:99-115` - modelos Pydantic
 - `apps/web/src/components/settings-view.tsx` - UI com botões sync
+
+#### [API-008] Integrar envio Telegram via Worker HTTP ✅
+**Data:** 2026-01-02
+**Contexto:** Frontend enviava mensagens mas não chegavam no Telegram. Loop de outbound foi removido do worker para usar n8n.
+**Resultado:** API agora chama Worker HTTP diretamente para enviar mensagens Telegram
+**Fluxo:**
+1. Frontend chama POST /messages/send
+2. API insere mensagem no banco
+3. API chama Worker HTTP (http://telegram-worker:8001/send)
+4. Worker envia via Telethon
+5. API atualiza external_message_id com telegram_msg_id
+**Arquivos:**
+- `apps/api/app/routers/messages.py:130-197` - lógica de envio Telegram
+- `apps/api/.env.example` - variáveis TELEGRAM_WORKER_URL e WORKER_API_KEY
