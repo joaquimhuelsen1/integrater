@@ -188,30 +188,54 @@ async def send_message(req: SendRequest):
 
 async def _resolve_entity(worker: "TelegramWorker", client, telegram_user_id: int):
     """Resolve entity do Telegram usando cache do worker."""
-    from telethon.tl.types import InputPeerUser
+    from telethon.tl.types import User
     
-    # 1. Verifica cache
+    # 1. Verifica cache positivo
     cached = worker._get_cached_entity(telegram_user_id)
     if cached:
         print(f"[API] Entity do cache: {telegram_user_id}")
         return cached
     
-    # 2. Verifica cache negativo
-    if worker._is_entity_failed(telegram_user_id):
-        print(f"[API] Entity em cache negativo: {telegram_user_id}")
-        return None
-    
-    # 3. Busca via Telegram
+    # 2. Tenta get_entity (ignora cache negativo - sempre tenta)
     try:
         entity = await client.get_entity(telegram_user_id)
         if entity:
             worker._cache_entity(telegram_user_id, entity)
-            print(f"[API] Entity resolvida: {telegram_user_id}")
+            # Limpa cache negativo se existia
+            if telegram_user_id in worker.entity_fail_cache:
+                del worker.entity_fail_cache[telegram_user_id]
+            print(f"[API] Entity resolvida via get_entity: {telegram_user_id}")
             return entity
     except Exception as e:
-        print(f"[API] Erro ao resolver entity {telegram_user_id}: {e}")
-        worker._mark_entity_failed(telegram_user_id)
+        print(f"[API] get_entity falhou para {telegram_user_id}: {e}")
     
+    # 3. Fallback: busca nos dialogs
+    try:
+        print(f"[API] Tentando fallback via dialogs para {telegram_user_id}")
+        async for dialog in client.iter_dialogs(limit=200):
+            if dialog.entity and hasattr(dialog.entity, 'id') and dialog.entity.id == telegram_user_id:
+                worker._cache_entity(telegram_user_id, dialog.entity)
+                # Limpa cache negativo se existia
+                if telegram_user_id in worker.entity_fail_cache:
+                    del worker.entity_fail_cache[telegram_user_id]
+                print(f"[API] Entity resolvida via dialogs: {telegram_user_id}")
+                return dialog.entity
+    except Exception as e:
+        print(f"[API] iter_dialogs falhou: {e}")
+    
+    # 4. Fallback: tenta get_input_entity
+    try:
+        input_entity = await client.get_input_entity(telegram_user_id)
+        if input_entity:
+            entity = await client.get_entity(input_entity)
+            if entity:
+                worker._cache_entity(telegram_user_id, entity)
+                print(f"[API] Entity resolvida via get_input_entity: {telegram_user_id}")
+                return entity
+    except Exception as e:
+        print(f"[API] get_input_entity falhou: {e}")
+    
+    print(f"[API] Não conseguiu resolver entity: {telegram_user_id}")
     return None
 
 
