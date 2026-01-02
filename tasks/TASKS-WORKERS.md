@@ -10,7 +10,41 @@ Tarefas relacionadas aos workers Telegram/Email (apps/workers).
 
 <!-- Tarefas sendo trabalhadas -->
 
+#### [WORKERS-008] Reestruturar Worker Telegram com n8n
+**Contexto:** Worker muito complexo, delay em mensagens. Reestruturar para usar n8n como orquestrador.
+**Arquivo:** `apps/workers/telegram/worker.py`
+**Milestone:** `M9`
+**Bloqueio:** nao
+**Proximos passos:**
+1. ~~Criar webhooks.py para comunicacao com n8n~~
+2. ~~Criar api.py com FastAPI para receber comandos de envio~~
+3. ~~Modificar worker.py para enviar eventos para n8n~~
+4. ~~Gerar JSON do workflow n8n~~
+5. Configurar n8n no servidor com credenciais Supabase
+6. Testar fluxo completo inbound/outbound/send
+7. Ajustar URLs e API keys em producao
+
+**Referencias:**
+- Workflow: `apps/workers/telegram/n8n-workflow-telegram.json`
+- API: `apps/workers/telegram/api.py`
+- Webhooks: `apps/workers/telegram/webhooks.py`
+
+**Atualizacoes:**
+- 2026-01-02: Criados webhooks.py, api.py. Worker modificado para enviar eventos ao n8n.
+- 2026-01-02: Gerado JSON do workflow n8n com 3 fluxos (inbound/outbound/send).
+
 ## Concluídas
+
+#### [WORKERS-007] Analise delay worker mensagem ✅
+**Data:** 2026-01-02
+**Resultado:** Diagnosticado e resolvido via reestruturacao com n8n
+**Causa raiz:** Worker fazendo I/O sincrono no Supabase bloqueava loop de eventos
+**Solucao:** Worker agora apenas captura eventos e envia para webhooks n8n. n8n orquestra toda logica de negocio (criar identity, conversa, mensagens). Ver WORKERS-008.
+**Arquivos:**
+- `apps/workers/telegram/webhooks.py` - funcoes para chamar n8n
+- `apps/workers/telegram/api.py` - FastAPI com /send e /health
+- `apps/workers/telegram/worker.py` - handlers enviam para n8n
+- `apps/workers/telegram/n8n-workflow-telegram.json` - workflow completo
 
 #### [WORKERS-001] Implementar worker Telegram ✅
 **Data:** 2025-12-20

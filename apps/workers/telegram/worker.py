@@ -1,6 +1,12 @@
 """
 Worker Telegram - Recebe e envia mensagens via Telethon
 
+ARQUITETURA COM n8n:
+- Worker captura eventos do Telegram e envia para webhooks n8n
+- Worker expõe API HTTP para n8n enviar comandos de envio
+- n8n orquestra toda a lógica de negócio (criar identity, conversa, inserir mensagens)
+- Worker mantém: presence, sync histórico, heartbeat
+
 Uso:
     python worker.py
 
@@ -8,6 +14,8 @@ Env vars necessárias:
     SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
     ENCRYPTION_KEY
     TELEGRAM_API_ID, TELEGRAM_API_HASH
+    N8N_API_KEY, N8N_WEBHOOK_INBOUND, N8N_WEBHOOK_OUTBOUND
+    WORKER_API_KEY, WORKER_HTTP_PORT
 """
 
 import asyncio
@@ -16,6 +24,7 @@ import sys
 from datetime import datetime, timezone, timedelta
 from uuid import UUID, uuid4
 
+import uvicorn
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
@@ -37,27 +46,26 @@ from shared.heartbeat import Heartbeat
 from shared.watchdog import LoopWatchdog
 from supabase import create_client as create_supabase_client
 
+# Importa módulos locais
+from webhooks import notify_inbound_message, notify_outbound_message
+from api import app as fastapi_app, set_worker, WORKER_HTTP_PORT
+
 load_dotenv()
 
-# Timeouts em segundos - operações que passarem disso são canceladas
-TIMEOUT_TELEGRAM_SEND = 30      # Enviar mensagem
-TIMEOUT_TELEGRAM_ENTITY = 3     # Resolver entidade (get_entity) - reduzido de 15s para 3s
-TIMEOUT_TELEGRAM_MEDIA = 60     # Upload de mídia/arquivo
-TIMEOUT_DB = 10                 # Operações no Supabase
+# Timeouts em segundos
+TIMEOUT_TELEGRAM_SEND = 30
+TIMEOUT_TELEGRAM_ENTITY = 3
+TIMEOUT_TELEGRAM_MEDIA = 60
+TIMEOUT_DB = 10
 
 # Cache settings
-ENTITY_CACHE_TTL = 3600         # Cache de entities válido por 1 hora
-ENTITY_FAIL_CACHE_TTL = 300     # Cache negativo (falhas) válido por 5 minutos
-PRESENCE_THROTTLE_SECONDS = 5   # Só grava presence se mudou ou passou 5s
+ENTITY_CACHE_TTL = 3600
+ENTITY_FAIL_CACHE_TTL = 300
+PRESENCE_THROTTLE_SECONDS = 5
 
 
 async def telegram_op(coro, timeout: float, op_name: str):
-    """
-    Executa operação Telegram com timeout.
-
-    Se passar do tempo, cancela e retorna None.
-    Isso evita que o worker trave esperando o Telegram.
-    """
+    """Executa operação Telegram com timeout."""
     try:
         return await asyncio.wait_for(coro, timeout=timeout)
     except asyncio.TimeoutError:
@@ -69,13 +77,7 @@ async def telegram_op(coro, timeout: float, op_name: str):
 
 
 async def db_async(query_fn):
-    """
-    Executa query do Supabase em thread separada.
-
-    supabase-py é síncrono - bloqueia o event loop.
-    Com to_thread(), executamos em outra thread,
-    liberando o event loop para outras tarefas.
-    """
+    """Executa query do Supabase em thread separada."""
     return await asyncio.to_thread(query_fn)
 
 
@@ -84,18 +86,18 @@ class TelegramWorker:
         self.api_id = int(os.environ["TELEGRAM_API_ID"])
         self.api_hash = os.environ["TELEGRAM_API_HASH"]
         self.clients: dict[str, TelegramClient] = {}
-        self.client_tasks: dict[str, asyncio.Task] = {}  # Tasks para run_until_disconnected
+        self.client_tasks: dict[str, asyncio.Task] = {}
         self.heartbeats: dict[str, Heartbeat] = {}
-        self.account_info: dict[str, dict] = {}  # acc_id -> {owner_id, ...}
-        self.watchdog = LoopWatchdog(max_silence=60)  # Reinicia loops travados >60s
+        self.account_info: dict[str, dict] = {}
+        self.watchdog = LoopWatchdog(max_silence=60)
         
-        # Caches para performance (evita timeouts repetidos)
-        self.entity_cache: dict[int, tuple] = {}  # telegram_user_id -> (entity, timestamp)
-        self.entity_fail_cache: dict[int, float] = {}  # telegram_user_id -> timestamp_falha
-        self.presence_cache: dict[int, tuple] = {}  # telegram_user_id -> (estado, is_typing, timestamp)
+        # Caches
+        self.entity_cache: dict[int, tuple] = {}
+        self.entity_fail_cache: dict[int, float] = {}
+        self.presence_cache: dict[int, tuple] = {}
 
     def _get_cached_entity(self, user_id: int):
-        """Retorna entity do cache se válida, None se expirou ou não existe."""
+        """Retorna entity do cache se válida."""
         import time
         if user_id in self.entity_cache:
             entity, ts = self.entity_cache[user_id]
@@ -110,7 +112,7 @@ class TelegramWorker:
         self.entity_cache[user_id] = (entity, time.time())
 
     def _is_entity_failed(self, user_id: int) -> bool:
-        """Verifica se get_entity falhou recentemente para este user."""
+        """Verifica se get_entity falhou recentemente."""
         import time
         if user_id in self.entity_fail_cache:
             if time.time() - self.entity_fail_cache[user_id] < ENTITY_FAIL_CACHE_TTL:
@@ -119,34 +121,34 @@ class TelegramWorker:
         return False
 
     def _mark_entity_failed(self, user_id: int):
-        """Marca que get_entity falhou para este user."""
+        """Marca que get_entity falhou."""
         import time
         self.entity_fail_cache[user_id] = time.time()
 
     def _should_update_presence(self, user_id: int, is_online: bool, is_typing: bool) -> bool:
-        """Retorna True se deve gravar no DB (mudou estado ou passou throttle)."""
+        """Retorna True se deve gravar presence no DB."""
         import time
         now = time.time()
-        cache_key = user_id
         
-        if cache_key in self.presence_cache:
-            cached_online, cached_typing, ts = self.presence_cache[cache_key]
-            # Se estado igual e não passou throttle, não grava
+        if user_id in self.presence_cache:
+            cached_online, cached_typing, ts = self.presence_cache[user_id]
             if cached_online == is_online and cached_typing == is_typing:
                 if now - ts < PRESENCE_THROTTLE_SECONDS:
                     return False
         
-        # Atualiza cache
-        self.presence_cache[cache_key] = (is_online, is_typing, now)
+        self.presence_cache[user_id] = (is_online, is_typing, now)
         return True
 
     async def start(self):
+        """Inicia o worker com FastAPI + Telethon."""
         print("Telegram Worker iniciando...")
-
-        # Cria e registra os loops no watchdog
+        
+        # Registra este worker na API
+        set_worker(self)
+        
+        # Cria loops do Telethon (NOTA: outbound removido - n8n controla via API)
         loops = {
             "sync": self._sync_loop,
-            "outbound": self._outbound_loop,
             "history": self._history_sync_loop,
             "jobs": self._message_jobs_loop,
         }
@@ -155,56 +157,49 @@ class TelegramWorker:
             task = asyncio.create_task(factory())
             self.watchdog.register(name, task, factory)
 
-        # Roda watchdog + heartbeat global (nunca termina)
+        # Configura servidor FastAPI
+        config = uvicorn.Config(
+            fastapi_app,
+            host="0.0.0.0",
+            port=WORKER_HTTP_PORT,
+            log_level="info",
+        )
+        server = uvicorn.Server(config)
+
+        print(f"[API] Servidor HTTP iniciando na porta {WORKER_HTTP_PORT}")
         await asyncio.gather(
+            server.serve(),
             self.watchdog.monitor(),
             self._global_heartbeat_loop(),
         )
 
     async def _global_heartbeat_loop(self):
-        """Heartbeat global - apenas monitora status dos loops (não grava no DB).
-        
-        Cada conta individual já tem seu próprio heartbeat via classe Heartbeat.
-        Este loop apenas loga status periodicamente para diagnóstico.
-        """
+        """Heartbeat global - monitora status dos loops."""
         while True:
             try:
                 status = self.watchdog.get_status()
-                # Log apenas em caso de problema (algum loop não está alive)
                 for loop_name, loop_status in status.items():
                     if not loop_status.get("alive", True):
                         print(f"[WATCHDOG-STATUS] Loop '{loop_name}' não está ativo: {loop_status}")
             except Exception as e:
                 print(f"[HEARTBEAT-GLOBAL] Erro: {e}")
-            await asyncio.sleep(30)  # Reduzido de 15s para 30s
+            await asyncio.sleep(30)
 
     async def _sync_loop(self):
         """Loop de sincronização de contas."""
         while True:
             try:
-                self.watchdog.ping("sync")  # Indica que está vivo
+                self.watchdog.ping("sync")
                 await self._sync_accounts()
                 await asyncio.sleep(60)
             except Exception as e:
                 print(f"Erro no sync loop: {e}")
                 await asyncio.sleep(10)
 
-    async def _outbound_loop(self):
-        """Loop de envio de mensagens outbound."""
-        while True:
-            try:
-                self.watchdog.ping("outbound")  # Indica que está vivo
-                await self._process_outbound_messages()
-                await asyncio.sleep(1)  # Verifica a cada 1s (mais responsivo)
-            except Exception as e:
-                print(f"Erro no outbound loop: {e}")
-                await asyncio.sleep(5)
-
     async def _sync_accounts(self):
         """Sincroniza contas ativas do banco."""
         db = get_supabase()
 
-        # Query async para não bloquear event loop
         result = await db_async(lambda: db.table("integration_accounts").select(
             "id, owner_id, secrets_encrypted, config, workspace_id"
         ).eq("type", "telegram_user").eq("is_active", True).execute())
@@ -218,7 +213,6 @@ class TelegramWorker:
             if acc_id not in self.clients:
                 await self._connect_account(acc)
 
-        # Desconecta contas removidas/desativadas
         for acc_id in list(self.clients.keys()):
             if acc_id not in active_ids:
                 await self._disconnect_account(acc_id)
@@ -229,19 +223,16 @@ class TelegramWorker:
         owner_id = account["owner_id"]
 
         try:
-            # Descriptografa sessão
             session_string = decrypt(account["secrets_encrypted"])
 
             client = TelegramClient(
                 StringSession(session_string),
                 self.api_id,
                 self.api_hash,
-                receive_updates=True,  # Recebe atualizações de TODAS as sessões
+                receive_updates=True,
             )
 
             await client.connect()
-
-            # Captura mensagens perdidas de outras sessões
             await client.catch_up()
 
             if not await client.is_user_authorized():
@@ -250,30 +241,17 @@ class TelegramWorker:
                 await client.disconnect()
                 return
 
-            # Handler RAW para capturar msgs instantaneamente (chats privados)
-            # Mais rápido que events.NewMessage pois não aguarda parsing do Telethon
+            # Handler RAW para msgs instantâneas - ENVIA PARA n8n
             @client.on(events.Raw)
             async def handler_raw(update, _acc_id=acc_id, _owner_id=owner_id, _client=client):
                 await self._handle_raw_update(_acc_id, _owner_id, _client, update)
 
-            # Fallback: eventos.NewMessage para GRUPOS e casos que RAW não pegou
-            # Verifica duplicata antes de processar (RAW pode ter processado primeiro)
+            # Fallback para grupos - ENVIA PARA n8n
             @client.on(events.NewMessage)
             async def handler_new_message(event, _acc_id=acc_id, _owner_id=owner_id):
                 await self._handle_new_message_fallback(_acc_id, _owner_id, event)
 
-            # Handler para ações de chat (entrada/saída de membros, etc)
-            @client.on(events.ChatAction)
-            async def handler_chat_action(event, _acc_id=acc_id, _owner_id=owner_id):
-                print(f"[DEBUG] Chat action para conta {_acc_id}")
-                await self._handle_chat_action(_acc_id, _owner_id, event)
-
-            # Handler para mensagens lidas (read receipts)
-            @client.on(events.MessageRead)
-            async def handler_message_read(event, _acc_id=acc_id, _owner_id=owner_id):
-                await self._handle_message_read(_acc_id, _owner_id, event)
-
-            # Handler para typing indicator
+            # Presence - MANTÉM NO WORKER (direto Supabase)
             @client.on(events.UserUpdate)
             async def handler_user_update(event, _acc_id=acc_id, _owner_id=owner_id):
                 await self._handle_user_update(_acc_id, _owner_id, event)
@@ -294,14 +272,12 @@ class TelegramWorker:
                 "workspace_id": account.get("workspace_id"),
             }
 
-            # Inicia task para receber eventos
             self.client_tasks[acc_id] = asyncio.create_task(
                 self._run_client(acc_id, client)
             )
 
             print(f"Conta {acc_id} conectada")
 
-            # Atualiza last_sync_at (async para não bloquear)
             db = get_supabase()
             await db_async(lambda: db.table("integration_accounts").update({
                 "last_sync_at": datetime.now(timezone.utc).isoformat(),
@@ -313,7 +289,7 @@ class TelegramWorker:
             self._mark_account_error(acc_id, str(e))
 
     async def _run_client(self, acc_id: str, client: TelegramClient):
-        """Mantém cliente rodando para receber eventos."""
+        """Mantém cliente rodando."""
         try:
             await client.run_until_disconnected()
         except asyncio.CancelledError:
@@ -323,7 +299,6 @@ class TelegramWorker:
 
     async def _disconnect_account(self, acc_id: str):
         """Desconecta uma conta."""
-        # Cancela task do cliente
         if acc_id in self.client_tasks:
             self.client_tasks[acc_id].cancel()
             try:
@@ -345,281 +320,6 @@ class TelegramWorker:
 
         print(f"Conta {acc_id} desconectada")
 
-    async def _process_outbound_messages(self):
-        """Processa mensagens outbound pendentes."""
-        db = get_supabase()
-
-        # Busca mensagens outbound não enviadas (async para não bloquear)
-        result = await db_async(lambda: db.table("messages").select(
-            "id, conversation_id, integration_account_id, identity_id, text, channel, sent_at"
-        ).eq("direction", "outbound").eq(
-            "channel", "telegram"
-        ).like("external_message_id", "local-%").limit(10).execute())
-
-        for msg in result.data:
-            await self._send_telegram_message(msg)
-
-    async def _send_telegram_message(self, message: dict):
-        """Envia uma mensagem via Telegram (com suporte a mídia)."""
-        acc_id = message.get("integration_account_id")
-
-        if not acc_id or acc_id not in self.clients:
-            return  # Conta não conectada ainda, tenta novamente depois
-
-        client = self.clients[acc_id]
-        db = get_supabase()
-
-        text = message.get("text") or ""
-        message_id = message["id"]
-
-        # Verifica idade da mensagem (para aguardar vinculação de attachments)
-        sent_at_str = message.get("sent_at")
-        age_seconds = 999
-        if sent_at_str:
-            from datetime import datetime
-            try:
-                sent_at = datetime.fromisoformat(sent_at_str.replace("Z", "+00:00"))
-                now = datetime.now(timezone.utc)
-                age_seconds = (now - sent_at).total_seconds()
-            except Exception:
-                pass
-
-        # Busca attachments da mensagem (async)
-        att_result = await db_async(lambda: db.table("attachments").select(
-            "id, storage_bucket, storage_path, file_name, mime_type"
-        ).eq("message_id", message_id).execute())
-
-        attachments = att_result.data or []
-
-        # Se mensagem não tem texto (provavelmente mídia) e não tem attachments, aguarda
-        # Msgs com texto são processadas direto (não precisam esperar attachments)
-        if not text.strip() and not attachments and age_seconds < 3:
-            print(f"Mensagem {message_id} sem texto, aguardando attachments ({age_seconds:.1f}s)")
-            return  # Pula, tenta novamente no próximo ciclo
-
-        # Se não tem texto nem attachments após aguardar
-        if not text.strip() and not attachments:
-            if age_seconds < 10:
-                print(f"Mensagem {message_id} sem conteúdo, aguardando ({age_seconds:.1f}s)")
-                return  # Pula, tenta novamente no próximo ciclo
-
-            print(f"Mensagem {message_id} sem texto nem mídia, marcando como erro")
-            await db_async(lambda: db.table("messages").update({
-                "external_message_id": f"error-empty-{message_id}",
-            }).eq("id", message_id).execute())
-            return
-
-        try:
-            # Busca telegram_user_id e access_hash do destinatário (async)
-            identity_result = await db_async(lambda: db.table("contact_identities").select(
-                "value, metadata"
-            ).eq("id", message["identity_id"]).single().execute())
-
-            if not identity_result.data:
-                print(f"Identity {message['identity_id']} não encontrada")
-                return
-
-            telegram_user_id = int(identity_result.data["value"])
-            metadata = identity_result.data.get("metadata") or {}
-            access_hash = metadata.get("access_hash")
-
-            from telethon.tl.types import InputPeerUser
-            entity = None
-
-            # 1. Verifica cache de entities primeiro (instantâneo)
-            cached = self._get_cached_entity(telegram_user_id)
-            if cached:
-                entity = cached
-                print(f"[CACHE] Entity do cache: {telegram_user_id}")
-
-            # 2. Se tem access_hash, usa DIRETO sem validar (evita timeout)
-            elif access_hash:
-                entity = InputPeerUser(telegram_user_id, access_hash)
-                self._cache_entity(telegram_user_id, entity)
-                print(f"[FAST] Entity via access_hash: {telegram_user_id}")
-
-            # 3. Verifica se get_entity falhou recentemente (cache negativo)
-            elif self._is_entity_failed(telegram_user_id):
-                print(f"[SKIP] get_entity falhou recentemente para {telegram_user_id}")
-                return  # Tenta novamente depois que cache negativo expirar
-
-            # 4. Última opção: get_entity (pode dar timeout)
-            else:
-                entity = await telegram_op(
-                    client.get_entity(telegram_user_id),
-                    TIMEOUT_TELEGRAM_ENTITY,
-                    f"get_entity({telegram_user_id})"
-                )
-                if entity:
-                    self._cache_entity(telegram_user_id, entity)
-                    print(f"[SLOW] Entity via get_entity: {telegram_user_id}")
-                else:
-                    # Marca falha no cache negativo
-                    self._mark_entity_failed(telegram_user_id)
-                    print(f"[FAIL] Não foi possível resolver {telegram_user_id}")
-                    return  # Tenta novamente no próximo ciclo
-
-            sent = None
-
-            # Se tem attachments, envia com mídia (COM TIMEOUT)
-            if attachments:
-                sent = await telegram_op(
-                    self._send_with_attachments(client, entity, text, attachments, db),
-                    TIMEOUT_TELEGRAM_MEDIA,
-                    f"send_with_attachments({telegram_user_id})"
-                )
-            else:
-                # Apenas texto (COM TIMEOUT)
-                sent = await telegram_op(
-                    client.send_message(entity, text),
-                    TIMEOUT_TELEGRAM_SEND,
-                    f"send_message({telegram_user_id})"
-                )
-
-            if sent:
-                # Atualiza external_message_id com ID real (async)
-                await db_async(lambda: db.table("messages").update({
-                    "external_message_id": str(sent.id),
-                }).eq("id", message_id).execute())
-                print(f"Mensagem enviada para {telegram_user_id}")
-            else:
-                raise Exception("Falha ao enviar mensagem")
-
-        except Exception as e:
-            print(f"Erro ao enviar mensagem {message_id}: {e}")
-            import traceback
-            traceback.print_exc()
-            # Marca erro na mensagem (async)
-            await db_async(lambda: db.table("messages").update({
-                "external_message_id": f"error-{message_id}",
-            }).eq("id", message_id).execute())
-
-    def _convert_webm_to_ogg(self, webm_bytes: bytes) -> bytes | None:
-        """Converte WebM para OGG Opus usando FFmpeg (requerido para voice notes Telegram)."""
-        import subprocess
-        import tempfile
-        import platform
-
-        try:
-            # Cria arquivos temporários
-            with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as webm_file:
-                webm_file.write(webm_bytes)
-                webm_path = webm_file.name
-
-            ogg_path = webm_path.replace(".webm", ".ogg")
-
-            # Determina caminho do FFmpeg (Windows vs Linux)
-            if platform.system() == "Windows":
-                ffmpeg_path = os.environ.get("FFMPEG_PATH", r"C:\ffmpeg\bin\ffmpeg.exe")
-            else:
-                ffmpeg_path = "ffmpeg"
-
-            # Converte com FFmpeg
-            result = subprocess.run([
-                ffmpeg_path, "-y",
-                "-i", webm_path,
-                "-c:a", "libopus",
-                "-b:a", "64k",
-                ogg_path
-            ], capture_output=True, timeout=30)
-
-            if result.returncode != 0:
-                print(f"FFmpeg erro: {result.stderr.decode()}")
-                return None
-
-            # Lê resultado
-            with open(ogg_path, "rb") as f:
-                ogg_bytes = f.read()
-
-            # Limpa arquivos temporários
-            os.unlink(webm_path)
-            os.unlink(ogg_path)
-
-            return ogg_bytes
-
-        except FileNotFoundError:
-            print("FFmpeg não encontrado - enviando WebM diretamente")
-            return None
-        except Exception as e:
-            print(f"Erro na conversão: {e}")
-            return None
-
-    async def _send_with_attachments(self, client, entity, text: str, attachments: list, db):
-        """Envia mensagem com attachments (incluindo áudios como voice notes)."""
-        from supabase import create_client
-        import io
-
-        supabase_url = os.environ["SUPABASE_URL"]
-        supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-        storage_client = create_client(supabase_url, supabase_key)
-
-        sent = None
-        for i, att in enumerate(attachments):
-            try:
-                # Download do storage
-                file_bytes = storage_client.storage.from_(
-                    att["storage_bucket"]
-                ).download(att["storage_path"])
-
-                # Prepara caption (texto apenas no primeiro arquivo)
-                caption = text if i == 0 and text.strip() else None
-
-                mime_type = att.get("mime_type", "")
-                file_name = att["file_name"]
-                is_audio = mime_type.startswith("audio/") or mime_type == "application/ogg"
-                is_image = mime_type.startswith("image/")
-
-                # Se for WebM, converte para OGG (Telegram requer OGG Opus para voice notes)
-                if is_audio and (mime_type == "audio/webm" or file_name.endswith(".webm")):
-                    print(f"Convertendo {file_name} de WebM para OGG...")
-                    ogg_bytes = self._convert_webm_to_ogg(file_bytes)
-                    if ogg_bytes:
-                        file_bytes = ogg_bytes
-                        file_name = file_name.replace(".webm", ".ogg")
-                        mime_type = "audio/ogg"
-                        print(f"Conversão bem-sucedida: {file_name}")
-
-                # Envia arquivo
-                file_like = io.BytesIO(file_bytes)
-                file_like.name = file_name
-
-                if is_audio:
-                    # Envia como voice note
-                    sent = await client.send_file(
-                        entity,
-                        file_like,
-                        caption=caption,
-                        voice_note=True,  # Envia como voice note
-                    )
-                    print(f"Áudio {file_name} enviado como voice note")
-                elif is_image:
-                    # Envia como foto
-                    sent = await client.send_file(
-                        entity,
-                        file_like,
-                        caption=caption,
-                        force_document=False,
-                    )
-                    print(f"Imagem {att['file_name']} enviada")
-                else:
-                    # Envia como documento
-                    sent = await client.send_file(
-                        entity,
-                        file_like,
-                        caption=caption,
-                        force_document=True,
-                    )
-                    print(f"Documento {att['file_name']} enviado")
-
-            except Exception as e:
-                print(f"Erro ao enviar attachment {att['id']}: {e}")
-
-        # Se tinha texto mas não conseguiu enviar com mídia, envia só texto
-        if not sent and text.strip():
-            sent = await client.send_message(entity, text)
-
-        return sent
-
     def _mark_account_error(self, acc_id: str, error: str):
         """Marca erro na conta."""
         db = get_supabase()
@@ -627,1447 +327,290 @@ class TelegramWorker:
             "last_error": error,
         }).eq("id", acc_id).execute()
 
-    async def _handle_new_message_fallback(self, acc_id: str, owner_id: str, event):
-        """
-        Fallback handler para mensagens que RAW não pegou.
-
-        Principal uso: GRUPOS (RAW só pega chats privados bem).
-        Para chats privados: verifica se RAW já processou (duplicata).
-        """
-        try:
-            msg = event.message
-            ext_msg_id = str(msg.id)
-            is_outgoing = msg.out
-            direction = "outbound" if is_outgoing else "inbound"
-
-            db = get_supabase()
-
-            # Verifica se já existe (RAW pode ter processado primeiro)
-            existing = db.table("messages").select("id").eq(
-                "external_message_id", ext_msg_id
-            ).eq(
-                "integration_account_id", acc_id
-            ).eq(
-                "direction", direction
-            ).execute()
-
-            if existing.data:
-                return  # RAW já processou, pula
-
-            # Determina se é grupo ou chat privado
-            chat = await event.get_chat()
-            is_group = isinstance(chat, (Chat, Channel))
-
-            if is_group:
-                print(f"[GRUPO] Mensagem em grupo: {chat.title if hasattr(chat, 'title') else chat.id}")
-                await self._process_group_message(acc_id, owner_id, event, chat, is_outgoing)
-            else:
-                # Chat privado que RAW não pegou (raro, mas possível)
-                print(f"[FALLBACK] Chat privado não capturado por RAW: {msg.id}")
-                await self._handle_incoming_message(acc_id, owner_id, event)
-
-        except Exception as e:
-            import traceback
-            print(f"[FALLBACK] Erro: {e}")
-            traceback.print_exc()
-
-    async def _process_group_message(self, acc_id: str, owner_id: str, event, chat, is_outgoing: bool):
-        """Processa mensagem de grupo."""
-        try:
-            msg = event.message
-            text = msg.text or ""
-            has_media = msg.media is not None
-
-            db = get_supabase()
-            client = self.clients[acc_id]
-            workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
-
-            chat_id = str(chat.id)
-
-            # Busca ou cria identity para o grupo
-            identity = await self._get_or_create_group_identity(
-                db, owner_id, chat_id, chat, client, workspace_id
-            )
-
-            # Busca ou cria conversa
-            conversation = await self._get_or_create_conversation(
-                db, owner_id, identity["id"], identity.get("contact_id"), workspace_id
-            )
-
-            # Determina quem enviou (para msgs inbound em grupos)
-            sender_name = None
-            if not is_outgoing:
-                try:
-                    sender = await event.get_sender()
-                    if sender:
-                        sender_name = getattr(sender, 'first_name', None) or getattr(sender, 'username', None)
-                except:
-                    pass
-
-            # Cria mensagem
-            now = datetime.now(timezone.utc).isoformat()
-            message_id = str(uuid4())
-            direction = "outbound" if is_outgoing else "inbound"
-
-            # Adiciona nome do sender no texto para grupos (contexto)
-            display_text = text
-            if sender_name and not is_outgoing:
-                display_text = f"[{sender_name}] {text}" if text else f"[{sender_name}]"
-
-            db.table("messages").insert({
-                "id": message_id,
-                "owner_id": owner_id,
-                "conversation_id": conversation["id"],
-                "integration_account_id": acc_id,
-                "identity_id": identity["id"],
-                "channel": "telegram",
-                "direction": direction,
-                "text": display_text if display_text else None,
-                "sent_at": msg.date.isoformat(),
-                "external_message_id": str(msg.id),
-                "raw_payload": {"sender_name": sender_name} if sender_name else {},
-            }).execute()
-
-            # Processa mídia se houver
-            if has_media:
-                await self._process_incoming_media(client, db, owner_id, message_id, msg)
-
-            # Incrementa unread apenas para inbound
-            if not is_outgoing:
-                db.rpc("increment_unread", {"conv_id": conversation["id"]}).execute()
-
-            # Atualiza conversa
-            preview = (text[:100] + "...") if text and len(text) > 100 else (text or "[Mídia]")
-            if sender_name and not is_outgoing:
-                preview = f"{sender_name}: {preview}"
-
-            update_data = {
-                "last_message_at": now,
-                "last_channel": "telegram",
-                "last_message_preview": preview,
-            }
-            if is_outgoing:
-                update_data["last_outbound_at"] = msg.date.isoformat()
-
-            db.table("conversations").update(update_data).eq("id", conversation["id"]).execute()
-
-            display = text[:30] if text else "(mídia)"
-            print(f"[GRUPO] {'Enviado' if is_outgoing else 'Recebido'}: {display}...")
-
-        except Exception as e:
-            import traceback
-            print(f"[GRUPO] Erro ao processar: {e}")
-            traceback.print_exc()
-
-    async def _handle_incoming_message(self, acc_id: str, owner_id: str, event):
-        """Processa mensagem recebida (usado pelo FALLBACK)."""
-        try:
-            msg = event.message
-            text = msg.text or ""
-            has_media = msg.media is not None
-
-            print(f"[FALLBACK-PROC] Iniciando: {text[:30] if text else '(mídia)'}")
-
-            sender = await event.get_sender()
-            if not isinstance(sender, User):
-                print(f"[FALLBACK-PROC] Sender não é User: {type(sender)}")
-                return
-
-            print(f"[FALLBACK-PROC] Sender: {sender.first_name} ({sender.id})")
-
-            db = get_supabase()
-            client = self.clients[acc_id]
-            workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
-
-            telegram_user_id = str(sender.id)
-            identity = await self._get_or_create_identity(
-                db, owner_id, telegram_user_id, sender, client, workspace_id
-            )
-            print(f"[FALLBACK-PROC] Identity: {identity['id']}")
-
-            conversation = await self._get_or_create_conversation(
-                db, owner_id, identity["id"], identity["contact_id"], workspace_id
-            )
-            print(f"[FALLBACK-PROC] Conversation: {conversation['id']}")
-
-            now = datetime.now(timezone.utc).isoformat()
-            message_id = str(uuid4())
-
-            try:
-                await db_async(lambda: db.table("messages").insert({
-                    "id": message_id,
-                    "owner_id": owner_id,
-                    "conversation_id": conversation["id"],
-                    "integration_account_id": acc_id,
-                    "identity_id": identity["id"],
-                    "channel": "telegram",
-                    "direction": "inbound",
-                    "text": text if text else None,
-                    "sent_at": msg.date.isoformat(),
-                    "external_message_id": str(msg.id),
-                    "raw_payload": {},
-                }).execute())
-                print(f"[FALLBACK-PROC] ✅ Mensagem salva: {message_id}")
-            except Exception as e:
-                print(f"[FALLBACK-PROC] ❌ ERRO insert: {e}")
-                return
-
-            # Processa mídia se houver
-            if has_media:
-                await self._process_incoming_media(client, db, owner_id, message_id, msg)
-
-            # Incrementa unread_count (async)
-            await db_async(lambda: db.rpc("increment_unread", {"conv_id": conversation["id"]}).execute())
-
-            # Preview da mensagem (trunca em 100 chars)
-            preview = (text[:100] + "...") if text and len(text) > 100 else (text or "[Mídia]")
-
-            await db_async(lambda: db.table("conversations").update({
-                "last_message_at": now,
-                "last_channel": "telegram",
-                "last_message_preview": preview,
-            }).eq("id", conversation["id"]).execute())
-
-            display_text = text[:50] if text else "(mídia)"
-            print(f"Mensagem recebida de {sender.first_name}: {display_text}...")
-
-        except Exception as e:
-            import traceback
-            print(f"Erro ao processar mensagem: {e}")
-            traceback.print_exc()
+    # =============================================
+    # HANDLERS DE MENSAGENS - ENVIAM PARA n8n
+    # =============================================
 
     async def _handle_raw_update(self, acc_id: str, owner_id: str, client: TelegramClient, update):
-        """
-        Processa RAW updates do Telegram.
-
-        Captura mensagens enviadas de QUALQUER sessão (app móvel, desktop, web).
-        O handler events.NewMessage(outgoing=True) só pega da sessão atual.
-        """
+        """Processa RAW updates - envia para n8n."""
         try:
-            # UpdateShortMessage = msg de chat privado (otimizado pelo Telegram)
+            workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
+            
             if isinstance(update, UpdateShortMessage):
-                if update.out:  # Enviada por mim
+                if update.out:
                     print(f"[RAW] UpdateShortMessage OUT: id={update.id} user={update.user_id}")
-                    await self._process_raw_outgoing_message(
-                        acc_id, owner_id, client,
-                        msg_id=update.id,
-                        user_id=update.user_id,
-                        text=update.message,
-                        date=update.date,
-                        media=None
+                    await self._notify_outbound(
+                        acc_id, owner_id, workspace_id, client,
+                        msg_id=update.id, user_id=update.user_id,
+                        text=update.message, date=update.date, media=None
                     )
-                else:  # Recebida de alguém
+                else:
                     print(f"[RAW] UpdateShortMessage IN: id={update.id} user={update.user_id}")
-                    await self._process_raw_incoming_message(
-                        acc_id, owner_id, client,
-                        msg_id=update.id,
-                        user_id=update.user_id,
-                        text=update.message,
-                        date=update.date,
-                        media=None
+                    await self._notify_inbound(
+                        acc_id, owner_id, workspace_id, client,
+                        msg_id=update.id, user_id=update.user_id,
+                        text=update.message, date=update.date, media=None
                     )
 
-            # UpdateNewMessage = msg completa (pode ter mídia)
             elif isinstance(update, UpdateNewMessage):
                 msg = update.message
                 if hasattr(msg, 'peer_id') and isinstance(msg.peer_id, PeerUser):
-                    if hasattr(msg, 'out') and msg.out:  # Enviada por mim
-                        print(f"[RAW] UpdateNewMessage OUT: id={msg.id} user={msg.peer_id.user_id}")
-                        await self._process_raw_outgoing_message(
-                            acc_id, owner_id, client,
-                            msg_id=msg.id,
-                            user_id=msg.peer_id.user_id,
+                    if hasattr(msg, 'out') and msg.out:
+                        print(f"[RAW] UpdateNewMessage OUT: id={msg.id}")
+                        await self._notify_outbound(
+                            acc_id, owner_id, workspace_id, client,
+                            msg_id=msg.id, user_id=msg.peer_id.user_id,
                             text=msg.message if hasattr(msg, 'message') else None,
-                            date=msg.date,
-                            media=getattr(msg, 'media', None)
+                            date=msg.date, media=getattr(msg, 'media', None)
                         )
-                    elif hasattr(msg, 'from_id') and isinstance(msg.from_id, PeerUser):  # Recebida
-                        print(f"[RAW] UpdateNewMessage IN: id={msg.id} user={msg.from_id.user_id}")
-                        await self._process_raw_incoming_message(
-                            acc_id, owner_id, client,
-                            msg_id=msg.id,
-                            user_id=msg.from_id.user_id,
+                    elif hasattr(msg, 'from_id') and isinstance(msg.from_id, PeerUser):
+                        print(f"[RAW] UpdateNewMessage IN: id={msg.id}")
+                        await self._notify_inbound(
+                            acc_id, owner_id, workspace_id, client,
+                            msg_id=msg.id, user_id=msg.from_id.user_id,
                             text=msg.message if hasattr(msg, 'message') else None,
-                            date=msg.date,
-                            media=getattr(msg, 'media', None)
+                            date=msg.date, media=getattr(msg, 'media', None)
                         )
 
         except Exception as e:
             import traceback
-            print(f"[RAW] Erro ao processar update: {e}")
+            print(f"[RAW] Erro: {e}")
             traceback.print_exc()
 
-    async def _process_raw_outgoing_message(
-        self, acc_id: str, owner_id: str, client: TelegramClient,
-        msg_id: int, user_id: int, text: str, date, media
+    async def _notify_inbound(
+        self, acc_id: str, owner_id: str, workspace_id: str | None,
+        client: TelegramClient, msg_id: int, user_id: int, text: str, date, media
     ):
-        """Processa mensagem outgoing capturada via Raw update."""
-        db = get_supabase()
-        ext_msg_id = str(msg_id)
-
-        # Verifica se já existe (async para não bloquear)
-        existing = await db_async(lambda: db.table("messages").select("id").eq(
-            "external_message_id", ext_msg_id
-        ).eq(
-            "integration_account_id", acc_id
-        ).eq(
-            "direction", "outbound"
-        ).execute())
-
-        if existing.data:
-            return  # Já processada
-
-        telegram_user_id = str(user_id)
-        workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
-
-        # Primeiro tenta buscar identity existente no banco (async)
-        def query_identity():
-            q = db.table("contact_identities").select("id, contact_id").eq("value", telegram_user_id)
-            if workspace_id:
-                q = q.eq("workspace_id", workspace_id)
-            else:
-                q = q.eq("owner_id", owner_id)
-            return q.execute()
+        """Notifica n8n sobre mensagem recebida."""
+        sender_data = await self._get_sender_data(client, user_id)
+        media_info = await self._process_media_for_webhook(client, media, msg_id) if media else None
         
-        existing_identity = await db_async(query_identity)
-
-        entity = None  # Pode não precisar buscar se já existe
-        if existing_identity.data:
-            # Identity já existe - usa ela
-            identity = existing_identity.data[0]
-            print(f"[RAW] Identity encontrada no banco: {telegram_user_id}")
-        else:
-            # Identity não existe - tenta buscar entity do Telegram (COM CACHE)
-            # 1. Verifica cache primeiro
-            cached = self._get_cached_entity(user_id)
-            if cached and isinstance(cached, User):
-                entity = cached
-                print(f"[RAW] Entity do cache: {user_id}")
-            # 2. Verifica cache negativo
-            elif self._is_entity_failed(user_id):
-                print(f"[RAW] Skipping get_entity (falhou recentemente): {user_id}")
-                entity = None
-            # 3. Busca via Telegram
-            else:
-                try:
-                    entity = await telegram_op(
-                        client.get_entity(user_id),
-                        TIMEOUT_TELEGRAM_ENTITY,
-                        f"get_entity({user_id})"
-                    )
-                    if entity:
-                        self._cache_entity(user_id, entity)
-                    else:
-                        self._mark_entity_failed(user_id)
-                except Exception as e:
-                    print(f"[RAW] get_entity falhou para {user_id}, criando identity mínima")
-                    self._mark_entity_failed(user_id)
-                    entity = None
-
-            if entity and isinstance(entity, User):
-                identity = await self._get_or_create_identity(
-                    db, owner_id, telegram_user_id, entity, client, workspace_id
-                )
-            else:
-                # Fallback: cria identity mínima sem dados do Telegram
-                identity_id = str(uuid4())
-                identity_data = {
-                    "id": identity_id,
-                    "owner_id": owner_id,
-                    "contact_id": None,
-                    "type": "telegram_user",
-                    "value": telegram_user_id,
-                    "metadata": {
-                        "telegram_user_id": int(telegram_user_id),
-                        "display_name": f"User {telegram_user_id}",
-                    },
-                }
-                if workspace_id:
-                    identity_data["workspace_id"] = workspace_id
-                db.table("contact_identities").insert(identity_data).execute()
-                identity = {"id": identity_id, "contact_id": None}
-                print(f"[RAW] Identity mínima criada: {telegram_user_id}")
-
-        # Busca ou cria conversa
-        conversation = await self._get_or_create_conversation(
-            db, owner_id, identity["id"], identity.get("contact_id"), workspace_id
+        content = {
+            "text": text or "",
+            "media_url": media_info.get("url") if media_info else None,
+            "media_type": media_info.get("type") if media_info else None,
+            "media_name": media_info.get("name") if media_info else None,
+        }
+        
+        await notify_inbound_message(
+            account_id=acc_id,
+            owner_id=owner_id,
+            workspace_id=workspace_id,
+            telegram_user_id=user_id,
+            telegram_msg_id=msg_id,
+            sender=sender_data,
+            content=content,
+            timestamp=date if date else datetime.now(timezone.utc),
+            is_group=False,
         )
 
-        # Cria mensagem
-        now = datetime.now(timezone.utc).isoformat()
-        message_id = str(uuid4())
-        text = text or ""
-
-        try:
-            await db_async(lambda: db.table("messages").insert({
-                "id": message_id,
-                "owner_id": owner_id,
-                "conversation_id": conversation["id"],
-                "integration_account_id": acc_id,
-                "identity_id": identity["id"],
-                "channel": "telegram",
-                "direction": "outbound",
-                "text": text if text else None,
-                "sent_at": date.isoformat() if date else now,
-                "external_message_id": ext_msg_id,
-                "raw_payload": {},
-            }).execute())
-            print(f"[RAW] Mensagem inserida: {message_id}")
-        except Exception as e:
-            print(f"[RAW] ERRO ao inserir mensagem: {e}")
-            return
-
-        # Processa mídia se houver
-        if media and entity:
-            # Busca mensagem completa para processar mídia (só se temos entity)
-            try:
-                full_msg = await client.get_messages(entity, ids=msg_id)
-                if full_msg:
-                    await self._process_incoming_media(client, db, owner_id, message_id, full_msg)
-            except Exception as e:
-                print(f"[RAW] Erro ao processar mídia: {e}")
-
-        # Atualiza conversa (async)
-        preview = (text[:100] + "...") if text and len(text) > 100 else (text or "[Mídia]")
-        await db_async(lambda: db.table("conversations").update({
-            "last_message_at": now,
-            "last_channel": "telegram",
-            "last_message_preview": preview,
-            "last_outbound_at": date.isoformat() if date else now,
-        }).eq("id", conversation["id"]).execute())
-
-        display_text = text[:50] if text else "(mídia)"
-        print(f"[RAW] Msg outgoing salva: user={user_id} - {display_text}...")
-
-    async def _process_raw_incoming_message(
-        self, acc_id: str, owner_id: str, client: TelegramClient,
-        msg_id: int, user_id: int, text: str, date, media
+    async def _notify_outbound(
+        self, acc_id: str, owner_id: str, workspace_id: str | None,
+        client: TelegramClient, msg_id: int, user_id: int, text: str, date, media
     ):
-        """Processa mensagem incoming capturada via Raw update (instantânea)."""
-        db = get_supabase()
-        ext_msg_id = str(msg_id)
-
-        # Verifica se já existe (async para não bloquear)
-        existing = await db_async(lambda: db.table("messages").select("id").eq(
-            "external_message_id", ext_msg_id
-        ).eq(
-            "integration_account_id", acc_id
-        ).eq(
-            "direction", "inbound"
-        ).execute())
-
-        if existing.data:
-            return  # Já processada (provavelmente pelo handler events.NewMessage)
-
-        telegram_user_id = str(user_id)
-        workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
-
-        # Tenta buscar entity para pegar nome/foto (COM CACHE)
-        entity = None
+        """Notifica n8n sobre mensagem enviada (capturada do Telegram)."""
+        media_info = await self._process_media_for_webhook(client, media, msg_id) if media else None
         
-        # 1. Verifica cache primeiro (instantâneo)
+        content = {
+            "text": text or "",
+            "media_url": media_info.get("url") if media_info else None,
+            "media_type": media_info.get("type") if media_info else None,
+            "media_name": media_info.get("name") if media_info else None,
+        }
+        
+        await notify_outbound_message(
+            account_id=acc_id,
+            owner_id=owner_id,
+            workspace_id=workspace_id,
+            telegram_user_id=user_id,
+            telegram_msg_id=msg_id,
+            content=content,
+            timestamp=date if date else datetime.now(timezone.utc),
+            is_group=False,
+        )
+
+    async def _get_sender_data(self, client: TelegramClient, user_id: int) -> dict:
+        """Busca dados do sender do Telegram."""
+        sender_data = {
+            "telegram_user_id": user_id,
+            "first_name": None,
+            "last_name": None,
+            "username": None,
+            "access_hash": None,
+        }
+        
         cached = self._get_cached_entity(user_id)
         if cached and isinstance(cached, User):
-            entity = cached
-            print(f"[RAW-IN] Entity do cache: {user_id}")
-        # 2. Verifica cache negativo (falhou recentemente)
-        elif self._is_entity_failed(user_id):
-            print(f"[RAW-IN] Skipping get_entity (falhou recentemente): {user_id}")
-            entity = None
-        # 3. Busca via Telegram
-        else:
+            sender_data["first_name"] = cached.first_name
+            sender_data["last_name"] = cached.last_name
+            sender_data["username"] = cached.username
+            sender_data["access_hash"] = cached.access_hash
+            return sender_data
+        
+        if not self._is_entity_failed(user_id):
             try:
                 entity = await telegram_op(
                     client.get_entity(user_id),
                     TIMEOUT_TELEGRAM_ENTITY,
                     f"get_entity({user_id})"
                 )
-                if entity:
+                if entity and isinstance(entity, User):
                     self._cache_entity(user_id, entity)
+                    sender_data["first_name"] = entity.first_name
+                    sender_data["last_name"] = entity.last_name
+                    sender_data["username"] = entity.username
+                    sender_data["access_hash"] = entity.access_hash
                 else:
                     self._mark_entity_failed(user_id)
             except Exception as e:
-                print(f"[RAW-IN] get_entity falhou para {user_id}: {e}")
+                print(f"[SENDER] Erro: {e}")
                 self._mark_entity_failed(user_id)
+        
+        return sender_data
 
-        # Busca ou cria identity
-        if entity and isinstance(entity, User):
-            identity = await self._get_or_create_identity(
-                db, owner_id, telegram_user_id, entity, client, workspace_id
-            )
-        else:
-            # Fallback: busca existente ou cria mínima (async)
-            def query_identity():
-                q = db.table("contact_identities").select("id, contact_id").eq("value", telegram_user_id)
-                if workspace_id:
-                    q = q.eq("workspace_id", workspace_id)
-                else:
-                    q = q.eq("owner_id", owner_id)
-                return q.execute()
-            
-            existing_identity = await db_async(query_identity)
-
-            if existing_identity.data:
-                identity = existing_identity.data[0]
-            else:
-                # Cria identity mínima (async)
-                identity_id = str(uuid4())
-                identity_data = {
-                    "id": identity_id,
-                    "owner_id": owner_id,
-                    "contact_id": None,
-                    "type": "telegram_user",
-                    "value": telegram_user_id,
-                    "metadata": {
-                        "telegram_user_id": int(telegram_user_id),
-                        "display_name": f"User {telegram_user_id}",
-                    },
-                }
-                if workspace_id:
-                    identity_data["workspace_id"] = workspace_id
-                await db_async(lambda: db.table("contact_identities").insert(identity_data).execute())
-                identity = {"id": identity_id, "contact_id": None}
-                print(f"[RAW-IN] Identity mínima criada: {telegram_user_id}")
-
-        # Busca ou cria conversa
-        conversation = await self._get_or_create_conversation(
-            db, owner_id, identity["id"], identity.get("contact_id"), workspace_id
-        )
-
-        # Cria mensagem
-        now = datetime.now(timezone.utc).isoformat()
-        message_id = str(uuid4())
-        text = text or ""
-
-        try:
-            await db_async(lambda: db.table("messages").insert({
-                "id": message_id,
-                "owner_id": owner_id,
-                "conversation_id": conversation["id"],
-                "integration_account_id": acc_id,
-                "identity_id": identity["id"],
-                "channel": "telegram",
-                "direction": "inbound",
-                "text": text if text else None,
-                "sent_at": date.isoformat() if date else now,
-                "external_message_id": ext_msg_id,
-                "raw_payload": {},
-            }).execute())
-            print(f"[RAW-IN] Mensagem inserida: {message_id}")
-        except Exception as e:
-            print(f"[RAW-IN] ERRO ao inserir mensagem: {e}")
-            return
-
-        # Processa mídia se houver
-        if media and entity:
-            try:
-                full_msg = await client.get_messages(entity, ids=msg_id)
-                if full_msg:
-                    await self._process_incoming_media(client, db, owner_id, message_id, full_msg)
-            except Exception as e:
-                print(f"[RAW-IN] Erro ao processar mídia: {e}")
-
-        # Incrementa unread_count (async)
-        try:
-            await db_async(lambda: db.rpc("increment_unread", {"conv_id": conversation["id"]}).execute())
-        except Exception as e:
-            print(f"[RAW-IN] Erro increment_unread: {e}")
-
-        # Atualiza conversa (async)
-        preview = (text[:100] + "...") if text and len(text) > 100 else (text or "[Mídia]")
-        await db_async(lambda: db.table("conversations").update({
-            "last_message_at": now,
-            "last_channel": "telegram",
-            "last_message_preview": preview,
-        }).eq("id", conversation["id"]).execute())
-
-        display_text = text[:50] if text else "(mídia)"
-        print(f"[RAW-IN] Msg incoming salva: user={user_id} - {display_text}...")
-
-    async def _handle_chat_action(self, acc_id: str, owner_id: str, event):
-        """Processa ações de chat (entrada/saída de membros, etc)."""
-        try:
-            db = get_supabase()
-            client = self.clients[acc_id]
-
-            # Pega o chat (grupo)
-            chat = await event.get_chat()
-            chat_id = str(event.chat_id)
-
-            # Determina o tipo de ação e texto
-            action_text = None
-            message_type = None
-
-            if event.user_joined:
-                user = await event.get_user()
-                if user:
-                    name = user.first_name or user.username or "Alguém"
-                    action_text = f"{name} joined the group via invite link"
-                    message_type = "service_join"
-            elif event.user_left:
-                user = await event.get_user()
-                if user:
-                    name = user.first_name or user.username or "Alguém"
-                    action_text = f"{name} left the group"
-                    message_type = "service_leave"
-            elif event.user_kicked:
-                user = await event.get_user()
-                if user:
-                    name = user.first_name or user.username or "Alguém"
-                    action_text = f"{name} was removed from the group"
-                    message_type = "service_kick"
-            elif event.user_added:
-                users = await event.get_users()
-                if users:
-                    names = [u.first_name or u.username or "?" for u in users]
-                    action_text = f"{', '.join(names)} was added to the group"
-                    message_type = "service_add"
-
-            if not action_text or not message_type:
-                print(f"[DEBUG] Chat action ignorada (tipo não suportado)")
-                return
-
-            # Busca workspace_id da conta ANTES de criar identity
-            workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
-
-            # Busca ou cria identity para o grupo
-            identity = await self._get_or_create_group_identity(
-                db, owner_id, chat_id, chat, client, workspace_id
-            )
-
-            # Busca ou cria conversa
-            conversation = await self._get_or_create_conversation(
-                db, owner_id, identity["id"], identity["contact_id"], workspace_id
-            )
-
-            # Cria mensagem de serviço
-            now = datetime.now(timezone.utc).isoformat()
-            message_id = str(uuid4())
-
-            db.table("messages").insert({
-                "id": message_id,
-                "owner_id": owner_id,
-                "conversation_id": conversation["id"],
-                "integration_account_id": acc_id,
-                "identity_id": identity["id"],
-                "channel": "telegram",
-                "direction": "inbound",
-                "text": action_text,
-                "message_type": message_type,
-                "sent_at": now,
-                "external_message_id": f"action-{message_id}",
-                "raw_payload": {},
-            }).execute()
-
-            # Atualiza conversa
-            db.table("conversations").update({
-                "last_message_at": now,
-                "last_channel": "telegram",
-            }).eq("id", conversation["id"]).execute()
-
-            print(f"[SERVICE] {action_text}")
-
-        except Exception as e:
-            import traceback
-            print(f"Erro ao processar chat action: {e}")
-            traceback.print_exc()
-
-    async def _parse_service_message(self, client, msg: MessageService) -> tuple[str | None, str | None, dict | None]:
-        """Parse MessageService e retorna (texto, message_type, metadata) ou (None, None, None)."""
-        action = msg.action
-
-        # Tenta pegar info do usuário que fez a ação
-        user_id = None
-        user_name = None
-        if msg.from_id and hasattr(msg.from_id, 'user_id'):
-            user_id = msg.from_id.user_id
-            try:
-                user = await client.get_entity(user_id)
-                user_name = getattr(user, 'first_name', None) or getattr(user, 'username', None) or str(user_id)
-            except Exception:
-                user_name = str(user_id)
-
-        if isinstance(action, MessageActionChatJoinedByLink):
-            name = user_name or "Alguém"
-            metadata = {"action_user_id": user_id, "action_user_name": user_name} if user_id else {}
-            return f"{name} joined the group via invite link", "service_join", metadata
-
-        elif isinstance(action, MessageActionChatJoinedByRequest):
-            name = user_name or "Alguém"
-            metadata = {"action_user_id": user_id, "action_user_name": user_name} if user_id else {}
-            return f"{name} joined the group via request", "service_join", metadata
-
-        elif isinstance(action, MessageActionChatAddUser):
-            user_ids = action.users if action.users else []
-            count = len(user_ids)
-            if count == 1:
-                added_id = user_ids[0]
-                try:
-                    added_user = await client.get_entity(added_id)
-                    added_name = getattr(added_user, 'first_name', None) or str(added_id)
-                except Exception:
-                    added_name = str(added_id)
-                metadata = {"action_user_id": added_id, "action_user_name": added_name}
-                return f"{added_name} was added to the group", "service_add", metadata
-            elif count > 1:
-                return f"{count} members were added to the group", "service_add", {"action_user_ids": user_ids}
-            return None, None, None
-
-        elif isinstance(action, MessageActionChatDeleteUser):
-            removed_id = action.user_id
-            try:
-                removed_user = await client.get_entity(removed_id)
-                removed_name = getattr(removed_user, 'first_name', None) or str(removed_id)
-            except Exception:
-                removed_name = str(removed_id)
-
-            metadata = {"action_user_id": removed_id, "action_user_name": removed_name}
-
-            # Se o user_id == from_id, ele saiu. Senão, foi removido
-            if msg.from_id and hasattr(msg.from_id, 'user_id'):
-                if action.user_id == msg.from_id.user_id:
-                    return f"{removed_name} left the group", "service_leave", metadata
-            return f"{removed_name} was removed from the group", "service_kick", metadata
-
-        # Ação não suportada
-        return None, None, None
-
-    async def _get_or_create_group_identity(self, db, owner_id: str, chat_id: str, chat, client, workspace_id: str = None):
-        """Busca ou cria identity para um grupo do Telegram."""
-        # Verifica se já existe (FILTRA POR WORKSPACE!)
-        query = db.table("contact_identities").select(
-            "id, contact_id"
-        ).eq("type", "telegram_user").eq("value", chat_id)
-        if workspace_id:
-            query = query.eq("workspace_id", workspace_id)
-        else:
-            query = query.eq("owner_id", owner_id)
-        existing = query.execute()
-
-        if existing.data:
-            return existing.data[0]
-
-        # Pega título do grupo
-        title = getattr(chat, 'title', None) or f"Grupo {chat_id}"
-
-        # Cria contato para o grupo
-        contact_id = str(uuid4())
-        contact_data = {
-            "id": contact_id,
-            "owner_id": owner_id,
-            "display_name": title,
-            "metadata": {"is_group": True},
-        }
-        if workspace_id:
-            contact_data["workspace_id"] = workspace_id
-        db.table("contacts").insert(contact_data).execute()
-
-        # Cria identity (sempre telegram_user, is_group no metadata)
-        identity_id = str(uuid4())
-        identity_data = {
-            "id": identity_id,
-            "owner_id": owner_id,
-            "contact_id": contact_id,
-            "type": "telegram_user",
-            "value": chat_id,
-            "metadata": {
-                "display_name": title,
-                "title": title,
-                "is_group": True,
-            },
-        }
-        if workspace_id:
-            identity_data["workspace_id"] = workspace_id
-        db.table("contact_identities").insert(identity_data).execute()
-
-        return {"id": identity_id, "contact_id": contact_id}
-
-    async def _process_incoming_media(self, client, db, owner_id: str, message_id: str, msg):
-        """Baixa e salva mídia de mensagem recebida."""
+    async def _process_media_for_webhook(self, client: TelegramClient, media, msg_id: int) -> dict | None:
+        """Processa mídia e faz upload para Supabase."""
         try:
             from telethon.tl.types import DocumentAttributeAudio, DocumentAttributeFilename
-
-            # Baixa mídia para bytes
-            media_bytes = await client.download_media(msg, file=bytes)
+            
+            media_bytes = await client.download_media(media, file=bytes)
             if not media_bytes:
-                return
-
-            # Determina nome e tipo do arquivo
-            file_name = "media"
+                return None
+            
+            file_name = f"media_{msg_id}"
             mime_type = "application/octet-stream"
-            is_voice = False
-
-            if hasattr(msg.media, "photo"):
-                file_name = f"photo_{msg.id}.jpg"
+            
+            if hasattr(media, "photo"):
+                file_name = f"photo_{msg_id}.jpg"
                 mime_type = "image/jpeg"
-            elif hasattr(msg.media, "document"):
-                doc = msg.media.document
+            elif hasattr(media, "document"):
+                doc = media.document
                 mime_type = doc.mime_type or "application/octet-stream"
-
-                # Verifica se é voice note ou áudio
+                
                 for attr in doc.attributes:
-                    if isinstance(attr, DocumentAttributeAudio):
-                        is_voice = getattr(attr, "voice", False)
-                        if is_voice:
-                            # Voice note - geralmente .ogg
-                            file_name = f"voice_{msg.id}.ogg"
-                            mime_type = "audio/ogg"
-                        else:
-                            # Áudio normal
-                            duration = getattr(attr, "duration", 0)
-                            title = getattr(attr, "title", None)
-                            if title:
-                                file_name = f"{title}.ogg"
-                            else:
-                                ext = mime_type.split("/")[-1] if "/" in mime_type else "ogg"
-                                file_name = f"audio_{msg.id}.{ext}"
-                        break
-                    elif isinstance(attr, DocumentAttributeFilename):
+                    if isinstance(attr, DocumentAttributeFilename):
                         file_name = attr.file_name
+                        break
+                    elif isinstance(attr, DocumentAttributeAudio):
+                        if getattr(attr, "voice", False):
+                            file_name = f"voice_{msg_id}.ogg"
+                            mime_type = "audio/ogg"
+                        break
                 else:
-                    # Não encontrou atributos específicos
                     ext = mime_type.split("/")[-1] if "/" in mime_type else "bin"
-                    file_name = f"file_{msg.id}.{ext}"
-
-            # Upload para Supabase Storage
-            storage_path = f"telegram/{owner_id}/{message_id}/{file_name}"
-
-            # Usa service role para upload
-            from supabase import create_client
+                    file_name = f"file_{msg_id}.{ext}"
+            
+            storage_path = f"telegram/webhook/{msg_id}/{file_name}"
+            
             supabase_url = os.environ["SUPABASE_URL"]
             supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-            storage_client = create_client(supabase_url, supabase_key)
-
+            storage_client = create_supabase_client(supabase_url, supabase_key)
+            
             storage_client.storage.from_("attachments").upload(
                 storage_path,
                 media_bytes,
                 {"content-type": mime_type}
             )
-
-            # Salva attachment no banco
-            attachment_id = str(uuid4())
-            db.table("attachments").insert({
-                "id": attachment_id,
-                "owner_id": owner_id,
-                "message_id": message_id,
-                "storage_bucket": "attachments",
-                "storage_path": storage_path,
-                "file_name": file_name,
-                "mime_type": mime_type,
-                "byte_size": len(media_bytes),
-            }).execute()
-
-            print(f"Mídia salva: {file_name} ({len(media_bytes)} bytes)")
-
+            
+            public_url = f"{supabase_url}/storage/v1/object/public/attachments/{storage_path}"
+            
+            return {
+                "url": public_url,
+                "type": mime_type,
+                "name": file_name,
+                "size": len(media_bytes),
+            }
+            
         except Exception as e:
-            print(f"Erro ao processar mídia: {e}")
-
-    async def _download_and_store_avatar(self, client: TelegramClient, owner_id: str, entity) -> str | None:
-        """Baixa foto de perfil do Telegram e salva no Supabase Storage."""
-        try:
-            photo_bytes = await client.download_profile_photo(entity, file=bytes)
-            if not photo_bytes:
-                return None
-
-            supabase_url = os.environ["SUPABASE_URL"]
-            supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-            storage_client = create_supabase_client(supabase_url, supabase_key)
-
-            telegram_id = entity.id
-            storage_path = f"telegram/{owner_id}/telegram_{telegram_id}.jpg"
-
-            # Remove foto antiga se existir
-            try:
-                storage_client.storage.from_("avatars").remove([storage_path])
-            except Exception:
-                pass
-
-            # Upload nova foto
-            storage_client.storage.from_("avatars").upload(
-                storage_path,
-                photo_bytes,
-                {"content-type": "image/jpeg"}
-            )
-
-            return f"{supabase_url}/storage/v1/object/public/avatars/{storage_path}"
-
-        except Exception as e:
-            print(f"[AVATAR] Erro ao baixar avatar para {entity.id}: {e}")
+            print(f"[MEDIA] Erro: {e}")
             return None
 
-    async def _get_or_create_identity(self, db, owner_id: str, telegram_user_id: str, sender: User, client: TelegramClient = None, workspace_id: str = None) -> dict:
-        """Busca ou cria identity para o usuário Telegram (com avatar para novos)."""
-        # Busca identity existente (FILTRA POR WORKSPACE!)
-        query = db.table("contact_identities").select(
-            "id, contact_id"
-        ).eq("type", "telegram_user").eq("value", telegram_user_id)
-
-        if workspace_id:
-            query = query.eq("workspace_id", workspace_id)
-        else:
-            query = query.eq("owner_id", owner_id)
-
-        result = query.execute()
-
-        if result.data:
-            identity = result.data[0]
-            # Enriquece identity se dados estiverem faltando (identidades mínimas)
-            existing_meta = db.table("contact_identities").select("metadata").eq("id", identity["id"]).single().execute()
-            if existing_meta.data:
-                meta = existing_meta.data.get("metadata", {}) or {}
-                needs_update = False
-
-                # Atualiza access_hash se faltando
-                if not meta.get("access_hash") and hasattr(sender, "access_hash") and sender.access_hash:
-                    meta["telegram_user_id"] = int(telegram_user_id)
-                    meta["access_hash"] = sender.access_hash
-                    needs_update = True
-
-                # Atualiza nome se faltando ou é placeholder
-                if not meta.get("first_name") or meta.get("display_name", "").startswith("User "):
-                    if sender.first_name:
-                        meta["first_name"] = sender.first_name
-                        meta["last_name"] = sender.last_name
-                        meta["username"] = sender.username
-                        # Remove display_name placeholder se existir
-                        if "display_name" in meta and meta["display_name"].startswith("User "):
-                            del meta["display_name"]
-                        needs_update = True
-                        print(f"[IDENTITY] Atualizando nome: {sender.first_name} {sender.last_name or ''}")
-
-                # Baixa avatar se faltando
-                if not meta.get("avatar_url") and client:
-                    avatar_url = await self._download_and_store_avatar(client, owner_id, sender)
-                    if avatar_url:
-                        meta["avatar_url"] = avatar_url
-                        needs_update = True
-                        print(f"[IDENTITY] Avatar baixado para {telegram_user_id}")
-
-                if needs_update:
-                    db.table("contact_identities").update({"metadata": meta}).eq("id", identity["id"]).execute()
-
-            return identity
-
-        # Baixa avatar apenas para identity NOVA
-        avatar_url = None
-        if client:
-            avatar_url = await self._download_and_store_avatar(client, owner_id, sender)
-
-        # Cria apenas identity (sem contato - PRD 5.4)
-        # IMPORTANTE: salvar access_hash para poder enviar mensagens depois
-        identity_id = str(uuid4())
-        identity_data = {
-            "id": identity_id,
-            "owner_id": owner_id,
-            "contact_id": None,
-            "type": "telegram_user",
-            "value": telegram_user_id,
-            "metadata": {
-                "first_name": sender.first_name,
-                "last_name": sender.last_name,
-                "username": sender.username,
-                "avatar_url": avatar_url,
-                "telegram_user_id": int(telegram_user_id),
-                "access_hash": sender.access_hash,  # Necessário para enviar msgs
-            },
-        }
-        # Adiciona workspace_id (obrigatório após migration)
-        if workspace_id:
-            identity_data["workspace_id"] = workspace_id
-        db.table("contact_identities").insert(identity_data).execute()
-
-        return {"id": identity_id, "contact_id": None}
-
-    async def _get_or_create_conversation(self, db, owner_id: str, identity_id: str, contact_id: str | None, workspace_id: str = None) -> dict:
-        """Busca ou cria conversa. Se contact_id existe, busca por contato. Senão, busca por identity."""
-        # Se tem contact_id, busca conversa do contato (filtra por workspace se fornecido)
-        if contact_id:
-            query = db.table("conversations").select("id").eq("owner_id", owner_id).eq("contact_id", contact_id)
-            if workspace_id:
-                query = query.eq("workspace_id", workspace_id)
-            result = query.execute()
-            if result.data:
-                return result.data[0]
-
-        # Busca conversa não vinculada pela identity (FILTRA POR WORKSPACE!)
-        query = db.table("conversations").select("id").eq("owner_id", owner_id).eq("primary_identity_id", identity_id).is_("contact_id", "null")
-        if workspace_id:
-            query = query.eq("workspace_id", workspace_id)
-        result = query.execute()
-
-        if result.data:
-            return result.data[0]
-
-        # Cria conversa não vinculada (apenas com identity)
-        conv_id = str(uuid4())
-        conv_data = {
-            "id": conv_id,
-            "owner_id": owner_id,
-            "contact_id": contact_id,  # None para não vinculadas
-            "primary_identity_id": identity_id,
-            "status": "open",
-            "last_channel": "telegram",
-            "last_message_at": datetime.now(timezone.utc).isoformat(),
-        }
-        if workspace_id:
-            conv_data["workspace_id"] = workspace_id
-        db.table("conversations").insert(conv_data).execute()
-
-        return {"id": conv_id}
-
-    async def _history_sync_loop(self):
-        """Loop para processar jobs de sincronização de histórico."""
-        # Aguarda 10s para contas conectarem antes de processar syncs
-        await asyncio.sleep(10)
-        print("[SYNC] Loop de sync iniciado")
-
-        while True:
-            try:
-                self.watchdog.ping("history")  # Indica que está vivo
-                # Só processa se tiver pelo menos 1 conta conectada
-                if not self.clients:
-                    await asyncio.sleep(5)
-                    continue
-
-                await self._process_history_sync_jobs()
-                await asyncio.sleep(5)  # Delay maior entre ciclos (era 2s)
-            except Exception as e:
-                print(f"Erro no history sync loop: {e}")
-                await asyncio.sleep(10)
-
-    async def _process_history_sync_jobs(self):
-        """Processa jobs de sincronização de histórico pendentes."""
-        db = get_supabase()
-
-        # Busca apenas 1 job por vez para não sobrecarregar (era 5)
-        result = db.table("sync_history_jobs").select(
-            "id, owner_id, conversation_id, integration_account_id, limit_messages, "
-            "telegram_id, telegram_name, workspace_id, is_group"
-        ).eq("status", "pending").order("created_at").limit(1).execute()
-
-        for job in result.data:
-            await self._process_single_history_job(db, job)
-            # Delay após cada sync para não sobrecarregar
-            await asyncio.sleep(2)
-
-    async def _resolve_telegram_entity(self, client, telegram_id: int):
-        """Resolve entidade do Telegram (usuário ou grupo)."""
-        entity = None
-
-        # Método 1: get_entity direto (usa cache interno do Telethon)
+    async def _handle_new_message_fallback(self, acc_id: str, owner_id: str, event):
+        """Fallback para grupos - envia para n8n."""
         try:
-            entity = await client.get_entity(telegram_id)
-            if entity:
-                print(f"[SYNC] Entidade {telegram_id} encontrada via get_entity")
-                return entity
-        except (ValueError, Exception) as e:
-            print(f"[SYNC] get_entity falhou para {telegram_id}: {e}")
-
-        # Método 2: get_input_entity (funciona com IDs conhecidos)
-        try:
-            from telethon.tl.types import InputPeerUser, InputPeerChat, InputPeerChannel
-            input_entity = await client.get_input_entity(telegram_id)
-            if input_entity:
-                # Converte input entity para entity completa
-                entity = await client.get_entity(input_entity)
-                if entity:
-                    print(f"[SYNC] Entidade {telegram_id} encontrada via get_input_entity")
-                    return entity
-        except (ValueError, Exception) as e:
-            print(f"[SYNC] get_input_entity falhou para {telegram_id}: {e}")
-
-        # Método 3: Busca nos diálogos (mais lento)
-        print(f"[SYNC] Carregando diálogos para encontrar {telegram_id}...")
-        try:
-            async for dialog in client.iter_dialogs(limit=None):
-                if dialog.entity and hasattr(dialog.entity, 'id') and dialog.entity.id == telegram_id:
-                    entity = dialog.entity
-                    print(f"[SYNC] Encontrado nos diálogos: {entity.id}")
-                    return entity
-        except Exception as e:
-            print(f"[SYNC] iter_dialogs falhou: {e}")
-
-        print(f"[SYNC] Entidade {telegram_id} não encontrada em nenhum método")
-        return None
-
-    async def _get_or_create_sync_identity(self, db, owner_id: str, telegram_id: int, entity, is_group: bool, client, workspace_id: str = None):
-        """Busca ou cria identity para sync (função unificada)."""
-        telegram_id_str = str(telegram_id)
-        # Sempre usa telegram_user, distingue por metadata.is_group
-        identity_type = "telegram_user"
-
-        # Busca existente (FILTRA POR WORKSPACE!)
-        query = db.table("contact_identities").select(
-            "id, metadata, type"
-        ).eq("value", telegram_id_str).eq("type", "telegram_user")
-        if workspace_id:
-            query = query.eq("workspace_id", workspace_id)
-        else:
-            query = query.eq("owner_id", owner_id)
-        existing = query.execute()
-
-        if existing.data:
-            identity = existing.data[0]
-            metadata = identity.get("metadata") or {}
-
-            # Atualiza is_group se necessário
-            if is_group and not metadata.get("is_group"):
-                metadata["is_group"] = True
-                db.table("contact_identities").update({
-                    "metadata": metadata
-                }).eq("id", identity["id"]).execute()
-
-            return identity["id"], metadata
-
-        # Cria nova identity
-        metadata = {"is_group": is_group}
-
-        if is_group:
-            metadata["title"] = getattr(entity, 'title', None) or f"Grupo {telegram_id}"
-            metadata["username"] = getattr(entity, 'username', None)
-        else:
-            metadata["first_name"] = getattr(entity, 'first_name', None)
-            metadata["last_name"] = getattr(entity, 'last_name', None)
-            metadata["username"] = getattr(entity, 'username', None)
-
-        # Baixa avatar
-        avatar_url = await self._download_and_store_avatar(client, owner_id, entity)
-        if avatar_url:
-            metadata["avatar_url"] = avatar_url
-
-        identity_id = str(uuid4())
-        identity_data = {
-            "id": identity_id,
-            "owner_id": owner_id,
-            "contact_id": None,
-            "type": identity_type,
-            "value": telegram_id_str,
-            "metadata": metadata,
-        }
-        if workspace_id:
-            identity_data["workspace_id"] = workspace_id
-        db.table("contact_identities").insert(identity_data).execute()
-
-        print(f"[SYNC] Identity criada: {identity_id}")
-        return identity_id, metadata
-
-    async def _get_or_create_sync_conversation(self, db, owner_id: str, identity_id: str, workspace_id: str) -> str:
-        """Busca ou cria conversa para sync (função unificada)."""
-        # Busca existente
-        existing = db.table("conversations").select(
-            "id"
-        ).eq("owner_id", owner_id).eq("primary_identity_id", identity_id).execute()
-
-        if existing.data:
-            return existing.data[0]["id"]
-
-        # Cria nova conversa
-        conv_id = str(uuid4())
-        db.table("conversations").insert({
-            "id": conv_id,
-            "owner_id": owner_id,
-            "workspace_id": workspace_id,
-            "contact_id": None,
-            "primary_identity_id": identity_id,
-            "status": "open",
-            "last_channel": "telegram",
-            "last_message_at": datetime.now(timezone.utc).isoformat(),
-        }).execute()
-
-        print(f"[SYNC] Conversa criada: {conv_id}")
-        return conv_id
-
-    async def _process_single_history_job(self, db, job: dict):
-        """Processa um job de sincronização de histórico (formato unificado)."""
-        job_id = job["id"]
-        owner_id = job["owner_id"]
-        acc_id = job["integration_account_id"]
-        limit = job.get("limit_messages", 100)
-
-        # Novo formato: telegram_id | Antigo formato: conversation_id
-        telegram_id = job.get("telegram_id")
-        workspace_id = job.get("workspace_id")
-        is_group = job.get("is_group", False)
-        telegram_name = job.get("telegram_name")
-        conversation_id = job.get("conversation_id")
-
-        print(f"[SYNC] Processando job {job_id}")
-
-        # Marca como processing
-        db.table("sync_history_jobs").update({
-            "status": "processing",
-        }).eq("id", job_id).execute()
-
-        try:
-            # Verifica se temos cliente conectado para esta conta
-            if acc_id not in self.clients:
-                raise Exception(f"Conta {acc_id} não conectada")
-
-            client = self.clients[acc_id]
-
-            # NOVO FORMATO: telegram_id (worker cria identity/conversa)
-            if telegram_id:
-                telegram_user_id = int(telegram_id)
-
-                # Resolve entidade
-                entity = await self._resolve_telegram_entity(client, telegram_user_id)
-                if not entity:
-                    raise Exception(f"Entidade {telegram_user_id} não encontrada")
-
-                # Verifica se é grupo pela entidade real
-                is_group = isinstance(entity, (Chat, Channel))
-
-                # Cria ou busca identity (COM workspace_id!)
-                identity_id, identity_metadata = await self._get_or_create_sync_identity(
-                    db, owner_id, telegram_user_id, entity, is_group, client, workspace_id
-                )
-
-                # Cria ou busca conversa
-                conversation_id = await self._get_or_create_sync_conversation(
-                    db, owner_id, identity_id, workspace_id
-                )
-
-                # Atualiza job com conversation_id
-                db.table("sync_history_jobs").update({
-                    "conversation_id": conversation_id
-                }).eq("id", job_id).execute()
-
-            # ANTIGO FORMATO: conversation_id (compatibilidade)
-            else:
-                if not conversation_id:
-                    raise Exception("Job sem telegram_id nem conversation_id")
-
-                # Busca identity da conversa
-                conv_result = db.table("conversations").select(
-                    "primary_identity_id"
-                ).eq("id", conversation_id).single().execute()
-
-                if not conv_result.data:
-                    raise Exception("Conversa não encontrada")
-
-                identity_id = conv_result.data["primary_identity_id"]
-
-                # Busca telegram_user_id
-                identity_result = db.table("contact_identities").select(
-                    "value, metadata"
-                ).eq("id", identity_id).single().execute()
-
-                if not identity_result.data:
-                    raise Exception("Identity não encontrada")
-
-                telegram_user_id = int(identity_result.data["value"])
-                identity_metadata = identity_result.data.get("metadata") or {}
-                is_group = identity_metadata.get("is_group", False)
-
-                # Resolve entidade
-                entity = await self._resolve_telegram_entity(client, telegram_user_id)
-                if not entity:
-                    raise Exception(f"Entidade {telegram_user_id} não encontrada")
-
-                # Atualiza is_group se detectou grupo
-                if isinstance(entity, (Chat, Channel)) and not is_group:
-                    print(f"[SYNC] Detectado grupo, atualizando metadata...")
-                    identity_metadata["is_group"] = True
-                    is_group = True
-                    db.table("contact_identities").update({
-                        "metadata": identity_metadata
-                    }).eq("id", identity_id).execute()
-
-            # Busca mensagens existentes para evitar duplicatas
-            existing_result = db.table("messages").select(
-                "external_message_id"
-            ).eq("conversation_id", conversation_id).execute()
-
-            existing_msg_ids = {m["external_message_id"] for m in existing_result.data}
-
-            # Busca histórico do Telegram (limite de 3 meses)
-            messages_synced = 0
-            skipped_old = 0
-            skipped_exists = 0
-            skipped_no_content = 0
-            total_fetched = 0
-            three_months_ago = datetime.now(timezone.utc) - timedelta(days=90)
-
-            print(f"[SYNC] Buscando mensagens para entity {entity.id}, limit={limit}, is_group={is_group}")
-            print(f"[SYNC] Cutoff date: {three_months_ago}, existing_ids count: {len(existing_msg_ids)}")
-
-            # NOTA: Não usar offset_date com reverse=True - bug conhecido do Telethon para grupos
-            # Filtramos manualmente por data após receber as mensagens
-            async for msg in client.iter_messages(entity, limit=limit):
-                total_fetched += 1
-
-                # Pula mensagens mais antigas que 3 meses
-                if msg.date.replace(tzinfo=timezone.utc) < three_months_ago:
-                    skipped_old += 1
-                    continue
-
-                # Pula se já existe
-                if str(msg.id) in existing_msg_ids:
-                    skipped_exists += 1
-                    continue
-
-                # Verifica se é mensagem de serviço (join/leave) - só para grupos
-                if is_group and isinstance(msg, MessageService):
-                    service_text, message_type, service_metadata = await self._parse_service_message(client, msg)
-                    if service_text and message_type:
-                        message_id = str(uuid4())
-                        db.table("messages").insert({
-                            "id": message_id,
-                            "owner_id": owner_id,
-                            "conversation_id": conversation_id,
-                            "integration_account_id": acc_id,
-                            "identity_id": identity_id,
-                            "channel": "telegram",
-                            "direction": "inbound",
-                            "text": service_text,
-                            "message_type": message_type,
-                            "sent_at": msg.date.isoformat(),
-                            "external_message_id": str(msg.id),
-                            "raw_payload": service_metadata or {},
-                        }).execute()
-                        messages_synced += 1
-                    continue
-
-                # Só processa mensagens com texto ou mídia
-                if not msg.text and not msg.media:
-                    skipped_no_content += 1
-                    continue
-
-                # Determina direção
-                direction = "outbound" if msg.out else "inbound"
-
-                # Cria mensagem
-                message_id = str(uuid4())
-                text = msg.text or ""
-                has_media = msg.media is not None
-
-                db.table("messages").insert({
-                    "id": message_id,
-                    "owner_id": owner_id,
-                    "conversation_id": conversation_id,
-                    "integration_account_id": acc_id,
-                    "identity_id": identity_id,
-                    "channel": "telegram",
-                    "direction": direction,
-                    "text": text if text else None,
-                    "sent_at": msg.date.isoformat(),
-                    "external_message_id": str(msg.id),
-                    "raw_payload": {},
-                }).execute()
-
-                # Processa mídia se houver
-                if has_media:
-                    await self._process_incoming_media(client, db, owner_id, message_id, msg)
-
-                messages_synced += 1
-
-            print(f"[SYNC] Resumo: fetched={total_fetched}, old={skipped_old}, exists={skipped_exists}, no_content={skipped_no_content}, synced={messages_synced}")
-
-            # Busca a última mensagem REAL da conversa (pode ser nova ou existente)
-            last_msg_result = db.table("messages").select(
-                "sent_at, text, message_type"
-            ).eq("conversation_id", conversation_id).order(
-                "sent_at", desc=True
-            ).limit(1).execute()
-
-            if last_msg_result.data:
-                last_msg = last_msg_result.data[0]
-                preview = last_msg.get("text") or ""
-                if last_msg.get("message_type", "").startswith("service_"):
-                    preview = last_msg.get("text") or "Ação no grupo"
-                elif not preview:
-                    preview = "📎 Mídia"
+            msg = event.message
+            is_outgoing = msg.out
+            workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
+            
+            chat = await event.get_chat()
+            is_group = isinstance(chat, (Chat, Channel))
+            
+            if is_group:
+                sender = await event.get_sender() if not is_outgoing else None
+                sender_data = {}
+                
+                if sender:
+                    sender_data = {
+                        "telegram_user_id": sender.id,
+                        "first_name": getattr(sender, 'first_name', None),
+                        "last_name": getattr(sender, 'last_name', None),
+                        "username": getattr(sender, 'username', None),
+                    }
+                
+                media_info = await self._process_media_for_webhook(
+                    self.clients[acc_id], msg.media, msg.id
+                ) if msg.media else None
+                
+                content = {
+                    "text": msg.text or "",
+                    "media_url": media_info.get("url") if media_info else None,
+                    "media_type": media_info.get("type") if media_info else None,
+                    "media_name": media_info.get("name") if media_info else None,
+                }
+                
+                group_info = {
+                    "title": getattr(chat, 'title', None),
+                    "username": getattr(chat, 'username', None),
+                }
+                
+                if is_outgoing:
+                    await notify_outbound_message(
+                        account_id=acc_id,
+                        owner_id=owner_id,
+                        workspace_id=workspace_id,
+                        telegram_user_id=chat.id,
+                        telegram_msg_id=msg.id,
+                        content=content,
+                        timestamp=msg.date,
+                        is_group=True,
+                    )
                 else:
-                    preview = (preview[:100] + "...") if len(preview) > 100 else preview
-
-                db.table("conversations").update({
-                    "last_message_at": last_msg["sent_at"],
-                    "last_message_preview": preview,
-                }).eq("id", conversation_id).execute()
-
-            # Marca como completed
-            db.table("sync_history_jobs").update({
-                "status": "completed",
-                "processed_at": datetime.now(timezone.utc).isoformat(),
-                "messages_synced": messages_synced,
-            }).eq("id", job_id).execute()
-
-            print(f"[SYNC] Job {job_id} concluído: {messages_synced} mensagens sincronizadas")
-
+                    await notify_inbound_message(
+                        account_id=acc_id,
+                        owner_id=owner_id,
+                        workspace_id=workspace_id,
+                        telegram_user_id=chat.id,
+                        telegram_msg_id=msg.id,
+                        sender=sender_data,
+                        content=content,
+                        timestamp=msg.date,
+                        is_group=True,
+                        group_info=group_info,
+                    )
+                    
         except Exception as e:
             import traceback
-            print(f"[SYNC] Erro no job {job_id}: {e}")
+            print(f"[FALLBACK] Erro: {e}")
             traceback.print_exc()
 
-            # Marca como failed
-            db.table("sync_history_jobs").update({
-                "status": "failed",
-                "processed_at": datetime.now(timezone.utc).isoformat(),
-                "error_message": str(e),
-            }).eq("id", job_id).execute()
-
-    async def _handle_message_read(self, acc_id: str, owner_id: str, event):
-        """Processa evento de leitura de mensagem (read receipts)."""
-        try:
-            # event.outbox = True quando NOSSA mensagem foi lida pelo outro
-            # event.outbox = False quando NÓS lemos mensagem deles
-            if not event.outbox:
-                return  # Só nos interessa quando nossas msgs são lidas
-
-            db = get_supabase()
-
-            # Pega o ID do chat/usuário que leu
-            chat_id = event.chat_id
-            max_id = event.max_id  # Todas as mensagens até esse ID foram lidas
-
-            # Busca mensagens outbound que foram lidas
-            result = db.table("messages").select(
-                "id, external_message_id"
-            ).eq("owner_id", owner_id).lte(
-                "external_message_id", str(max_id)
-            ).eq("direction", "outbound").eq(
-                "channel", "telegram"
-            ).execute()
-
-            now = datetime.now(timezone.utc).isoformat()
-
-            for msg in result.data:
-                # Verifica se já tem evento de read
-                existing = db.table("message_events").select("id").eq(
-                    "message_id", msg["id"]
-                ).eq("type", "read").execute()
-
-                if not existing.data:
-                    # Insere evento de leitura
-                    db.table("message_events").insert({
-                        "owner_id": owner_id,
-                        "message_id": msg["id"],
-                        "type": "read",
-                        "occurred_at": now,
-                        "payload": {"read_by_chat_id": chat_id},
-                    }).execute()
-
-            print(f"[READ] Mensagens até {max_id} marcadas como lidas")
-
-        except Exception as e:
-            print(f"[READ] Erro ao processar evento de leitura: {e}")
+    # =============================================
+    # PRESENCE - MANTÉM NO WORKER (direto Supabase)
+    # =============================================
 
     async def _handle_user_update(self, acc_id: str, owner_id: str, event):
-        """Processa eventos de atualização do usuário (typing, online)."""
+        """Processa eventos de presence - grava direto no Supabase."""
         try:
             user_id = event.user_id
             now = datetime.now(timezone.utc)
 
-            # Determina estado atual
             is_typing = False
             is_online = None
             last_seen = None
+            typing_expires = None
 
             if hasattr(event, 'typing') and event.typing:
                 is_typing = True
                 typing_expires = (now + timedelta(seconds=5)).isoformat()
-            else:
-                typing_expires = None
 
             if hasattr(event, 'status'):
                 status = event.status
@@ -2082,13 +625,11 @@ class TelegramWorker:
                     is_online = False
                     last_seen = now.isoformat()
 
-            # THROTTLE: só grava se estado mudou ou passou tempo suficiente
             if not self._should_update_presence(user_id, is_online or False, is_typing):
-                return  # Skip - estado igual e dentro do throttle
+                return
 
             db = get_supabase()
 
-            # Busca identity do usuário (async para não bloquear)
             identity_result = await db_async(lambda: db.table("contact_identities").select(
                 "id"
             ).eq("owner_id", owner_id).eq(
@@ -2096,18 +637,16 @@ class TelegramWorker:
             ).eq("value", str(user_id)).execute())
 
             if not identity_result.data:
-                return  # Usuário não está em nossos contatos
+                return
 
             identity_id = identity_result.data[0]["id"]
 
-            # Busca conversa do usuário (async)
             conv_result = await db_async(lambda: db.table("conversations").select("id").eq(
                 "primary_identity_id", identity_id
             ).execute())
 
             conversation_id = conv_result.data[0]["id"] if conv_result.data else None
 
-            # Upsert em presence_status (async)
             await db_async(lambda: db.table("presence_status").upsert({
                 "owner_id": owner_id,
                 "contact_identity_id": identity_id,
@@ -2120,29 +659,357 @@ class TelegramWorker:
             }, on_conflict="owner_id,contact_identity_id").execute())
 
             if is_typing:
-                print(f"[PRESENCE] Usuário {user_id} está digitando")
+                print(f"[PRESENCE] Usuário {user_id} digitando")
             elif is_online is not None:
-                status_str = "online" if is_online else "offline"
-                print(f"[PRESENCE] Usuário {user_id} está {status_str}")
+                print(f"[PRESENCE] Usuário {user_id} {'online' if is_online else 'offline'}")
 
         except Exception as e:
-            print(f"[PRESENCE] Erro ao processar evento: {e}")
+            print(f"[PRESENCE] Erro: {e}")
+
+    # =============================================
+    # SYNC HISTÓRICO - MANTÉM NO WORKER
+    # =============================================
+
+    async def _history_sync_loop(self):
+        """Loop para processar jobs de sync de histórico."""
+        await asyncio.sleep(10)
+        print("[SYNC] Loop de sync iniciado")
+
+        while True:
+            try:
+                self.watchdog.ping("history")
+                if not self.clients:
+                    await asyncio.sleep(5)
+                    continue
+
+                await self._process_history_sync_jobs()
+                await asyncio.sleep(5)
+            except Exception as e:
+                print(f"Erro no history sync loop: {e}")
+                await asyncio.sleep(10)
+
+    async def _process_history_sync_jobs(self):
+        """Processa jobs de sync pendentes."""
+        db = get_supabase()
+
+        result = db.table("sync_history_jobs").select(
+            "id, owner_id, conversation_id, integration_account_id, limit_messages, "
+            "telegram_id, telegram_name, workspace_id, is_group"
+        ).eq("status", "pending").order("created_at").limit(1).execute()
+
+        for job in result.data:
+            await self._process_single_history_job(db, job)
+            await asyncio.sleep(2)
+
+    async def _process_single_history_job(self, db, job: dict):
+        """Processa um job de sync - MANTÉM LÓGICA ORIGINAL."""
+        job_id = job["id"]
+        owner_id = job["owner_id"]
+        acc_id = job["integration_account_id"]
+        limit = job.get("limit_messages", 100)
+        telegram_id = job.get("telegram_id")
+        workspace_id = job.get("workspace_id")
+        conversation_id = job.get("conversation_id")
+
+        print(f"[SYNC] Processando job {job_id}")
+
+        db.table("sync_history_jobs").update({
+            "status": "processing",
+        }).eq("id", job_id).execute()
+
+        try:
+            if acc_id not in self.clients:
+                raise Exception(f"Conta {acc_id} não conectada")
+
+            client = self.clients[acc_id]
+
+            if telegram_id:
+                telegram_user_id = int(telegram_id)
+                entity = await self._resolve_telegram_entity(client, telegram_user_id)
+                if not entity:
+                    raise Exception(f"Entidade {telegram_user_id} não encontrada")
+
+                is_group = isinstance(entity, (Chat, Channel))
+
+                identity_id, _ = await self._get_or_create_sync_identity(
+                    db, owner_id, telegram_user_id, entity, is_group, client, workspace_id
+                )
+
+                conversation_id = await self._get_or_create_sync_conversation(
+                    db, owner_id, identity_id, workspace_id
+                )
+
+                db.table("sync_history_jobs").update({
+                    "conversation_id": conversation_id
+                }).eq("id", job_id).execute()
+            else:
+                if not conversation_id:
+                    raise Exception("Job sem telegram_id nem conversation_id")
+
+                conv_result = db.table("conversations").select(
+                    "primary_identity_id"
+                ).eq("id", conversation_id).single().execute()
+
+                if not conv_result.data:
+                    raise Exception("Conversa não encontrada")
+
+                identity_id = conv_result.data["primary_identity_id"]
+
+                identity_result = db.table("contact_identities").select(
+                    "value, metadata"
+                ).eq("id", identity_id).single().execute()
+
+                if not identity_result.data:
+                    raise Exception("Identity não encontrada")
+
+                telegram_user_id = int(identity_result.data["value"])
+                is_group = identity_result.data.get("metadata", {}).get("is_group", False)
+
+                entity = await self._resolve_telegram_entity(client, telegram_user_id)
+                if not entity:
+                    raise Exception(f"Entidade {telegram_user_id} não encontrada")
+
+            existing_result = db.table("messages").select(
+                "external_message_id"
+            ).eq("conversation_id", conversation_id).execute()
+
+            existing_msg_ids = {m["external_message_id"] for m in existing_result.data}
+
+            messages_synced = 0
+            three_months_ago = datetime.now(timezone.utc) - timedelta(days=90)
+
+            async for msg in client.iter_messages(entity, limit=limit):
+                if msg.date.replace(tzinfo=timezone.utc) < three_months_ago:
+                    continue
+
+                if str(msg.id) in existing_msg_ids:
+                    continue
+
+                if not msg.text and not msg.media:
+                    continue
+
+                direction = "outbound" if msg.out else "inbound"
+                message_id = str(uuid4())
+
+                db.table("messages").insert({
+                    "id": message_id,
+                    "owner_id": owner_id,
+                    "conversation_id": conversation_id,
+                    "integration_account_id": acc_id,
+                    "identity_id": identity_id,
+                    "channel": "telegram",
+                    "direction": direction,
+                    "text": msg.text or None,
+                    "sent_at": msg.date.isoformat(),
+                    "external_message_id": str(msg.id),
+                    "raw_payload": {},
+                }).execute()
+
+                if msg.media:
+                    await self._process_incoming_media(client, db, owner_id, message_id, msg)
+
+                messages_synced += 1
+
+            last_msg_result = db.table("messages").select(
+                "sent_at, text"
+            ).eq("conversation_id", conversation_id).order(
+                "sent_at", desc=True
+            ).limit(1).execute()
+
+            if last_msg_result.data:
+                last_msg = last_msg_result.data[0]
+                preview = last_msg.get("text") or "📎 Mídia"
+                preview = (preview[:100] + "...") if len(preview) > 100 else preview
+
+                db.table("conversations").update({
+                    "last_message_at": last_msg["sent_at"],
+                    "last_message_preview": preview,
+                }).eq("id", conversation_id).execute()
+
+            db.table("sync_history_jobs").update({
+                "status": "completed",
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+                "messages_synced": messages_synced,
+            }).eq("id", job_id).execute()
+
+            print(f"[SYNC] Job {job_id} concluído: {messages_synced} mensagens")
+
+        except Exception as e:
+            import traceback
+            print(f"[SYNC] Erro no job {job_id}: {e}")
+            traceback.print_exc()
+
+            db.table("sync_history_jobs").update({
+                "status": "failed",
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+                "error_message": str(e),
+            }).eq("id", job_id).execute()
+
+    async def _resolve_telegram_entity(self, client, telegram_id: int):
+        """Resolve entidade do Telegram."""
+        try:
+            entity = await client.get_entity(telegram_id)
+            if entity:
+                return entity
+        except Exception as e:
+            print(f"[SYNC] get_entity falhou: {e}")
+
+        try:
+            input_entity = await client.get_input_entity(telegram_id)
+            if input_entity:
+                entity = await client.get_entity(input_entity)
+                if entity:
+                    return entity
+        except Exception as e:
+            print(f"[SYNC] get_input_entity falhou: {e}")
+
+        try:
+            async for dialog in client.iter_dialogs(limit=None):
+                if dialog.entity and hasattr(dialog.entity, 'id') and dialog.entity.id == telegram_id:
+                    return dialog.entity
+        except Exception as e:
+            print(f"[SYNC] iter_dialogs falhou: {e}")
+
+        return None
+
+    async def _get_or_create_sync_identity(self, db, owner_id: str, telegram_id: int, entity, is_group: bool, client, workspace_id: str = None):
+        """Busca ou cria identity para sync."""
+        telegram_id_str = str(telegram_id)
+
+        query = db.table("contact_identities").select(
+            "id, metadata"
+        ).eq("value", telegram_id_str).eq("type", "telegram_user")
+        
+        if workspace_id:
+            query = query.eq("workspace_id", workspace_id)
+        else:
+            query = query.eq("owner_id", owner_id)
+        
+        existing = query.execute()
+
+        if existing.data:
+            return existing.data[0]["id"], existing.data[0].get("metadata") or {}
+
+        metadata = {"is_group": is_group}
+
+        if is_group:
+            metadata["title"] = getattr(entity, 'title', None) or f"Grupo {telegram_id}"
+            metadata["username"] = getattr(entity, 'username', None)
+        else:
+            metadata["first_name"] = getattr(entity, 'first_name', None)
+            metadata["last_name"] = getattr(entity, 'last_name', None)
+            metadata["username"] = getattr(entity, 'username', None)
+
+        identity_id = str(uuid4())
+        identity_data = {
+            "id": identity_id,
+            "owner_id": owner_id,
+            "contact_id": None,
+            "type": "telegram_user",
+            "value": telegram_id_str,
+            "metadata": metadata,
+        }
+        if workspace_id:
+            identity_data["workspace_id"] = workspace_id
+        
+        db.table("contact_identities").insert(identity_data).execute()
+
+        return identity_id, metadata
+
+    async def _get_or_create_sync_conversation(self, db, owner_id: str, identity_id: str, workspace_id: str) -> str:
+        """Busca ou cria conversa para sync."""
+        existing = db.table("conversations").select(
+            "id"
+        ).eq("owner_id", owner_id).eq("primary_identity_id", identity_id).execute()
+
+        if existing.data:
+            return existing.data[0]["id"]
+
+        conv_id = str(uuid4())
+        db.table("conversations").insert({
+            "id": conv_id,
+            "owner_id": owner_id,
+            "workspace_id": workspace_id,
+            "contact_id": None,
+            "primary_identity_id": identity_id,
+            "status": "open",
+            "last_channel": "telegram",
+            "last_message_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+
+        return conv_id
+
+    async def _process_incoming_media(self, client, db, owner_id: str, message_id: str, msg):
+        """Processa mídia para sync histórico."""
+        try:
+            from telethon.tl.types import DocumentAttributeAudio, DocumentAttributeFilename
+
+            media_bytes = await client.download_media(msg, file=bytes)
+            if not media_bytes:
+                return
+
+            file_name = "media"
+            mime_type = "application/octet-stream"
+
+            if hasattr(msg.media, "photo"):
+                file_name = f"photo_{msg.id}.jpg"
+                mime_type = "image/jpeg"
+            elif hasattr(msg.media, "document"):
+                doc = msg.media.document
+                mime_type = doc.mime_type or "application/octet-stream"
+
+                for attr in doc.attributes:
+                    if isinstance(attr, DocumentAttributeFilename):
+                        file_name = attr.file_name
+                        break
+                else:
+                    ext = mime_type.split("/")[-1] if "/" in mime_type else "bin"
+                    file_name = f"file_{msg.id}.{ext}"
+
+            storage_path = f"telegram/{owner_id}/{message_id}/{file_name}"
+
+            supabase_url = os.environ["SUPABASE_URL"]
+            supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+            storage_client = create_supabase_client(supabase_url, supabase_key)
+
+            storage_client.storage.from_("attachments").upload(
+                storage_path,
+                media_bytes,
+                {"content-type": mime_type}
+            )
+
+            attachment_id = str(uuid4())
+            db.table("attachments").insert({
+                "id": attachment_id,
+                "owner_id": owner_id,
+                "message_id": message_id,
+                "storage_bucket": "attachments",
+                "storage_path": storage_path,
+                "file_name": file_name,
+                "mime_type": mime_type,
+                "byte_size": len(media_bytes),
+            }).execute()
+
+        except Exception as e:
+            print(f"[SYNC] Erro ao processar mídia: {e}")
+
+    # =============================================
+    # MESSAGE JOBS - MANTÉM NO WORKER
+    # =============================================
 
     async def _message_jobs_loop(self):
-        """Loop para processar jobs de edição/deleção de mensagens."""
-        # Aguarda 5s para contas conectarem
+        """Loop para processar jobs de edit/delete."""
         await asyncio.sleep(5)
 
         while True:
             try:
-                self.watchdog.ping("jobs")  # Indica que está vivo
-                # Só processa se tiver conta conectada
+                self.watchdog.ping("jobs")
                 if not self.clients:
                     await asyncio.sleep(2)
                     continue
 
                 await self._process_message_jobs()
-                await asyncio.sleep(2)  # Verifica a cada 2s
+                await asyncio.sleep(2)
             except Exception as e:
                 print(f"Erro no message jobs loop: {e}")
                 await asyncio.sleep(5)
@@ -2151,7 +1018,6 @@ class TelegramWorker:
         """Processa jobs de edit/delete pendentes."""
         db = get_supabase()
 
-        # Busca jobs pendentes
         result = db.table("message_jobs").select(
             "id, owner_id, message_id, integration_account_id, action, payload, status"
         ).eq("status", "pending").order("created_at").limit(10).execute()
@@ -2160,7 +1026,7 @@ class TelegramWorker:
             await self._process_single_message_job(db, job)
 
     async def _process_single_message_job(self, db, job: dict):
-        """Processa um job de edit ou delete."""
+        """Processa um job de edit/delete."""
         job_id = job["id"]
         action = job["action"]
         acc_id = job.get("integration_account_id")
@@ -2168,52 +1034,39 @@ class TelegramWorker:
 
         print(f"[JOB] Processando {action} job {job_id}")
 
-        # Marca como processing
         db.table("message_jobs").update({
             "status": "processing",
         }).eq("id", job_id).execute()
 
         try:
-            # Verifica se temos cliente conectado
             if not acc_id or acc_id not in self.clients:
                 raise Exception(f"Conta {acc_id} não conectada")
 
             client = self.clients[acc_id]
-            channel = payload.get("channel", "telegram")
 
-            # Só processa Telegram por enquanto
-            if channel != "telegram":
-                raise Exception(f"Canal {channel} não suportado para {action}")
-
-            # Ação especial: typing (não precisa de message_id)
             if action == "typing":
                 telegram_user_id = payload.get("telegram_user_id")
                 if not telegram_user_id:
-                    raise Exception("telegram_user_id não encontrado no payload")
+                    raise Exception("telegram_user_id não encontrado")
 
-                # Envia ação de digitando para o Telegram (context manager, não awaitable)
                 from telethon.tl.functions.messages import SetTypingRequest
                 from telethon.tl.types import SendMessageTypingAction
                 await client(SetTypingRequest(peer=int(telegram_user_id), action=SendMessageTypingAction()))
-                print(f"[JOB] Typing enviado para {telegram_user_id}")
 
-                # Marca como completed
                 db.table("message_jobs").update({
                     "status": "completed",
                     "processed_at": datetime.now(timezone.utc).isoformat(),
                 }).eq("id", job_id).execute()
-
-                return  # Job concluído, sai da função
+                return
 
             external_msg_id = payload.get("external_message_id")
             if not external_msg_id or external_msg_id.startswith("local-") or external_msg_id.startswith("error-"):
-                raise Exception(f"Mensagem não tem ID externo válido: {external_msg_id}")
+                raise Exception(f"ID externo inválido: {external_msg_id}")
 
             msg_id = int(external_msg_id)
 
-            # Busca a conversa para pegar o chat_id
             message_result = db.table("messages").select(
-                "conversation_id, identity_id"
+                "identity_id"
             ).eq("id", job["message_id"]).single().execute()
 
             if not message_result.data:
@@ -2221,7 +1074,6 @@ class TelegramWorker:
 
             identity_id = message_result.data["identity_id"]
 
-            # Busca telegram_user_id da identity
             identity_result = db.table("contact_identities").select(
                 "value"
             ).eq("id", identity_id).single().execute()
@@ -2234,21 +1086,18 @@ class TelegramWorker:
             if action == "edit":
                 new_text = payload.get("new_text", "")
                 if not new_text:
-                    raise Exception("Texto vazio para edição")
+                    raise Exception("Texto vazio")
 
-                # Edita mensagem no Telegram
                 await client.edit_message(telegram_user_id, msg_id, new_text)
-                print(f"[JOB] Mensagem {msg_id} editada no Telegram")
+                print(f"[JOB] Mensagem {msg_id} editada")
 
             elif action == "delete":
-                # Deleta mensagem no Telegram
                 await client.delete_messages(telegram_user_id, [msg_id])
-                print(f"[JOB] Mensagem {msg_id} deletada no Telegram")
+                print(f"[JOB] Mensagem {msg_id} deletada")
 
             else:
                 raise Exception(f"Ação desconhecida: {action}")
 
-            # Marca como completed
             db.table("message_jobs").update({
                 "status": "completed",
                 "processed_at": datetime.now(timezone.utc).isoformat(),
@@ -2256,10 +1105,9 @@ class TelegramWorker:
 
         except Exception as e:
             import traceback
-            print(f"[JOB] Erro no job {job_id}: {e}")
+            print(f"[JOB] Erro: {e}")
             traceback.print_exc()
 
-            # Marca como failed
             db.table("message_jobs").update({
                 "status": "failed",
                 "processed_at": datetime.now(timezone.utc).isoformat(),

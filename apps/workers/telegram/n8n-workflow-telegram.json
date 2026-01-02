@@ -1,0 +1,739 @@
+{
+  "name": "Telegram Message Orchestrator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telegram/inbound",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "webhook-inbound",
+      "name": "Webhook Inbound",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "telegram-inbound"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telegram/outbound",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "webhook-outbound",
+      "name": "Webhook Outbound",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 600],
+      "webhookId": "telegram-outbound"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telegram/send",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "webhook-send",
+      "name": "Webhook Send",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 900],
+      "webhookId": "telegram-send"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO contact_identities (id, owner_id, workspace_id, type, value, metadata)\nVALUES (\n  COALESCE(\n    (SELECT id FROM contact_identities WHERE owner_id = '{{ $json.owner_id }}' AND type = 'telegram_user' AND value = '{{ $json.telegram_user_id }}' LIMIT 1),\n    gen_random_uuid()\n  ),\n  '{{ $json.owner_id }}',\n  {{ $json.workspace_id ? \"'\" + $json.workspace_id + \"'\" : \"NULL\" }},\n  'telegram_user',\n  '{{ $json.telegram_user_id }}',\n  '{{ JSON.stringify($json.sender || {}) }}'::jsonb\n)\nON CONFLICT (owner_id, type, value) DO UPDATE SET\n  metadata = COALESCE(contact_identities.metadata, '{}'::jsonb) || EXCLUDED.metadata,\n  updated_at = NOW()\nRETURNING id, owner_id, workspace_id, type, value, metadata;",
+        "options": {}
+      },
+      "id": "upsert-identity-inbound",
+      "name": "Upsert Identity (Inbound)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [480, 300],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO contact_identities (id, owner_id, workspace_id, type, value, metadata)\nVALUES (\n  COALESCE(\n    (SELECT id FROM contact_identities WHERE owner_id = '{{ $json.owner_id }}' AND type = 'telegram_user' AND value = '{{ $json.telegram_user_id }}' LIMIT 1),\n    gen_random_uuid()\n  ),\n  '{{ $json.owner_id }}',\n  {{ $json.workspace_id ? \"'\" + $json.workspace_id + \"'\" : \"NULL\" }},\n  'telegram_user',\n  '{{ $json.telegram_user_id }}',\n  '{}'::jsonb\n)\nON CONFLICT (owner_id, type, value) DO UPDATE SET\n  updated_at = NOW()\nRETURNING id, owner_id, workspace_id, type, value, metadata;",
+        "options": {}
+      },
+      "id": "upsert-identity-outbound",
+      "name": "Upsert Identity (Outbound)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [480, 600],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH identity AS (\n  SELECT id, owner_id, workspace_id FROM contact_identities\n  WHERE owner_id = '{{ $('Webhook Inbound').item.json.owner_id }}'\n    AND type = 'telegram_user'\n    AND value = '{{ $('Webhook Inbound').item.json.telegram_user_id }}'\n  LIMIT 1\n)\nINSERT INTO conversations (id, owner_id, workspace_id, primary_identity_id, status, last_channel, last_message_at)\nSELECT\n  COALESCE(\n    (SELECT id FROM conversations WHERE primary_identity_id = identity.id LIMIT 1),\n    gen_random_uuid()\n  ),\n  identity.owner_id,\n  identity.workspace_id,\n  identity.id,\n  'open',\n  'telegram',\n  NOW()\nFROM identity\nON CONFLICT (primary_identity_id) DO UPDATE SET\n  last_message_at = NOW(),\n  last_channel = 'telegram',\n  status = CASE WHEN conversations.status = 'closed' THEN 'open' ELSE conversations.status END\nRETURNING id, owner_id, workspace_id, primary_identity_id, status;",
+        "options": {}
+      },
+      "id": "upsert-conversation-inbound",
+      "name": "Upsert Conversation (Inbound)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [720, 300],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH identity AS (\n  SELECT id, owner_id, workspace_id FROM contact_identities\n  WHERE owner_id = '{{ $('Webhook Outbound').item.json.owner_id }}'\n    AND type = 'telegram_user'\n    AND value = '{{ $('Webhook Outbound').item.json.telegram_user_id }}'\n  LIMIT 1\n)\nINSERT INTO conversations (id, owner_id, workspace_id, primary_identity_id, status, last_channel, last_message_at)\nSELECT\n  COALESCE(\n    (SELECT id FROM conversations WHERE primary_identity_id = identity.id LIMIT 1),\n    gen_random_uuid()\n  ),\n  identity.owner_id,\n  identity.workspace_id,\n  identity.id,\n  'open',\n  'telegram',\n  NOW()\nFROM identity\nON CONFLICT (primary_identity_id) DO UPDATE SET\n  last_message_at = NOW(),\n  last_channel = 'telegram'\nRETURNING id, owner_id, workspace_id, primary_identity_id, status;",
+        "options": {}
+      },
+      "id": "upsert-conversation-outbound",
+      "name": "Upsert Conversation (Outbound)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [720, 600],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO messages (id, owner_id, conversation_id, integration_account_id, identity_id, channel, direction, text, sent_at, external_message_id, raw_payload)\nVALUES (\n  gen_random_uuid(),\n  '{{ $('Webhook Inbound').item.json.owner_id }}',\n  '{{ $('Upsert Conversation (Inbound)').item.json.id }}',\n  '{{ $('Webhook Inbound').item.json.account_id }}',\n  '{{ $('Upsert Identity (Inbound)').item.json.id }}',\n  'telegram',\n  'inbound',\n  '{{ ($('Webhook Inbound').item.json.content.text || '').replace(/'/g, \"''\") }}',\n  '{{ $('Webhook Inbound').item.json.timestamp }}',\n  '{{ $('Webhook Inbound').item.json.telegram_msg_id }}',\n  '{{ JSON.stringify($('Webhook Inbound').item.json.content || {}) }}'::jsonb\n)\nON CONFLICT (conversation_id, external_message_id) DO NOTHING\nRETURNING id, conversation_id, direction, text, sent_at;",
+        "options": {}
+      },
+      "id": "insert-message-inbound",
+      "name": "Insert Message (Inbound)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [960, 300],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO messages (id, owner_id, conversation_id, integration_account_id, identity_id, channel, direction, text, sent_at, external_message_id, raw_payload)\nVALUES (\n  gen_random_uuid(),\n  '{{ $('Webhook Outbound').item.json.owner_id }}',\n  '{{ $('Upsert Conversation (Outbound)').item.json.id }}',\n  '{{ $('Webhook Outbound').item.json.account_id }}',\n  '{{ $('Upsert Identity (Outbound)').item.json.id }}',\n  'telegram',\n  'outbound',\n  '{{ ($('Webhook Outbound').item.json.content.text || '').replace(/'/g, \"''\") }}',\n  '{{ $('Webhook Outbound').item.json.timestamp }}',\n  '{{ $('Webhook Outbound').item.json.telegram_msg_id }}',\n  '{{ JSON.stringify($('Webhook Outbound').item.json.content || {}) }}'::jsonb\n)\nON CONFLICT (conversation_id, external_message_id) DO NOTHING\nRETURNING id, conversation_id, direction, text, sent_at;",
+        "options": {}
+      },
+      "id": "insert-message-outbound",
+      "name": "Insert Message (Outbound)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [960, 600],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE conversations SET\n  last_message_preview = LEFT('{{ ($('Webhook Inbound').item.json.content.text || '📎 Mídia').replace(/'/g, \"''\") }}', 100),\n  last_inbound_at = NOW(),\n  updated_at = NOW()\nWHERE id = '{{ $('Upsert Conversation (Inbound)').item.json.id }}'\nRETURNING id;",
+        "options": {}
+      },
+      "id": "update-conversation-inbound",
+      "name": "Update Conversation (Inbound)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1200, 300],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE conversations SET\n  last_message_preview = LEFT('{{ ($('Webhook Outbound').item.json.content.text || '📎 Mídia').replace(/'/g, \"''\") }}', 100),\n  last_outbound_at = NOW(),\n  updated_at = NOW()\nWHERE id = '{{ $('Upsert Conversation (Outbound)').item.json.id }}'\nRETURNING id;",
+        "options": {}
+      },
+      "id": "update-conversation-outbound",
+      "name": "Update Conversation (Outbound)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1200, 600],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO unread_conversations (owner_id, conversation_id, unread_count)\nVALUES (\n  '{{ $('Webhook Inbound').item.json.owner_id }}',\n  '{{ $('Upsert Conversation (Inbound)').item.json.id }}',\n  1\n)\nON CONFLICT (owner_id, conversation_id) DO UPDATE SET\n  unread_count = unread_conversations.unread_count + 1,\n  updated_at = NOW()\nRETURNING conversation_id, unread_count;",
+        "options": {}
+      },
+      "id": "increment-unread",
+      "name": "Increment Unread",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1440, 300],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $('Webhook Inbound').item.json.content.media_url }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "check-media-inbound",
+      "name": "Has Media? (Inbound)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1680, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO attachments (id, owner_id, message_id, storage_bucket, storage_path, file_name, mime_type)\nVALUES (\n  gen_random_uuid(),\n  '{{ $('Webhook Inbound').item.json.owner_id }}',\n  '{{ $('Insert Message (Inbound)').item.json.id }}',\n  'attachments',\n  '{{ $('Webhook Inbound').item.json.content.media_url }}',\n  '{{ $('Webhook Inbound').item.json.content.media_name || 'attachment' }}',\n  '{{ $('Webhook Inbound').item.json.content.media_type || 'application/octet-stream' }}'\n)\nRETURNING id;",
+        "options": {}
+      },
+      "id": "insert-attachment-inbound",
+      "name": "Insert Attachment (Inbound)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1920, 200],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'ok', conversation_id: $('Upsert Conversation (Inbound)').item.json.id, message_id: $('Insert Message (Inbound)').item.json.id }) }}"
+      },
+      "id": "respond-inbound",
+      "name": "Respond (Inbound)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2160, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $('Webhook Outbound').item.json.content.media_url }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "check-media-outbound",
+      "name": "Has Media? (Outbound)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1440, 600]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO attachments (id, owner_id, message_id, storage_bucket, storage_path, file_name, mime_type)\nVALUES (\n  gen_random_uuid(),\n  '{{ $('Webhook Outbound').item.json.owner_id }}',\n  '{{ $('Insert Message (Outbound)').item.json.id }}',\n  'attachments',\n  '{{ $('Webhook Outbound').item.json.content.media_url }}',\n  '{{ $('Webhook Outbound').item.json.content.media_name || 'attachment' }}',\n  '{{ $('Webhook Outbound').item.json.content.media_type || 'application/octet-stream' }}'\n)\nRETURNING id;",
+        "options": {}
+      },
+      "id": "insert-attachment-outbound",
+      "name": "Insert Attachment (Outbound)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1680, 500],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'ok', conversation_id: $('Upsert Conversation (Outbound)').item.json.id, message_id: $('Insert Message (Outbound)').item.json.id }) }}"
+      },
+      "id": "respond-outbound",
+      "name": "Respond (Outbound)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1920, 600]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT c.id as conversation_id, c.owner_id, c.workspace_id, c.primary_identity_id,\n       ci.value as telegram_user_id, ci.metadata\nFROM conversations c\nJOIN contact_identities ci ON ci.id = c.primary_identity_id\nWHERE c.id = '{{ $json.conversation_id }}'\nLIMIT 1;",
+        "options": {}
+      },
+      "id": "get-conversation",
+      "name": "Get Conversation",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [480, 900],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ia.id as account_id\nFROM integration_accounts ia\nWHERE ia.owner_id = '{{ $('Get Conversation').item.json.owner_id }}'\n  AND ia.type = 'telegram_user'\n  AND ia.is_active = true\nLIMIT 1;",
+        "options": {}
+      },
+      "id": "get-account",
+      "name": "Get Integration Account",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [720, 900],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://telegram-worker:8001/send",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "account_id",
+              "value": "={{ $('Get Integration Account').item.json.account_id }}"
+            },
+            {
+              "name": "telegram_user_id",
+              "value": "={{ parseInt($('Get Conversation').item.json.telegram_user_id) }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $('Webhook Send').item.json.text }}"
+            },
+            {
+              "name": "attachments",
+              "value": "={{ $('Webhook Send').item.json.attachments || [] }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "call-worker-send",
+      "name": "Call Worker /send",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 900],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "WORKER_API_KEY_CREDENTIAL_ID",
+          "name": "Worker API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.success }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-send-success",
+      "name": "Send Success?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1200, 900]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO messages (id, owner_id, conversation_id, integration_account_id, identity_id, channel, direction, text, sent_at, external_message_id, raw_payload)\nVALUES (\n  gen_random_uuid(),\n  '{{ $('Get Conversation').item.json.owner_id }}',\n  '{{ $('Webhook Send').item.json.conversation_id }}',\n  '{{ $('Get Integration Account').item.json.account_id }}',\n  '{{ $('Get Conversation').item.json.primary_identity_id }}',\n  'telegram',\n  'outbound',\n  '{{ ($('Webhook Send').item.json.text || '').replace(/'/g, \"''\") }}',\n  NOW(),\n  '{{ $('Call Worker /send').item.json.telegram_msg_id }}',\n  '{}'::jsonb\n)\nRETURNING id, conversation_id, direction, text, sent_at, external_message_id;",
+        "options": {}
+      },
+      "id": "insert-message-send",
+      "name": "Insert Message (Send)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1440, 800],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE conversations SET\n  last_message_preview = LEFT('{{ ($('Webhook Send').item.json.text || '📎 Mídia').replace(/'/g, \"''\") }}', 100),\n  last_message_at = NOW(),\n  last_outbound_at = NOW(),\n  updated_at = NOW()\nWHERE id = '{{ $('Webhook Send').item.json.conversation_id }}'\nRETURNING id;",
+        "options": {}
+      },
+      "id": "update-conversation-send",
+      "name": "Update Conversation (Send)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1680, 800],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'ok', message_id: $('Insert Message (Send)').item.json.id, telegram_msg_id: $('Call Worker /send').item.json.telegram_msg_id }) }}"
+      },
+      "id": "respond-send-success",
+      "name": "Respond Success (Send)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1920, 800]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'error', error: $('Call Worker /send').item.json.error || 'Falha ao enviar' }) }}",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "id": "respond-send-error",
+      "name": "Respond Error (Send)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1440, 1000]
+    }
+  ],
+  "connections": {
+    "Webhook Inbound": {
+      "main": [
+        [
+          {
+            "node": "Upsert Identity (Inbound)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Identity (Inbound)": {
+      "main": [
+        [
+          {
+            "node": "Upsert Conversation (Inbound)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Conversation (Inbound)": {
+      "main": [
+        [
+          {
+            "node": "Insert Message (Inbound)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Message (Inbound)": {
+      "main": [
+        [
+          {
+            "node": "Update Conversation (Inbound)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Conversation (Inbound)": {
+      "main": [
+        [
+          {
+            "node": "Increment Unread",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Increment Unread": {
+      "main": [
+        [
+          {
+            "node": "Has Media? (Inbound)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Media? (Inbound)": {
+      "main": [
+        [
+          {
+            "node": "Insert Attachment (Inbound)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond (Inbound)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Attachment (Inbound)": {
+      "main": [
+        [
+          {
+            "node": "Respond (Inbound)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Outbound": {
+      "main": [
+        [
+          {
+            "node": "Upsert Identity (Outbound)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Identity (Outbound)": {
+      "main": [
+        [
+          {
+            "node": "Upsert Conversation (Outbound)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Conversation (Outbound)": {
+      "main": [
+        [
+          {
+            "node": "Insert Message (Outbound)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Message (Outbound)": {
+      "main": [
+        [
+          {
+            "node": "Update Conversation (Outbound)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Conversation (Outbound)": {
+      "main": [
+        [
+          {
+            "node": "Has Media? (Outbound)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Media? (Outbound)": {
+      "main": [
+        [
+          {
+            "node": "Insert Attachment (Outbound)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond (Outbound)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Attachment (Outbound)": {
+      "main": [
+        [
+          {
+            "node": "Respond (Outbound)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Send": {
+      "main": [
+        [
+          {
+            "node": "Get Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Conversation": {
+      "main": [
+        [
+          {
+            "node": "Get Integration Account",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Integration Account": {
+      "main": [
+        [
+          {
+            "node": "Call Worker /send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Worker /send": {
+      "main": [
+        [
+          {
+            "node": "Send Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Success?": {
+      "main": [
+        [
+          {
+            "node": "Insert Message (Send)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Error (Send)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Message (Send)": {
+      "main": [
+        [
+          {
+            "node": "Update Conversation (Send)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Conversation (Send)": {
+      "main": [
+        [
+          {
+            "node": "Respond Success (Send)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "telegram",
+      "id": "telegram"
+    },
+    {
+      "name": "messaging",
+      "id": "messaging"
+    }
+  ],
+  "triggerCount": 3,
+  "pinData": {}
+}

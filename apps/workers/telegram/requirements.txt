@@ -9,3 +9,8 @@ python-dotenv>=1.0.0
 
 # Security
 cryptography>=44.0.0
+
+# HTTP API (FastAPI)
+fastapi>=0.115.0
+uvicorn>=0.32.0
+httpx>=0.28.0
