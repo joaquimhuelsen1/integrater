@@ -278,6 +278,11 @@ async def send_message(
             "external_message_id": external_id
         }).eq("id", str(message_id)).execute()
 
+    # Se envio falhou, deletar mensagem e retornar erro
+    if send_status == "failed":
+        db.table("messages").delete().eq("id", str(message_id)).execute()
+        raise HTTPException(status_code=500, detail="Falha ao enviar mensagem")
+
     # Retornar mensagem atualizada
     final_result = db.table("messages").select("*").eq("id", str(message_id)).single().execute()
     return final_result.data
