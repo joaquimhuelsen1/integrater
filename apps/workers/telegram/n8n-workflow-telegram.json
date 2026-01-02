@@ -46,7 +46,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO contact_identities (id, owner_id, workspace_id, type, value, metadata)\nVALUES (\n  COALESCE(\n    (SELECT id FROM contact_identities WHERE owner_id = '{{ $json.owner_id }}' AND type = 'telegram_user' AND value = '{{ $json.telegram_user_id }}' LIMIT 1),\n    gen_random_uuid()\n  ),\n  '{{ $json.owner_id }}',\n  {{ $json.workspace_id ? \"'\" + $json.workspace_id + \"'\" : \"NULL\" }},\n  'telegram_user',\n  '{{ $json.telegram_user_id }}',\n  '{{ JSON.stringify($json.sender || {}) }}'::jsonb\n)\nON CONFLICT (owner_id, type, value) DO UPDATE SET\n  metadata = COALESCE(contact_identities.metadata, '{}'::jsonb) || EXCLUDED.metadata,\n  updated_at = NOW()\nRETURNING id, owner_id, workspace_id, type, value, metadata;",
+        "query": "INSERT INTO contact_identities (id, owner_id, workspace_id, type, value, metadata)\nVALUES (\n  COALESCE(\n    (SELECT id FROM contact_identities WHERE owner_id = '{{ $json.body.owner_id }}' AND type = 'telegram_user' AND value = '{{ $json.body.telegram_user_id }}' LIMIT 1),\n    gen_random_uuid()\n  ),\n  '{{ $json.body.owner_id }}',\n  {{ $json.body.workspace_id ? \"'\" + $json.body.workspace_id + \"'\" : \"NULL\" }},\n  'telegram_user',\n  '{{ $json.body.telegram_user_id }}',\n  '{{ JSON.stringify($json.body.sender || {}) }}'::jsonb\n)\nON CONFLICT (owner_id, type, value) DO UPDATE SET\n  metadata = COALESCE(contact_identities.metadata, '{}'::jsonb) || EXCLUDED.metadata,\n  updated_at = NOW()\nRETURNING id, owner_id, workspace_id, type, value, metadata;",
         "options": {}
       },
       "id": "upsert-identity-inbound",
@@ -64,7 +64,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO contact_identities (id, owner_id, workspace_id, type, value, metadata)\nVALUES (\n  COALESCE(\n    (SELECT id FROM contact_identities WHERE owner_id = '{{ $json.owner_id }}' AND type = 'telegram_user' AND value = '{{ $json.telegram_user_id }}' LIMIT 1),\n    gen_random_uuid()\n  ),\n  '{{ $json.owner_id }}',\n  {{ $json.workspace_id ? \"'\" + $json.workspace_id + \"'\" : \"NULL\" }},\n  'telegram_user',\n  '{{ $json.telegram_user_id }}',\n  '{}'::jsonb\n)\nON CONFLICT (owner_id, type, value) DO UPDATE SET\n  updated_at = NOW()\nRETURNING id, owner_id, workspace_id, type, value, metadata;",
+        "query": "INSERT INTO contact_identities (id, owner_id, workspace_id, type, value, metadata)\nVALUES (\n  COALESCE(\n    (SELECT id FROM contact_identities WHERE owner_id = '{{ $json.body.owner_id }}' AND type = 'telegram_user' AND value = '{{ $json.body.telegram_user_id }}' LIMIT 1),\n    gen_random_uuid()\n  ),\n  '{{ $json.body.owner_id }}',\n  {{ $json.body.workspace_id ? \"'\" + $json.body.workspace_id + \"'\" : \"NULL\" }},\n  'telegram_user',\n  '{{ $json.body.telegram_user_id }}',\n  '{}'::jsonb\n)\nON CONFLICT (owner_id, type, value) DO UPDATE SET\n  updated_at = NOW()\nRETURNING id, owner_id, workspace_id, type, value, metadata;",
         "options": {}
       },
       "id": "upsert-identity-outbound",
@@ -82,7 +82,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH identity AS (\n  SELECT id, owner_id, workspace_id FROM contact_identities\n  WHERE owner_id = '{{ $('Webhook Inbound').item.json.owner_id }}'\n    AND type = 'telegram_user'\n    AND value = '{{ $('Webhook Inbound').item.json.telegram_user_id }}'\n  LIMIT 1\n)\nINSERT INTO conversations (id, owner_id, workspace_id, primary_identity_id, status, last_channel, last_message_at)\nSELECT\n  COALESCE(\n    (SELECT id FROM conversations WHERE primary_identity_id = identity.id LIMIT 1),\n    gen_random_uuid()\n  ),\n  identity.owner_id,\n  identity.workspace_id,\n  identity.id,\n  'open',\n  'telegram',\n  NOW()\nFROM identity\nON CONFLICT (primary_identity_id) DO UPDATE SET\n  last_message_at = NOW(),\n  last_channel = 'telegram',\n  status = CASE WHEN conversations.status = 'closed' THEN 'open' ELSE conversations.status END\nRETURNING id, owner_id, workspace_id, primary_identity_id, status;",
+        "query": "WITH identity AS (\n  SELECT id, owner_id, workspace_id FROM contact_identities\n  WHERE owner_id = '{{ $('Webhook Inbound').item.json.body.owner_id }}'\n    AND type = 'telegram_user'\n    AND value = '{{ $('Webhook Inbound').item.json.body.telegram_user_id }}'\n  LIMIT 1\n)\nINSERT INTO conversations (id, owner_id, workspace_id, primary_identity_id, status, last_channel, last_message_at)\nSELECT\n  COALESCE(\n    (SELECT id FROM conversations WHERE primary_identity_id = identity.id LIMIT 1),\n    gen_random_uuid()\n  ),\n  identity.owner_id,\n  identity.workspace_id,\n  identity.id,\n  'open',\n  'telegram',\n  NOW()\nFROM identity\nON CONFLICT (primary_identity_id) DO UPDATE SET\n  last_message_at = NOW(),\n  last_channel = 'telegram',\n  status = CASE WHEN conversations.status = 'closed' THEN 'open' ELSE conversations.status END\nRETURNING id, owner_id, workspace_id, primary_identity_id, status;",
         "options": {}
       },
       "id": "upsert-conversation-inbound",
@@ -100,7 +100,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH identity AS (\n  SELECT id, owner_id, workspace_id FROM contact_identities\n  WHERE owner_id = '{{ $('Webhook Outbound').item.json.owner_id }}'\n    AND type = 'telegram_user'\n    AND value = '{{ $('Webhook Outbound').item.json.telegram_user_id }}'\n  LIMIT 1\n)\nINSERT INTO conversations (id, owner_id, workspace_id, primary_identity_id, status, last_channel, last_message_at)\nSELECT\n  COALESCE(\n    (SELECT id FROM conversations WHERE primary_identity_id = identity.id LIMIT 1),\n    gen_random_uuid()\n  ),\n  identity.owner_id,\n  identity.workspace_id,\n  identity.id,\n  'open',\n  'telegram',\n  NOW()\nFROM identity\nON CONFLICT (primary_identity_id) DO UPDATE SET\n  last_message_at = NOW(),\n  last_channel = 'telegram'\nRETURNING id, owner_id, workspace_id, primary_identity_id, status;",
+        "query": "WITH identity AS (\n  SELECT id, owner_id, workspace_id FROM contact_identities\n  WHERE owner_id = '{{ $('Webhook Outbound').item.json.body.owner_id }}'\n    AND type = 'telegram_user'\n    AND value = '{{ $('Webhook Outbound').item.json.body.telegram_user_id }}'\n  LIMIT 1\n)\nINSERT INTO conversations (id, owner_id, workspace_id, primary_identity_id, status, last_channel, last_message_at)\nSELECT\n  COALESCE(\n    (SELECT id FROM conversations WHERE primary_identity_id = identity.id LIMIT 1),\n    gen_random_uuid()\n  ),\n  identity.owner_id,\n  identity.workspace_id,\n  identity.id,\n  'open',\n  'telegram',\n  NOW()\nFROM identity\nON CONFLICT (primary_identity_id) DO UPDATE SET\n  last_message_at = NOW(),\n  last_channel = 'telegram'\nRETURNING id, owner_id, workspace_id, primary_identity_id, status;",
         "options": {}
       },
       "id": "upsert-conversation-outbound",
@@ -118,7 +118,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO messages (id, owner_id, conversation_id, integration_account_id, identity_id, channel, direction, text, sent_at, external_message_id, raw_payload)\nVALUES (\n  gen_random_uuid(),\n  '{{ $('Webhook Inbound').item.json.owner_id }}',\n  '{{ $('Upsert Conversation (Inbound)').item.json.id }}',\n  '{{ $('Webhook Inbound').item.json.account_id }}',\n  '{{ $('Upsert Identity (Inbound)').item.json.id }}',\n  'telegram',\n  'inbound',\n  '{{ ($('Webhook Inbound').item.json.content.text || '').replace(/'/g, \"''\") }}',\n  '{{ $('Webhook Inbound').item.json.timestamp }}',\n  '{{ $('Webhook Inbound').item.json.telegram_msg_id }}',\n  '{{ JSON.stringify($('Webhook Inbound').item.json.content || {}) }}'::jsonb\n)\nON CONFLICT (conversation_id, external_message_id) DO NOTHING\nRETURNING id, conversation_id, direction, text, sent_at;",
+        "query": "INSERT INTO messages (id, owner_id, conversation_id, integration_account_id, identity_id, channel, direction, text, sent_at, external_message_id, raw_payload)\nVALUES (\n  gen_random_uuid(),\n  '{{ $('Webhook Inbound').item.json.body.owner_id }}',\n  '{{ $('Upsert Conversation (Inbound)').item.json.id }}',\n  '{{ $('Webhook Inbound').item.json.body.account_id }}',\n  '{{ $('Upsert Identity (Inbound)').item.json.id }}',\n  'telegram',\n  'inbound',\n  '{{ ($('Webhook Inbound').item.json.body.content.text || '').replace(/'/g, \"''\") }}',\n  '{{ $('Webhook Inbound').item.json.body.timestamp }}',\n  '{{ $('Webhook Inbound').item.json.body.telegram_msg_id }}',\n  '{{ JSON.stringify($('Webhook Inbound').item.json.body.content || {}) }}'::jsonb\n)\nON CONFLICT (conversation_id, external_message_id) DO NOTHING\nRETURNING id, conversation_id, direction, text, sent_at;",
         "options": {}
       },
       "id": "insert-message-inbound",
@@ -136,7 +136,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO messages (id, owner_id, conversation_id, integration_account_id, identity_id, channel, direction, text, sent_at, external_message_id, raw_payload)\nVALUES (\n  gen_random_uuid(),\n  '{{ $('Webhook Outbound').item.json.owner_id }}',\n  '{{ $('Upsert Conversation (Outbound)').item.json.id }}',\n  '{{ $('Webhook Outbound').item.json.account_id }}',\n  '{{ $('Upsert Identity (Outbound)').item.json.id }}',\n  'telegram',\n  'outbound',\n  '{{ ($('Webhook Outbound').item.json.content.text || '').replace(/'/g, \"''\") }}',\n  '{{ $('Webhook Outbound').item.json.timestamp }}',\n  '{{ $('Webhook Outbound').item.json.telegram_msg_id }}',\n  '{{ JSON.stringify($('Webhook Outbound').item.json.content || {}) }}'::jsonb\n)\nON CONFLICT (conversation_id, external_message_id) DO NOTHING\nRETURNING id, conversation_id, direction, text, sent_at;",
+        "query": "INSERT INTO messages (id, owner_id, conversation_id, integration_account_id, identity_id, channel, direction, text, sent_at, external_message_id, raw_payload)\nVALUES (\n  gen_random_uuid(),\n  '{{ $('Webhook Outbound').item.json.body.owner_id }}',\n  '{{ $('Upsert Conversation (Outbound)').item.json.id }}',\n  '{{ $('Webhook Outbound').item.json.body.account_id }}',\n  '{{ $('Upsert Identity (Outbound)').item.json.id }}',\n  'telegram',\n  'outbound',\n  '{{ ($('Webhook Outbound').item.json.body.content.text || '').replace(/'/g, \"''\") }}',\n  '{{ $('Webhook Outbound').item.json.body.timestamp }}',\n  '{{ $('Webhook Outbound').item.json.body.telegram_msg_id }}',\n  '{{ JSON.stringify($('Webhook Outbound').item.json.body.content || {}) }}'::jsonb\n)\nON CONFLICT (conversation_id, external_message_id) DO NOTHING\nRETURNING id, conversation_id, direction, text, sent_at;",
         "options": {}
       },
       "id": "insert-message-outbound",
@@ -154,7 +154,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE conversations SET\n  last_message_preview = LEFT('{{ ($('Webhook Inbound').item.json.content.text || '📎 Mídia').replace(/'/g, \"''\") }}', 100),\n  last_inbound_at = NOW(),\n  updated_at = NOW()\nWHERE id = '{{ $('Upsert Conversation (Inbound)').item.json.id }}'\nRETURNING id;",
+        "query": "UPDATE conversations SET\n  last_message_preview = LEFT('{{ ($('Webhook Inbound').item.json.body.content.text || '📎 Mídia').replace(/'/g, \"''\") }}', 100),\n  last_inbound_at = NOW(),\n  updated_at = NOW()\nWHERE id = '{{ $('Upsert Conversation (Inbound)').item.json.id }}'\nRETURNING id;",
         "options": {}
       },
       "id": "update-conversation-inbound",
@@ -172,7 +172,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE conversations SET\n  last_message_preview = LEFT('{{ ($('Webhook Outbound').item.json.content.text || '📎 Mídia').replace(/'/g, \"''\") }}', 100),\n  last_outbound_at = NOW(),\n  updated_at = NOW()\nWHERE id = '{{ $('Upsert Conversation (Outbound)').item.json.id }}'\nRETURNING id;",
+        "query": "UPDATE conversations SET\n  last_message_preview = LEFT('{{ ($('Webhook Outbound').item.json.body.content.text || '📎 Mídia').replace(/'/g, \"''\") }}', 100),\n  last_outbound_at = NOW(),\n  updated_at = NOW()\nWHERE id = '{{ $('Upsert Conversation (Outbound)').item.json.id }}'\nRETURNING id;",
         "options": {}
       },
       "id": "update-conversation-outbound",
@@ -190,7 +190,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO unread_conversations (owner_id, conversation_id, unread_count)\nVALUES (\n  '{{ $('Webhook Inbound').item.json.owner_id }}',\n  '{{ $('Upsert Conversation (Inbound)').item.json.id }}',\n  1\n)\nON CONFLICT (owner_id, conversation_id) DO UPDATE SET\n  unread_count = unread_conversations.unread_count + 1,\n  updated_at = NOW()\nRETURNING conversation_id, unread_count;",
+        "query": "INSERT INTO unread_conversations (owner_id, conversation_id, unread_count)\nVALUES (\n  '{{ $('Webhook Inbound').item.json.body.owner_id }}',\n  '{{ $('Upsert Conversation (Inbound)').item.json.id }}',\n  1\n)\nON CONFLICT (owner_id, conversation_id) DO UPDATE SET\n  unread_count = unread_conversations.unread_count + 1,\n  updated_at = NOW()\nRETURNING conversation_id, unread_count;",
         "options": {}
       },
       "id": "increment-unread",
@@ -210,7 +210,7 @@
         "conditions": {
           "string": [
             {
-              "value1": "={{ $('Webhook Inbound').item.json.content.media_url }}",
+              "value1": "={{ $('Webhook Inbound').item.json.body.content.media_url }}",
               "operation": "isNotEmpty"
             }
           ]
@@ -225,7 +225,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO attachments (id, owner_id, message_id, storage_bucket, storage_path, file_name, mime_type)\nVALUES (\n  gen_random_uuid(),\n  '{{ $('Webhook Inbound').item.json.owner_id }}',\n  '{{ $('Insert Message (Inbound)').item.json.id }}',\n  'attachments',\n  '{{ $('Webhook Inbound').item.json.content.media_url }}',\n  '{{ $('Webhook Inbound').item.json.content.media_name || 'attachment' }}',\n  '{{ $('Webhook Inbound').item.json.content.media_type || 'application/octet-stream' }}'\n)\nRETURNING id;",
+        "query": "INSERT INTO attachments (id, owner_id, message_id, storage_bucket, storage_path, file_name, mime_type)\nVALUES (\n  gen_random_uuid(),\n  '{{ $('Webhook Inbound').item.json.body.owner_id }}',\n  '{{ $('Insert Message (Inbound)').item.json.id }}',\n  'attachments',\n  '{{ $('Webhook Inbound').item.json.body.content.media_url }}',\n  '{{ $('Webhook Inbound').item.json.body.content.media_name || 'attachment' }}',\n  '{{ $('Webhook Inbound').item.json.body.content.media_type || 'application/octet-stream' }}'\n)\nRETURNING id;",
         "options": {}
       },
       "id": "insert-attachment-inbound",
@@ -256,7 +256,7 @@
         "conditions": {
           "string": [
             {
-              "value1": "={{ $('Webhook Outbound').item.json.content.media_url }}",
+              "value1": "={{ $('Webhook Outbound').item.json.body.content.media_url }}",
               "operation": "isNotEmpty"
             }
           ]
@@ -271,7 +271,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO attachments (id, owner_id, message_id, storage_bucket, storage_path, file_name, mime_type)\nVALUES (\n  gen_random_uuid(),\n  '{{ $('Webhook Outbound').item.json.owner_id }}',\n  '{{ $('Insert Message (Outbound)').item.json.id }}',\n  'attachments',\n  '{{ $('Webhook Outbound').item.json.content.media_url }}',\n  '{{ $('Webhook Outbound').item.json.content.media_name || 'attachment' }}',\n  '{{ $('Webhook Outbound').item.json.content.media_type || 'application/octet-stream' }}'\n)\nRETURNING id;",
+        "query": "INSERT INTO attachments (id, owner_id, message_id, storage_bucket, storage_path, file_name, mime_type)\nVALUES (\n  gen_random_uuid(),\n  '{{ $('Webhook Outbound').item.json.body.owner_id }}',\n  '{{ $('Insert Message (Outbound)').item.json.id }}',\n  'attachments',\n  '{{ $('Webhook Outbound').item.json.body.content.media_url }}',\n  '{{ $('Webhook Outbound').item.json.body.content.media_name || 'attachment' }}',\n  '{{ $('Webhook Outbound').item.json.body.content.media_type || 'application/octet-stream' }}'\n)\nRETURNING id;",
         "options": {}
       },
       "id": "insert-attachment-outbound",
@@ -300,7 +300,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT c.id as conversation_id, c.owner_id, c.workspace_id, c.primary_identity_id,\n       ci.value as telegram_user_id, ci.metadata\nFROM conversations c\nJOIN contact_identities ci ON ci.id = c.primary_identity_id\nWHERE c.id = '{{ $json.conversation_id }}'\nLIMIT 1;",
+        "query": "SELECT c.id as conversation_id, c.owner_id, c.workspace_id, c.primary_identity_id,\n       ci.value as telegram_user_id, ci.metadata\nFROM conversations c\nJOIN contact_identities ci ON ci.id = c.primary_identity_id\nWHERE c.id = '{{ $json.body.conversation_id }}'\nLIMIT 1;",
         "options": {}
       },
       "id": "get-conversation",
@@ -336,7 +336,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://telegram-worker:8001/send",
+        "url": "https://api.thereconquestmap.com/worker/send",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
@@ -352,11 +352,11 @@
             },
             {
               "name": "text",
-              "value": "={{ $('Webhook Send').item.json.text }}"
+              "value": "={{ $('Webhook Send').item.json.body.text }}"
             },
             {
               "name": "attachments",
-              "value": "={{ $('Webhook Send').item.json.attachments || [] }}"
+              "value": "={{ $('Webhook Send').item.json.body.attachments || [] }}"
             }
           ]
         },
@@ -396,7 +396,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO messages (id, owner_id, conversation_id, integration_account_id, identity_id, channel, direction, text, sent_at, external_message_id, raw_payload)\nVALUES (\n  gen_random_uuid(),\n  '{{ $('Get Conversation').item.json.owner_id }}',\n  '{{ $('Webhook Send').item.json.conversation_id }}',\n  '{{ $('Get Integration Account').item.json.account_id }}',\n  '{{ $('Get Conversation').item.json.primary_identity_id }}',\n  'telegram',\n  'outbound',\n  '{{ ($('Webhook Send').item.json.text || '').replace(/'/g, \"''\") }}',\n  NOW(),\n  '{{ $('Call Worker /send').item.json.telegram_msg_id }}',\n  '{}'::jsonb\n)\nRETURNING id, conversation_id, direction, text, sent_at, external_message_id;",
+        "query": "INSERT INTO messages (id, owner_id, conversation_id, integration_account_id, identity_id, channel, direction, text, sent_at, external_message_id, raw_payload)\nVALUES (\n  gen_random_uuid(),\n  '{{ $('Get Conversation').item.json.owner_id }}',\n  '{{ $('Webhook Send').item.json.body.conversation_id }}',\n  '{{ $('Get Integration Account').item.json.account_id }}',\n  '{{ $('Get Conversation').item.json.primary_identity_id }}',\n  'telegram',\n  'outbound',\n  '{{ ($('Webhook Send').item.json.body.text || '').replace(/'/g, \"''\") }}',\n  NOW(),\n  '{{ $('Call Worker /send').item.json.telegram_msg_id }}',\n  '{}'::jsonb\n)\nRETURNING id, conversation_id, direction, text, sent_at, external_message_id;",
         "options": {}
       },
       "id": "insert-message-send",
@@ -414,7 +414,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE conversations SET\n  last_message_preview = LEFT('{{ ($('Webhook Send').item.json.text || '📎 Mídia').replace(/'/g, \"''\") }}', 100),\n  last_message_at = NOW(),\n  last_outbound_at = NOW(),\n  updated_at = NOW()\nWHERE id = '{{ $('Webhook Send').item.json.conversation_id }}'\nRETURNING id;",
+        "query": "UPDATE conversations SET\n  last_message_preview = LEFT('{{ ($('Webhook Send').item.json.body.text || '📎 Mídia').replace(/'/g, \"''\") }}', 100),\n  last_message_at = NOW(),\n  last_outbound_at = NOW(),\n  updated_at = NOW()\nWHERE id = '{{ $('Webhook Send').item.json.body.conversation_id }}'\nRETURNING id;",
         "options": {}
       },
       "id": "update-conversation-send",

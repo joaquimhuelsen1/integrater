@@ -25,6 +25,8 @@ services:
     build: ./apps/workers
     container_name: inbox-telegram-worker
     command: python telegram/worker.py
+    ports:
+      - "8001:8001"
     env_file:
       - ./apps/workers/.env
     restart: unless-stopped
