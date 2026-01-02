@@ -48,11 +48,21 @@ class SendRequest(BaseModel):
     reply_to_msg_id: int | None = None
 
 
+class RecipientData(BaseModel):
+    """Dados do destinatário."""
+    telegram_user_id: int
+    first_name: str | None = None
+    last_name: str | None = None
+    username: str | None = None
+    photo_url: str | None = None
+
+
 class SendResponse(BaseModel):
     """Response do envio de mensagem."""
     success: bool
     telegram_msg_id: int | None = None
     error: str | None = None
+    recipient: RecipientData | None = None
 
 
 class HealthResponse(BaseModel):
@@ -166,9 +176,20 @@ async def send_message(req: SendRequest):
             print(f"[API] Mensagem enviada: {sent.id} para {req.telegram_user_id}")
             # Marca no cache para o handler Raw ignorar (evita duplicata)
             worker._mark_sent_via_api(sent.id, req.telegram_user_id)
+            
+            # Busca dados do destinatário (nome, foto)
+            recipient_data = await worker._get_sender_data(client, req.telegram_user_id)
+            
             return SendResponse(
                 success=True,
-                telegram_msg_id=sent.id
+                telegram_msg_id=sent.id,
+                recipient=RecipientData(
+                    telegram_user_id=req.telegram_user_id,
+                    first_name=recipient_data.get("first_name"),
+                    last_name=recipient_data.get("last_name"),
+                    username=recipient_data.get("username"),
+                    photo_url=recipient_data.get("photo_url"),
+                )
             )
         else:
             return SendResponse(
