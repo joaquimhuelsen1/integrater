@@ -161,32 +161,8 @@ async def send_message(req: SendRequest):
         
         if sent:
             print(f"[API] Mensagem enviada: {sent.id} para {req.telegram_user_id}")
-            
-            # Notifica webhook outbound
-            from webhooks import notify_outbound_message
-            from datetime import datetime, timezone
-            
-            account_info = worker.account_info.get(req.account_id, {})
-            owner_id = account_info.get("owner_id")
-            workspace_id = account_info.get("workspace_id")
-            
-            if owner_id:
-                await notify_outbound_message(
-                    account_id=req.account_id,
-                    owner_id=owner_id,
-                    workspace_id=workspace_id,
-                    telegram_user_id=req.telegram_user_id,
-                    telegram_msg_id=sent.id,
-                    content={
-                        "text": req.text or "",
-                        "media_url": req.attachments[0] if req.attachments else None,
-                        "media_type": None,
-                        "media_name": None,
-                    },
-                    timestamp=datetime.now(timezone.utc),
-                    is_group=False,
-                )
-            
+            # Marca no cache para o handler Raw ignorar (evita duplicata)
+            worker._mark_sent_via_api(sent.id)
             return SendResponse(
                 success=True,
                 telegram_msg_id=sent.id

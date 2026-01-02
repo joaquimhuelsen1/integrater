@@ -95,6 +95,7 @@ class TelegramWorker:
         self.entity_cache: dict[int, tuple] = {}
         self.entity_fail_cache: dict[int, float] = {}
         self.presence_cache: dict[int, tuple] = {}
+        self.sent_via_api: dict[int, float] = {}  # msg_id -> timestamp (msgs enviadas via API)
 
     def _get_cached_entity(self, user_id: int):
         """Retorna entity do cache se válida."""
@@ -124,6 +125,23 @@ class TelegramWorker:
         """Marca que get_entity falhou."""
         import time
         self.entity_fail_cache[user_id] = time.time()
+
+    def _mark_sent_via_api(self, msg_id: int):
+        """Marca mensagem como enviada via API (para ignorar no handler Raw)."""
+        import time
+        self.sent_via_api[msg_id] = time.time()
+        # Limpa msgs antigas (mais de 60s)
+        cutoff = time.time() - 60
+        self.sent_via_api = {k: v for k, v in self.sent_via_api.items() if v > cutoff}
+
+    def _was_sent_via_api(self, msg_id: int) -> bool:
+        """Verifica se mensagem foi enviada via API."""
+        import time
+        if msg_id in self.sent_via_api:
+            if time.time() - self.sent_via_api[msg_id] < 60:
+                return True
+            del self.sent_via_api[msg_id]
+        return False
 
     def _should_update_presence(self, user_id: int, is_online: bool, is_typing: bool) -> bool:
         """Retorna True se deve gravar presence no DB."""
@@ -338,6 +356,10 @@ class TelegramWorker:
             
             if isinstance(update, UpdateShortMessage):
                 if update.out:
+                    # Ignora se foi enviada via API (evita duplicata)
+                    if self._was_sent_via_api(update.id):
+                        print(f"[RAW] UpdateShortMessage OUT ignorada (via API): id={update.id}")
+                        return
                     print(f"[RAW] UpdateShortMessage OUT: id={update.id} user={update.user_id}")
                     await self._notify_outbound(
                         acc_id, owner_id, workspace_id, client,
@@ -356,6 +378,10 @@ class TelegramWorker:
                 msg = update.message
                 if hasattr(msg, 'peer_id') and isinstance(msg.peer_id, PeerUser):
                     if hasattr(msg, 'out') and msg.out:
+                        # Ignora se foi enviada via API (evita duplicata)
+                        if self._was_sent_via_api(msg.id):
+                            print(f"[RAW] UpdateNewMessage OUT ignorada (via API): id={msg.id}")
+                            return
                         print(f"[RAW] UpdateNewMessage OUT: id={msg.id}")
                         await self._notify_outbound(
                             acc_id, owner_id, workspace_id, client,
