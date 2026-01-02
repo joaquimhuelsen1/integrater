@@ -49,7 +49,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO conversations (id, owner_id, workspace_id, primary_identity_id, integration_account_id, status, last_channel, last_message_at)\nVALUES (\n  COALESCE(\n    (SELECT id FROM conversations \n     WHERE workspace_id = '{{ $('Webhook Sync').item.json.body.workspace_id }}' \n       AND primary_identity_id = '{{ $('Upsert Identity (Sync)').item.json.id }}' \n     LIMIT 1),\n    gen_random_uuid()\n  ),\n  '{{ $('Webhook Sync').item.json.body.owner_id }}',\n  '{{ $('Webhook Sync').item.json.body.workspace_id }}',\n  '{{ $('Upsert Identity (Sync)').item.json.id }}',\n  '{{ $('Webhook Sync').item.json.body.account_id }}',\n  'open',\n  'telegram',\n  NOW()\n)\nON CONFLICT (workspace_id, primary_identity_id) DO UPDATE SET\n  updated_at = NOW()\nRETURNING id;",
+        "query": "INSERT INTO conversations (id, owner_id, workspace_id, primary_identity_id, status, last_channel, last_message_at)\nVALUES (\n  COALESCE(\n    (SELECT id FROM conversations \n     WHERE workspace_id = '{{ $('Webhook Sync').item.json.body.workspace_id }}' \n       AND primary_identity_id = '{{ $('Upsert Identity (Sync)').item.json.id }}' \n     LIMIT 1),\n    gen_random_uuid()\n  ),\n  '{{ $('Webhook Sync').item.json.body.owner_id }}',\n  '{{ $('Webhook Sync').item.json.body.workspace_id }}',\n  '{{ $('Upsert Identity (Sync)').item.json.id }}',\n  'open',\n  'telegram',\n  NOW()\n)\nON CONFLICT (workspace_id, primary_identity_id) DO UPDATE SET\n  updated_at = NOW()\nRETURNING id;",
         "options": {}
       },
       "id": "sync-conversation-003",
