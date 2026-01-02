@@ -100,21 +100,31 @@ class WebhookMessageData(BaseModel):
 
 # --- Helper Functions ---
 
-def _verify_webhook_signature(payload: bytes, signature: str | None) -> bool:
+def _verify_webhook_signature(payload: bytes, signature: str | None, webhook_type: str) -> bool:
     """
     Verifica assinatura HMAC-SHA256 do webhook OpenPhone.
     
     SEGURANÇA: Usa hmac.compare_digest para evitar timing attacks.
     
+    Args:
+        payload: Corpo da requisição em bytes
+        signature: Header x-openphone-signature
+        webhook_type: "inbound" ou "status"
+    
     Returns:
         True se válida, False se inválida ou sem secret configurado
     """
     settings = get_settings()
-    secret = settings.openphone_webhook_secret
+    
+    # Seleciona secret correto baseado no tipo de webhook
+    if webhook_type == "inbound":
+        secret = settings.openphone_webhook_secret_inbound
+    else:
+        secret = settings.openphone_webhook_secret_status
     
     # Se não tem secret configurado, loga warning mas permite (para migração)
     if not secret:
-        logger.warning("OPENPHONE_WEBHOOK_SECRET não configurado - webhook não validado!")
+        logger.warning(f"OPENPHONE_WEBHOOK_SECRET_{webhook_type.upper()} não configurado - webhook não validado!")
         return True  # Permite durante migração, mas loga warning
     
     if not signature:
@@ -130,7 +140,7 @@ def _verify_webhook_signature(payload: bytes, signature: str | None) -> bool:
     is_valid = hmac.compare_digest(signature.lower(), expected.lower())
     
     if not is_valid:
-        logger.warning("Assinatura de webhook inválida")
+        logger.warning(f"Assinatura de webhook {webhook_type} inválida")
     
     return is_valid
 
@@ -367,7 +377,7 @@ async def webhook_inbound(
     payload = await request.body()
     
     # SEGURANÇA: Validar assinatura do webhook
-    if not _verify_webhook_signature(payload, x_openphone_signature):
+    if not _verify_webhook_signature(payload, x_openphone_signature, "inbound"):
         logger.warning("Webhook inbound rejeitado: assinatura inválida")
         raise HTTPException(status_code=401, detail="Assinatura inválida")
     
@@ -477,7 +487,7 @@ async def webhook_status(
         payload = await request.body()
         
         # SEGURANÇA: Validar assinatura do webhook
-        if not _verify_webhook_signature(payload, x_openphone_signature):
+        if not _verify_webhook_signature(payload, x_openphone_signature, "status"):
             logger.warning("Webhook status rejeitado: assinatura inválida")
             raise HTTPException(status_code=401, detail="Assinatura inválida")
         

@@ -28,8 +28,9 @@ class Settings(BaseSettings):
     gemini_flash_model: str = "gemini-3-flash-preview"
     gemini_pro_model: str = "gemini-3-pro-preview"
 
-    # OpenPhone
-    openphone_webhook_secret: str = ""  # Secret para validar webhooks
+    # OpenPhone (secrets diferentes por webhook)
+    openphone_webhook_secret_inbound: str = ""  # Secret do webhook /inbound
+    openphone_webhook_secret_status: str = ""   # Secret do webhook /status
 
     # CORS (URL do frontend)
     frontend_url: str = "http://localhost:3000"
