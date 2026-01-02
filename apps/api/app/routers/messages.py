@@ -16,7 +16,7 @@ from app.utils.crypto import decrypt
 router = APIRouter(prefix="/messages", tags=["messages"])
 
 
-@router.post("/send", response_model=Message, status_code=201)
+@router.post("/send", status_code=201)
 async def send_message(
     data: MessageSendRequest,
     db: Client = Depends(get_supabase),
@@ -31,15 +31,89 @@ async def send_message(
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
 
     conv = conv_result.data
+    channel = data.channel.value if data.channel else conv.get("last_channel", "telegram")
 
-    # Criar mensagem - usa ID do frontend se fornecido (evita duplicata com Realtime)
+    # ============================================
+    # TELEGRAM: n8n faz tudo (não insere no banco)
+    # ============================================
+    if channel == "telegram":
+        print(f"[Telegram] Enviando mensagem para conversa {data.conversation_id}")
+        
+        # Buscar attachments URLs se houver
+        attachment_urls = []
+        if data.attachments:
+            for att_id in data.attachments:
+                att_result = db.table("attachments").select(
+                    "storage_bucket, storage_path"
+                ).eq("id", str(att_id)).single().execute()
+                if att_result.data:
+                    bucket = att_result.data.get("storage_bucket", "attachments")
+                    path = att_result.data.get("storage_path")
+                    if path:
+                        from ..config import get_settings
+                        settings = get_settings()
+                        url = f"{settings.supabase_url}/storage/v1/object/public/{bucket}/{path}"
+                        attachment_urls.append(url)
+        
+        # Chamar webhook n8n /send - n8n insere no banco
+        try:
+            import os
+            n8n_webhook_url = os.environ.get(
+                "N8N_TELEGRAM_SEND_WEBHOOK", 
+                "https://n8nwebhook.thereconquestmap.com/webhook/telegram/send"
+            )
+            n8n_api_key = os.environ.get("N8N_API_KEY", "")
+            
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    n8n_webhook_url,
+                    headers={
+                        "X-API-KEY": n8n_api_key,
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "conversation_id": str(data.conversation_id),
+                        "text": data.text or "",
+                        "attachments": attachment_urls,
+                    },
+                )
+            
+            if response.status_code == 200:
+                resp_data = response.json()
+                if resp_data.get("status") == "ok":
+                    print(f"[Telegram] Enviado via n8n com sucesso: {resp_data.get('telegram_msg_id')}")
+                    # Retorna dados do n8n (mensagem inserida pelo n8n)
+                    return {
+                        "id": resp_data.get("message_id"),
+                        "conversation_id": str(data.conversation_id),
+                        "direction": "outbound",
+                        "text": data.text,
+                        "channel": "telegram",
+                        "sent_at": datetime.utcnow().isoformat(),
+                        "external_message_id": str(resp_data.get("telegram_msg_id")),
+                        "sending_status": "sent",
+                    }
+                else:
+                    print(f"[Telegram] Erro do n8n: {resp_data.get('error')}")
+                    raise HTTPException(status_code=500, detail=resp_data.get('error', 'Erro ao enviar'))
+            else:
+                print(f"[Telegram] Erro HTTP n8n: {response.status_code} {response.text}")
+                raise HTTPException(status_code=500, detail=f"Erro n8n: {response.status_code}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[Telegram] Exceção ao enviar via n8n: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # ============================================
+    # OUTROS CANAIS: API insere no banco
+    # ============================================
     message_id = data.id if data.id else uuid4()
     now = datetime.utcnow().isoformat()
 
     # Buscar identity_id da conversa
     identity_id = conv.get("primary_identity_id")
     if not identity_id and conv.get("contact_id"):
-        # Buscar primeira identidade do contato
         id_result = db.table("contact_identities").select("id").eq(
             "contact_id", conv["contact_id"]
         ).limit(1).execute()
@@ -47,29 +121,11 @@ async def send_message(
             identity_id = id_result.data[0]["id"]
 
     external_message_id = f"local-{message_id}"
-    channel = data.channel.value if data.channel else conv.get("last_channel", "telegram")
 
-    # Buscar integration_account_id se não fornecido
+    # Buscar integration_account_id
     integration_account_id = data.integration_account_id
-    if not integration_account_id and channel == "telegram":
-        # Buscar do workspace da conversa
-        workspace_id = conv.get("workspace_id")
-        if workspace_id:
-            int_result = db.table("integration_accounts").select("id").eq(
-                "workspace_id", workspace_id
-            ).eq("type", "telegram_user").eq("is_active", True).limit(1).execute()
-            if int_result.data:
-                integration_account_id = int_result.data[0]["id"]
 
-        # Fallback: primeira conta ativa do owner
-        if not integration_account_id:
-            int_result = db.table("integration_accounts").select("id").eq(
-                "owner_id", str(owner_id)
-            ).eq("type", "telegram_user").eq("is_active", True).limit(1).execute()
-            if int_result.data:
-                integration_account_id = int_result.data[0]["id"]
-
-    # Para emails: buscar última mensagem inbound para threading correto
+    # Para emails: buscar última mensagem inbound para threading
     email_reply_to = None
     email_subject = None
     if channel == "email":
@@ -85,7 +141,6 @@ async def send_message(
             email_reply_to = last_inbound.data[0].get("external_message_id")
             original_subject = last_inbound.data[0].get("subject", "")
             if original_subject:
-                # Adiciona "Re:" se não tiver
                 if not original_subject.lower().startswith("re:"):
                     email_subject = f"Re: {original_subject}"
                 else:
@@ -123,85 +178,13 @@ async def send_message(
         "last_message_preview": preview,
     }).eq("id", str(data.conversation_id)).execute()
 
-    # Enviar via canal apropriado (channel já definido acima)
+    # Enviar via canal apropriado
     send_status = "sent"
     external_id = None
 
-    if channel == "telegram":
-        print(f"[Telegram] Enviando mensagem para conversa {data.conversation_id}")
-        
-        # Buscar telegram_user_id da identity
-        telegram_user_id = None
-        if identity_id:
-            identity_result = db.table("contact_identities").select("value, type").eq(
-                "id", identity_id
-            ).single().execute()
-            if identity_result.data and identity_result.data.get("type") == "telegram_user":
-                telegram_user_id = int(identity_result.data.get("value"))
-                print(f"[Telegram] telegram_user_id via identity: {telegram_user_id}")
-        
-        if telegram_user_id and integration_account_id:
-            # Buscar attachments URLs se houver
-            attachment_urls = []
-            if data.attachments:
-                for att_id in data.attachments:
-                    att_result = db.table("attachments").select(
-                        "storage_bucket, storage_path"
-                    ).eq("id", str(att_id)).single().execute()
-                    if att_result.data:
-                        bucket = att_result.data.get("storage_bucket", "attachments")
-                        path = att_result.data.get("storage_path")
-                        if path:
-                            from ..config import get_settings
-                            settings = get_settings()
-                            url = f"{settings.supabase_url}/storage/v1/object/public/{bucket}/{path}"
-                            attachment_urls.append(url)
-            
-            # Chamar webhook n8n /send
-            try:
-                import os
-                n8n_webhook_url = os.environ.get(
-                    "N8N_TELEGRAM_SEND_WEBHOOK", 
-                    "https://n8nwebhook.thereconquestmap.com/webhook/telegram/send"
-                )
-                n8n_api_key = os.environ.get("N8N_API_KEY", "")
-                
-                async with httpx.AsyncClient(timeout=30) as client:
-                    response = await client.post(
-                        n8n_webhook_url,
-                        headers={
-                            "X-API-KEY": n8n_api_key,
-                            "Content-Type": "application/json",
-                        },
-                        json={
-                            "conversation_id": str(data.conversation_id),
-                            "text": data.text or "",
-                            "attachments": attachment_urls,
-                        },
-                    )
-                
-                if response.status_code == 200:
-                    resp_data = response.json()
-                    if resp_data.get("status") == "ok":
-                        external_id = str(resp_data.get("telegram_msg_id"))
-                        send_status = "sent"
-                        print(f"[Telegram] Enviado via n8n com sucesso: {external_id}")
-                    else:
-                        send_status = "failed"
-                        print(f"[Telegram] Erro do n8n: {resp_data.get('error')}")
-                else:
-                    send_status = "failed"
-                    print(f"[Telegram] Erro HTTP n8n: {response.status_code} {response.text}")
-            except Exception as e:
-                send_status = "failed"
-                print(f"[Telegram] Exceção ao enviar via n8n: {e}")
-        else:
-            print(f"[Telegram] telegram_user_id ou integration_account_id não encontrado")
-
-    elif channel == "openphone_sms":
+    if channel == "openphone_sms":
         print(f"[OpenPhone] Enviando SMS para conversa {data.conversation_id}")
 
-        # Buscar conta de integração (da request ou primeira ativa)
         account_id = data.integration_account_id
         if not account_id:
             acc_search = db.table("integration_accounts").select("id").eq(
@@ -219,30 +202,24 @@ async def send_message(
                 account = acc_result.data
                 to_phone = None
 
-                # Primeiro tenta pelo primary_identity_id
                 if conv.get("primary_identity_id"):
                     identity_result = db.table("contact_identities").select("value, type").eq(
                         "id", conv["primary_identity_id"]
                     ).single().execute()
                     if identity_result.data and identity_result.data.get("type") == "phone":
                         to_phone = identity_result.data.get("value")
-                        print(f"[OpenPhone] Telefone via primary_identity: {to_phone}")
 
-                # Fallback: busca pelo contact_id
                 if not to_phone and conv.get("contact_id"):
                     identity_result = db.table("contact_identities").select("value").eq(
                         "contact_id", conv["contact_id"]
                     ).eq("type", "phone").limit(1).execute()
                     if identity_result.data:
                         to_phone = identity_result.data[0].get("value")
-                        print(f"[OpenPhone] Telefone via contact_id: {to_phone}")
 
                 if to_phone:
                     api_key = decrypt(account["secrets_encrypted"])
                     from_number = account["config"]["phone_number"]
-                    print(f"[OpenPhone] Enviando de {from_number} para {to_phone}")
 
-                    # Enviar via OpenPhone API
                     try:
                         async with httpx.AsyncClient() as client:
                             response = await client.post(
@@ -262,15 +239,11 @@ async def send_message(
                             resp_data = response.json().get("data", {})
                             external_id = resp_data.get("id")
                             send_status = "sent"
-                            print(f"[OpenPhone] Enviado com sucesso: {external_id}")
                         else:
                             send_status = "failed"
-                            print(f"[OpenPhone] Erro ao enviar: {response.status_code} {response.text}")
                     except Exception as e:
                         send_status = "failed"
-                        print(f"[OpenPhone] Exceção ao enviar: {e}")
-                else:
-                    print(f"[OpenPhone] Telefone não encontrado para conversa")
+                        print(f"[OpenPhone] Exceção: {e}")
 
     # Atualizar external_message_id se enviou com sucesso
     if external_id:
@@ -316,7 +289,6 @@ async def edit_message(
     Só pode editar mensagens outbound (enviadas pelo usuário).
     Cria um job para o worker editar no canal externo (Telegram/etc).
     """
-    # Buscar mensagem
     msg_result = db.table("messages").select("*").eq(
         "id", str(message_id)
     ).eq("owner_id", str(owner_id)).single().execute()
@@ -326,11 +298,9 @@ async def edit_message(
 
     msg = msg_result.data
 
-    # Só pode editar mensagens outbound
     if msg["direction"] != "outbound":
         raise HTTPException(status_code=400, detail="Só pode editar mensagens enviadas")
 
-    # Validar tamanho do texto
     if not text or len(text.strip()) < 1:
         raise HTTPException(status_code=400, detail="Texto não pode ser vazio")
 
@@ -339,48 +309,36 @@ async def edit_message(
 
     now = datetime.utcnow().isoformat()
 
-    # Atualizar mensagem no banco
     db.table("messages").update({
         "text": text.strip(),
         "edited_at": now,
     }).eq("id", str(message_id)).execute()
 
-    # Criar job para o worker editar no canal externo
-    job_id = uuid4()
-    db.table("message_jobs").insert({
-        "id": str(job_id),
-        "owner_id": str(owner_id),
-        "message_id": str(message_id),
-        "integration_account_id": msg.get("integration_account_id"),
-        "action": "edit",
-        "payload": {
-            "new_text": text.strip(),
-            "external_message_id": msg.get("external_message_id"),
-            "channel": msg.get("channel"),
-        },
-        "status": "pending",
-        "created_at": now,
-    }).execute()
+    # Criar job para editar no canal externo
+    if msg.get("channel") == "telegram" and msg.get("external_message_id"):
+        db.table("message_jobs").insert({
+            "owner_id": str(owner_id),
+            "message_id": str(message_id),
+            "integration_account_id": msg.get("integration_account_id"),
+            "action": "edit",
+            "payload": {"new_text": text.strip()},
+            "status": "pending",
+        }).execute()
 
-    # Retornar mensagem atualizada
-    result = db.table("messages").select("*").eq("id", str(message_id)).single().execute()
-    return result.data
+    return {"status": "ok", "edited_at": now}
 
 
 @router.delete("/{message_id}")
 async def delete_message(
     message_id: UUID,
-    for_everyone: bool = True,
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
     """
-    Deleta uma mensagem.
-    for_everyone=True: deleta no Telegram E marca como deletada no banco
-    for_everyone=False: apenas marca como deletada no banco (soft delete)
+    Deleta uma mensagem (soft delete).
     Só pode deletar mensagens outbound (enviadas pelo usuário).
+    Cria um job para deletar no canal externo (Telegram/etc).
     """
-    # Buscar mensagem
     msg_result = db.table("messages").select("*").eq(
         "id", str(message_id)
     ).eq("owner_id", str(owner_id)).single().execute()
@@ -390,110 +348,98 @@ async def delete_message(
 
     msg = msg_result.data
 
-    # Só pode deletar mensagens outbound
     if msg["direction"] != "outbound":
         raise HTTPException(status_code=400, detail="Só pode deletar mensagens enviadas")
 
     now = datetime.utcnow().isoformat()
 
-    # Soft delete no banco
     db.table("messages").update({
         "deleted_at": now,
     }).eq("id", str(message_id)).execute()
 
-    # Se for_everyone, criar job para deletar no canal externo
-    if for_everyone:
-        job_id = uuid4()
+    # Criar job para deletar no canal externo
+    if msg.get("channel") == "telegram" and msg.get("external_message_id"):
         db.table("message_jobs").insert({
-            "id": str(job_id),
             "owner_id": str(owner_id),
             "message_id": str(message_id),
             "integration_account_id": msg.get("integration_account_id"),
             "action": "delete",
-            "payload": {
-                "external_message_id": msg.get("external_message_id"),
-                "channel": msg.get("channel"),
-            },
+            "payload": {},
             "status": "pending",
-            "created_at": now,
         }).execute()
 
-    return {"success": True, "deleted_at": now, "for_everyone": for_everyone}
+    return {"status": "ok", "deleted_at": now}
 
 
 @router.post("/typing")
 async def send_typing(
-    data: dict,
+    conversation_id: UUID,
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
     """
-    Envia notificação de 'digitando...' para o Telegram.
-    Cria um job na tabela message_jobs com action='typing'.
-    O worker vai processar e enviar o typing action.
+    Envia indicador de digitação para o canal.
+    Cria um job para o worker enviar o typing action.
     """
-    conversation_id = data.get("conversation_id")
-    if not conversation_id:
-        raise HTTPException(status_code=400, detail="conversation_id é obrigatório")
-
-    # Buscar conversa
-    conv_result = db.table("conversations").select("*").eq(
-        "id", str(conversation_id)
-    ).eq("owner_id", str(owner_id)).single().execute()
+    conv_result = db.table("conversations").select(
+        "id, last_channel, primary_identity_id"
+    ).eq("id", str(conversation_id)).eq("owner_id", str(owner_id)).single().execute()
 
     if not conv_result.data:
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
 
     conv = conv_result.data
 
-    # Só funciona para Telegram
     if conv.get("last_channel") != "telegram":
-        return {"success": False, "reason": "Typing só funciona para Telegram"}
+        return {"status": "skipped", "reason": "Only telegram supports typing"}
 
-    # Buscar integration account do Telegram
-    int_result = db.table("integration_accounts").select("id").eq(
-        "owner_id", str(owner_id)
-    ).eq("type", "telegram_user").eq("is_active", True).limit(1).execute()
+    # Buscar integration_account_id
+    workspace_result = db.table("conversations").select("workspace_id").eq(
+        "id", str(conversation_id)
+    ).single().execute()
+    
+    workspace_id = workspace_result.data.get("workspace_id") if workspace_result.data else None
+    
+    integration_account_id = None
+    if workspace_id:
+        int_result = db.table("integration_accounts").select("id").eq(
+            "workspace_id", workspace_id
+        ).eq("type", "telegram_user").eq("is_active", True).limit(1).execute()
+        if int_result.data:
+            integration_account_id = int_result.data[0]["id"]
 
-    if not int_result.data:
-        return {"success": False, "reason": "Sem integração Telegram ativa"}
+    if not integration_account_id:
+        int_result = db.table("integration_accounts").select("id").eq(
+            "owner_id", str(owner_id)
+        ).eq("type", "telegram_user").eq("is_active", True).limit(1).execute()
+        if int_result.data:
+            integration_account_id = int_result.data[0]["id"]
 
-    integration_account_id = int_result.data[0]["id"]
+    if not integration_account_id:
+        return {"status": "skipped", "reason": "No telegram account"}
 
-    # Buscar identity para obter telegram_user_id
+    # Buscar telegram_user_id
     identity_id = conv.get("primary_identity_id")
     if not identity_id:
-        return {"success": False, "reason": "Sem identity na conversa"}
+        return {"status": "skipped", "reason": "No identity"}
 
-    id_result = db.table("contact_identities").select("*").eq(
+    identity_result = db.table("contact_identities").select("value").eq(
         "id", identity_id
     ).single().execute()
 
-    if not id_result.data:
-        return {"success": False, "reason": "Identity não encontrada"}
+    if not identity_result.data:
+        return {"status": "skipped", "reason": "Identity not found"}
 
-    identity = id_result.data
-    telegram_user_id = identity.get("metadata", {}).get("telegram_user_id")
-
-    if not telegram_user_id:
-        return {"success": False, "reason": "Sem telegram_user_id na identity"}
+    telegram_user_id = identity_result.data.get("value")
 
     # Criar job de typing
-    now = datetime.utcnow().isoformat()
-    job_id = uuid4()
-
     db.table("message_jobs").insert({
-        "id": str(job_id),
         "owner_id": str(owner_id),
-        "message_id": None,  # Não há mensagem, é só typing
+        "message_id": None,
         "integration_account_id": integration_account_id,
         "action": "typing",
-        "payload": {
-            "telegram_user_id": telegram_user_id,
-            "conversation_id": str(conversation_id),
-        },
+        "payload": {"telegram_user_id": int(telegram_user_id)},
         "status": "pending",
-        "created_at": now,
     }).execute()
 
-    return {"success": True, "job_id": str(job_id)}
+    return {"status": "ok"}
