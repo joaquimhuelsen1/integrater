@@ -16,6 +16,7 @@ import httpx
 N8N_API_KEY = os.environ.get("N8N_API_KEY", "")
 N8N_WEBHOOK_INBOUND = os.environ.get("N8N_WEBHOOK_INBOUND", "")
 N8N_WEBHOOK_OUTBOUND = os.environ.get("N8N_WEBHOOK_OUTBOUND", "")
+N8N_WEBHOOK_SYNC = os.environ.get("N8N_WEBHOOK_SYNC", "")
 
 # Timeout para chamadas ao n8n (segundos)
 N8N_TIMEOUT = 30
@@ -155,3 +156,45 @@ async def notify_outbound_message(
     
     print(f"[WEBHOOK] Enviando outbound: user={telegram_user_id}, msg={telegram_msg_id}")
     return await send_to_n8n(N8N_WEBHOOK_OUTBOUND, payload)
+
+
+async def notify_sync_batch(
+    account_id: str,
+    owner_id: str,
+    workspace_id: str | None,
+    job_id: str,
+    telegram_user_id: int,
+    is_group: bool,
+    sender: dict,
+    messages: list[dict],
+) -> dict | None:
+    """
+    Envia batch de mensagens de sync histórico para n8n.
+    
+    Args:
+        account_id: ID da conta de integração
+        owner_id: ID do owner
+        workspace_id: ID do workspace
+        job_id: ID do job de sync
+        telegram_user_id: ID do usuário/grupo no Telegram
+        is_group: Se é grupo
+        sender: Dados do contato {first_name, last_name, username, photo_url}
+        messages: Lista de mensagens [{id, telegram_msg_id, text, date, direction, media_url, media_type, media_name}]
+        
+    Returns:
+        Resposta do n8n {status, conversation_id, identity_id, messages_inserted}
+    """
+    payload = {
+        "event": "sync",
+        "account_id": account_id,
+        "owner_id": owner_id,
+        "workspace_id": workspace_id,
+        "job_id": job_id,
+        "telegram_user_id": telegram_user_id,
+        "is_group": is_group,
+        "sender": sender,
+        "messages": messages,
+    }
+    
+    print(f"[WEBHOOK] Enviando sync batch: user={telegram_user_id}, msgs={len(messages)}")
+    return await send_to_n8n(N8N_WEBHOOK_SYNC, payload)

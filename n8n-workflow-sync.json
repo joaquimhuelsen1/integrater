@@ -1,0 +1,213 @@
+{
+  "name": "Telegram Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telegram/sync",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "sync-webhook-001",
+      "name": "Webhook Sync",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        80,
+        -544
+      ],
+      "webhookId": "telegram-sync",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "XhGTaNXCZbwq8Pbi",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO contact_identities (id, owner_id, workspace_id, type, value, metadata)\nVALUES (\n  COALESCE(\n    (SELECT id FROM contact_identities \n     WHERE workspace_id = '{{ $json.body.workspace_id }}' \n       AND type = 'telegram_user' \n       AND value = '{{ $json.body.telegram_user_id }}' \n     LIMIT 1),\n    gen_random_uuid()\n  ),\n  '{{ $json.body.owner_id }}',\n  '{{ $json.body.workspace_id }}',\n  'telegram_user',\n  '{{ $json.body.telegram_user_id }}',\n  jsonb_build_object(\n    'first_name', NULLIF('{{ $json.body.sender.first_name || '' }}', ''),\n    'last_name', NULLIF('{{ $json.body.sender.last_name || '' }}', ''),\n    'username', NULLIF('{{ $json.body.sender.username || '' }}', ''),\n    'avatar_url', NULLIF('{{ $json.body.sender.photo_url || '' }}', ''),\n    'is_group', {{ $json.body.is_group || false }}\n  )\n)\nON CONFLICT (workspace_id, type, value) DO UPDATE SET\n  metadata = COALESCE(contact_identities.metadata, '{}'::jsonb) || \n    jsonb_strip_nulls(jsonb_build_object(\n      'first_name', NULLIF('{{ $json.body.sender.first_name || '' }}', ''),\n      'last_name', NULLIF('{{ $json.body.sender.last_name || '' }}', ''),\n      'username', NULLIF('{{ $json.body.sender.username || '' }}', ''),\n      'avatar_url', NULLIF('{{ $json.body.sender.photo_url || '' }}', '')\n    )),\n  updated_at = NOW()\nRETURNING id, metadata;",
+        "options": {}
+      },
+      "id": "sync-identity-002",
+      "name": "Upsert Identity (Sync)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        336,
+        -544
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "ScAgDQm6RUu4SFJ9",
+          "name": "Integrater"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO conversations (id, owner_id, workspace_id, primary_identity_id, integration_account_id, status, last_channel, last_message_at)\nVALUES (\n  COALESCE(\n    (SELECT id FROM conversations \n     WHERE workspace_id = '{{ $('Webhook Sync').item.json.body.workspace_id }}' \n       AND primary_identity_id = '{{ $('Upsert Identity (Sync)').item.json.id }}' \n     LIMIT 1),\n    gen_random_uuid()\n  ),\n  '{{ $('Webhook Sync').item.json.body.owner_id }}',\n  '{{ $('Webhook Sync').item.json.body.workspace_id }}',\n  '{{ $('Upsert Identity (Sync)').item.json.id }}',\n  '{{ $('Webhook Sync').item.json.body.account_id }}',\n  'open',\n  'telegram',\n  NOW()\n)\nON CONFLICT (workspace_id, primary_identity_id) DO UPDATE SET\n  updated_at = NOW()\nRETURNING id;",
+        "options": {}
+      },
+      "id": "sync-conversation-003",
+      "name": "Upsert Conversation (Sync)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        576,
+        -544
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "ScAgDQm6RUu4SFJ9",
+          "name": "Integrater"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Gera SQL de batch insert para mensagens\nconst messages = $('Webhook Sync').item.json.body.messages || [];\nconst ownerId = $('Webhook Sync').item.json.body.owner_id;\nconst conversationId = $('Upsert Conversation (Sync)').item.json.id;\nconst accountId = $('Webhook Sync').item.json.body.account_id;\nconst identityId = $('Upsert Identity (Sync)').item.json.id;\n\nif (messages.length === 0) {\n  return [{ json: { sql: 'SELECT 0 as messages_inserted', messages_count: 0 } }];\n}\n\n// Escapa aspas simples para SQL\nconst escape = (str) => str ? str.replace(/'/g, \"''\") : null;\n\n// Gera VALUES para cada mensagem\nconst values = messages.map(msg => {\n  const text = escape(msg.text || '');\n  const rawPayload = JSON.stringify({\n    media_url: msg.media_url || null,\n    media_type: msg.media_type || null,\n    media_name: msg.media_name || null,\n    synced: true\n  }).replace(/'/g, \"''\");\n  \n  return `(\n    '${msg.id}'::uuid,\n    '${ownerId}'::uuid,\n    '${conversationId}'::uuid,\n    '${accountId}'::uuid,\n    '${identityId}'::uuid,\n    'telegram',\n    '${msg.direction}',\n    ${text ? `E'${text}'` : 'NULL'},\n    '${msg.date}'::timestamptz,\n    '${msg.telegram_msg_id}',\n    '${rawPayload}'::jsonb,\n    NOW(),\n    NOW()\n  )`;\n}).join(',\\n');\n\nconst sql = `\nWITH inserted AS (\n  INSERT INTO messages (\n    id, owner_id, conversation_id, integration_account_id, identity_id,\n    channel, direction, text, sent_at, external_message_id, raw_payload,\n    created_at, updated_at\n  )\n  VALUES ${values}\n  ON CONFLICT (conversation_id, external_message_id) DO NOTHING\n  RETURNING id\n)\nSELECT COUNT(*) as messages_inserted FROM inserted;\n`;\n\nreturn [{ json: { sql, messages_count: messages.length } }];"
+      },
+      "id": "sync-code-004",
+      "name": "Build Batch SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        816,
+        -544
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {}
+      },
+      "id": "sync-messages-005",
+      "name": "Batch Insert Messages",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1056,
+        -544
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "ScAgDQm6RUu4SFJ9",
+          "name": "Integrater"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH last_msg AS (\n  SELECT \n    sent_at,\n    COALESCE(\n      CASE \n        WHEN text IS NOT NULL AND text != '' THEN \n          CASE WHEN LENGTH(text) > 100 THEN LEFT(text, 100) || '...' ELSE text END\n        ELSE '📎 Mídia'\n      END,\n      '📎 Mídia'\n    ) as preview\n  FROM messages\n  WHERE conversation_id = '{{ $('Upsert Conversation (Sync)').item.json.id }}'::uuid\n  ORDER BY sent_at DESC\n  LIMIT 1\n)\nUPDATE conversations\nSET \n  last_message_at = last_msg.sent_at,\n  last_message_preview = last_msg.preview,\n  updated_at = NOW()\nFROM last_msg\nWHERE id = '{{ $('Upsert Conversation (Sync)').item.json.id }}'::uuid\nRETURNING id, last_message_at;",
+        "options": {}
+      },
+      "id": "sync-update-006",
+      "name": "Update Conversation Last Message",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1296,
+        -544
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "ScAgDQm6RUu4SFJ9",
+          "name": "Integrater"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'ok', conversation_id: $('Upsert Conversation (Sync)').item.json.id, identity_id: $('Upsert Identity (Sync)').item.json.id, messages_inserted: parseInt($('Batch Insert Messages').item.json.messages_inserted) || 0 }) }}",
+        "options": {}
+      },
+      "id": "sync-respond-007",
+      "name": "Respond (Sync)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1536,
+        -544
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Sync": {
+      "main": [
+        [
+          {
+            "node": "Upsert Identity (Sync)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Identity (Sync)": {
+      "main": [
+        [
+          {
+            "node": "Upsert Conversation (Sync)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Conversation (Sync)": {
+      "main": [
+        [
+          {
+            "node": "Build Batch SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Batch SQL": {
+      "main": [
+        [
+          {
+            "node": "Batch Insert Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Insert Messages": {
+      "main": [
+        [
+          {
+            "node": "Update Conversation Last Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Conversation Last Message": {
+      "main": [
+        [
+          {
+            "node": "Respond (Sync)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "27f48368f0b933e7e98f13c210f44911371365aa3cf226fc59d0b4a3098edde1"
+  }
+}

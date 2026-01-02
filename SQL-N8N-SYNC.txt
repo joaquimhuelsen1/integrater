@@ -1,0 +1,284 @@
+================================================================================
+WORKFLOW: /sync (Sync Histórico - Batch Processing)
+================================================================================
+
+ESTRUTURA DO WORKFLOW:
+1. Webhook Trigger (/sync)
+2. Upsert Identity
+3. Upsert Conversation  
+4. Batch Insert Messages
+5. Update Conversation Last Message
+6. Respond to Webhook
+
+================================================================================
+PAYLOAD DO WEBHOOK (recebido do Worker):
+================================================================================
+
+{
+  "account_id": "uuid",
+  "owner_id": "uuid",
+  "workspace_id": "uuid",
+  "job_id": "uuid",
+  "telegram_user_id": 123456,
+  "is_group": false,
+  "sender": {
+    "first_name": "John",
+    "last_name": "Doe", 
+    "username": "johndoe",
+    "photo_url": "https://supabase.../avatars/telegram/123456.jpg"
+  },
+  "messages": [
+    {
+      "id": "uuid-gerado-pelo-worker",
+      "telegram_msg_id": 100,
+      "text": "Hello",
+      "date": "2025-01-01T10:00:00Z",
+      "direction": "inbound",
+      "media_url": null,
+      "media_type": null,
+      "media_name": null
+    }
+  ]
+}
+
+================================================================================
+NODE 2: Upsert Identity (Sync)
+================================================================================
+Postgres Node - Execute Query
+
+INSERT INTO contact_identities (
+  id,
+  owner_id,
+  workspace_id,
+  contact_id,
+  type,
+  value,
+  metadata,
+  created_at,
+  updated_at
+)
+VALUES (
+  gen_random_uuid(),
+  '{{ $json.owner_id }}'::uuid,
+  '{{ $json.workspace_id }}'::uuid,
+  NULL,
+  'telegram_user',
+  '{{ $json.telegram_user_id }}',
+  jsonb_build_object(
+    'first_name', NULLIF('{{ $json.sender.first_name }}', ''),
+    'last_name', NULLIF('{{ $json.sender.last_name }}', ''),
+    'username', NULLIF('{{ $json.sender.username }}', ''),
+    'avatar_url', NULLIF('{{ $json.sender.photo_url }}', ''),
+    'is_group', {{ $json.is_group }}
+  ),
+  NOW(),
+  NOW()
+)
+ON CONFLICT (workspace_id, type, value)
+DO UPDATE SET
+  metadata = CASE
+    WHEN contact_identities.metadata IS NULL THEN EXCLUDED.metadata
+    ELSE contact_identities.metadata || 
+      jsonb_strip_nulls(jsonb_build_object(
+        'first_name', NULLIF('{{ $json.sender.first_name }}', ''),
+        'last_name', NULLIF('{{ $json.sender.last_name }}', ''),
+        'username', NULLIF('{{ $json.sender.username }}', ''),
+        'avatar_url', NULLIF('{{ $json.sender.photo_url }}', '')
+      ))
+  END,
+  updated_at = NOW()
+RETURNING id, metadata;
+
+================================================================================
+NODE 3: Upsert Conversation (Sync)
+================================================================================
+Postgres Node - Execute Query
+
+-- Usa o identity_id do node anterior: {{ $('Upsert Identity (Sync)').item.json.id }}
+
+INSERT INTO conversations (
+  id,
+  owner_id,
+  workspace_id,
+  contact_id,
+  primary_identity_id,
+  integration_account_id,
+  status,
+  last_channel,
+  created_at,
+  updated_at
+)
+VALUES (
+  gen_random_uuid(),
+  '{{ $json.owner_id }}'::uuid,
+  '{{ $json.workspace_id }}'::uuid,
+  NULL,
+  '{{ $('Upsert Identity (Sync)').item.json.id }}'::uuid,
+  '{{ $json.account_id }}'::uuid,
+  'open',
+  'telegram',
+  NOW(),
+  NOW()
+)
+ON CONFLICT (workspace_id, primary_identity_id)
+DO UPDATE SET
+  updated_at = NOW()
+RETURNING id;
+
+================================================================================
+NODE 4: Batch Insert Messages
+================================================================================
+Postgres Node - Execute Query
+
+-- IMPORTANTE: Este SQL usa uma função para processar o array de mensagens
+-- O n8n vai passar o array de mensagens como JSON
+
+WITH input_messages AS (
+  SELECT * FROM jsonb_to_recordset('{{ JSON.stringify($json.messages) }}'::jsonb) AS x(
+    id uuid,
+    telegram_msg_id bigint,
+    text text,
+    date timestamptz,
+    direction text,
+    media_url text,
+    media_type text,
+    media_name text
+  )
+),
+inserted AS (
+  INSERT INTO messages (
+    id,
+    owner_id,
+    conversation_id,
+    integration_account_id,
+    identity_id,
+    channel,
+    direction,
+    text,
+    sent_at,
+    external_message_id,
+    raw_payload,
+    created_at,
+    updated_at
+  )
+  SELECT
+    COALESCE(im.id, gen_random_uuid()),
+    '{{ $json.owner_id }}'::uuid,
+    '{{ $('Upsert Conversation (Sync)').item.json.id }}'::uuid,
+    '{{ $json.account_id }}'::uuid,
+    '{{ $('Upsert Identity (Sync)').item.json.id }}'::uuid,
+    'telegram',
+    im.direction,
+    im.text,
+    im.date,
+    im.telegram_msg_id::text,
+    jsonb_build_object(
+      'media_url', im.media_url,
+      'media_type', im.media_type,
+      'media_name', im.media_name,
+      'synced', true
+    ),
+    NOW(),
+    NOW()
+  FROM input_messages im
+  ON CONFLICT (conversation_id, external_message_id) DO NOTHING
+  RETURNING id
+)
+SELECT COUNT(*) as messages_inserted FROM inserted;
+
+================================================================================
+NODE 5: Update Conversation Last Message
+================================================================================
+Postgres Node - Execute Query
+
+-- Atualiza last_message_at e preview baseado na mensagem mais recente
+
+WITH last_msg AS (
+  SELECT 
+    sent_at,
+    COALESCE(
+      CASE 
+        WHEN text IS NOT NULL AND text != '' THEN 
+          CASE WHEN LENGTH(text) > 100 THEN LEFT(text, 100) || '...' ELSE text END
+        ELSE '📎 Mídia'
+      END,
+      '📎 Mídia'
+    ) as preview
+  FROM messages
+  WHERE conversation_id = '{{ $('Upsert Conversation (Sync)').item.json.id }}'::uuid
+  ORDER BY sent_at DESC
+  LIMIT 1
+)
+UPDATE conversations
+SET 
+  last_message_at = last_msg.sent_at,
+  last_message_preview = last_msg.preview,
+  updated_at = NOW()
+FROM last_msg
+WHERE id = '{{ $('Upsert Conversation (Sync)').item.json.id }}'::uuid
+RETURNING id, last_message_at;
+
+================================================================================
+NODE 6: Respond to Webhook
+================================================================================
+Respond to Webhook Node
+
+Response Body (JSON):
+{
+  "status": "ok",
+  "conversation_id": "{{ $('Upsert Conversation (Sync)').item.json.id }}",
+  "identity_id": "{{ $('Upsert Identity (Sync)').item.json.id }}",
+  "messages_inserted": {{ $('Batch Insert Messages').item.json.messages_inserted }}
+}
+
+================================================================================
+CONFIGURAÇÃO DO WORKFLOW NO n8n:
+================================================================================
+
+1. Webhook Trigger
+   - HTTP Method: POST
+   - Path: /sync
+   - Authentication: Header Auth
+   - Header Name: X-API-Key
+   - Header Value: (seu N8N_API_KEY)
+
+2. Upsert Identity (Sync)
+   - Operation: Execute Query
+   - Query: (SQL acima)
+
+3. Upsert Conversation (Sync)  
+   - Operation: Execute Query
+   - Query: (SQL acima)
+
+4. Batch Insert Messages
+   - Operation: Execute Query
+   - Query: (SQL acima)
+
+5. Update Conversation Last Message
+   - Operation: Execute Query
+   - Query: (SQL acima)
+
+6. Respond to Webhook
+   - Response Code: 200
+   - Response Body: (JSON acima)
+
+================================================================================
+CONSTRAINT NECESSÁRIA (se não existir):
+================================================================================
+
+-- Para evitar mensagens duplicadas no sync
+ALTER TABLE messages 
+ADD CONSTRAINT messages_conversation_external_unique 
+UNIQUE (conversation_id, external_message_id);
+
+-- Obs: external_message_id pode ser NULL para mensagens sem ID externo,
+-- então a constraint só evita duplicatas quando ambos existem.
+
+================================================================================
+ÍNDICE PARA PERFORMANCE:
+================================================================================
+
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_external 
+ON messages(conversation_id, external_message_id);
+
+================================================================================

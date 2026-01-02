@@ -47,7 +47,7 @@ from shared.watchdog import LoopWatchdog
 from supabase import create_client as create_supabase_client
 
 # Importa módulos locais
-from webhooks import notify_inbound_message, notify_outbound_message
+from webhooks import notify_inbound_message, notify_outbound_message, notify_sync_batch
 from api import app as fastapi_app, set_worker, WORKER_HTTP_PORT
 
 load_dotenv()
@@ -813,7 +813,7 @@ class TelegramWorker:
             await asyncio.sleep(2)
 
     async def _process_single_history_job(self, db, job: dict):
-        """Processa um job de sync - MANTÉM LÓGICA ORIGINAL."""
+        """Processa job de sync - envia batch para n8n."""
         job_id = job["id"]
         owner_id = job["owner_id"]
         acc_id = job["integration_account_id"]
@@ -833,26 +833,17 @@ class TelegramWorker:
                 raise Exception(f"Conta {acc_id} não conectada")
 
             client = self.clients[acc_id]
+            telegram_user_id = None
+            entity = None
+            is_group = False
 
+            # Resolve entity do Telegram
             if telegram_id:
                 telegram_user_id = int(telegram_id)
                 entity = await self._resolve_telegram_entity(client, telegram_user_id)
                 if not entity:
                     raise Exception(f"Entidade {telegram_user_id} não encontrada")
-
                 is_group = isinstance(entity, (Chat, Channel))
-
-                identity_id, _ = await self._get_or_create_sync_identity(
-                    db, owner_id, telegram_user_id, entity, is_group, client, workspace_id
-                )
-
-                conversation_id = await self._get_or_create_sync_conversation(
-                    db, owner_id, identity_id, workspace_id
-                )
-
-                db.table("sync_history_jobs").update({
-                    "conversation_id": conversation_id
-                }).eq("id", job_id).execute()
             else:
                 if not conversation_id:
                     raise Exception("Job sem telegram_id nem conversation_id")
@@ -864,11 +855,9 @@ class TelegramWorker:
                 if not conv_result.data:
                     raise Exception("Conversa não encontrada")
 
-                identity_id = conv_result.data["primary_identity_id"]
-
                 identity_result = db.table("contact_identities").select(
                     "value, metadata"
-                ).eq("id", identity_id).single().execute()
+                ).eq("id", conv_result.data["primary_identity_id"]).single().execute()
 
                 if not identity_result.data:
                     raise Exception("Identity não encontrada")
@@ -880,70 +869,78 @@ class TelegramWorker:
                 if not entity:
                     raise Exception(f"Entidade {telegram_user_id} não encontrada")
 
-            existing_result = db.table("messages").select(
-                "external_message_id"
-            ).eq("conversation_id", conversation_id).execute()
+            # Busca dados do contato (incluindo foto)
+            sender_data = await self._get_sender_data(client, telegram_user_id)
+            
+            # Se for grupo, adiciona info do grupo
+            if is_group:
+                sender_data["title"] = getattr(entity, 'title', None) or f"Grupo {telegram_user_id}"
+                sender_data["is_group"] = True
 
-            existing_msg_ids = {m["external_message_id"] for m in existing_result.data}
-
-            messages_synced = 0
+            # Coleta mensagens do Telegram
+            messages_batch = []
             three_months_ago = datetime.now(timezone.utc) - timedelta(days=90)
 
             async for msg in client.iter_messages(entity, limit=limit):
                 if msg.date.replace(tzinfo=timezone.utc) < three_months_ago:
                     continue
 
-                if str(msg.id) in existing_msg_ids:
-                    continue
-
                 if not msg.text and not msg.media:
                     continue
 
                 direction = "outbound" if msg.out else "inbound"
-                message_id = str(uuid4())
-
-                db.table("messages").insert({
-                    "id": message_id,
-                    "owner_id": owner_id,
-                    "conversation_id": conversation_id,
-                    "integration_account_id": acc_id,
-                    "identity_id": identity_id,
-                    "channel": "telegram",
-                    "direction": direction,
-                    "text": msg.text or None,
-                    "sent_at": msg.date.isoformat(),
-                    "external_message_id": str(msg.id),
-                    "raw_payload": {},
-                }).execute()
-
+                
+                # Processa mídia se houver
+                media_info = None
                 if msg.media:
-                    await self._process_incoming_media(client, db, owner_id, message_id, msg)
+                    media_info = await self._process_media_for_webhook(client, msg.media, msg.id)
 
-                messages_synced += 1
+                messages_batch.append({
+                    "id": str(uuid4()),
+                    "telegram_msg_id": msg.id,
+                    "text": msg.text or None,
+                    "date": msg.date.isoformat(),
+                    "direction": direction,
+                    "media_url": media_info.get("url") if media_info else None,
+                    "media_type": media_info.get("type") if media_info else None,
+                    "media_name": media_info.get("name") if media_info else None,
+                })
 
-            last_msg_result = db.table("messages").select(
-                "sent_at, text"
-            ).eq("conversation_id", conversation_id).order(
-                "sent_at", desc=True
-            ).limit(1).execute()
+            if not messages_batch:
+                print(f"[SYNC] Nenhuma mensagem nova para sincronizar")
+                db.table("sync_history_jobs").update({
+                    "status": "completed",
+                    "processed_at": datetime.now(timezone.utc).isoformat(),
+                    "messages_synced": 0,
+                }).eq("id", job_id).execute()
+                return
 
-            if last_msg_result.data:
-                last_msg = last_msg_result.data[0]
-                preview = last_msg.get("text") or "📎 Mídia"
-                preview = (preview[:100] + "...") if len(preview) > 100 else preview
+            # Envia batch para n8n
+            result = await notify_sync_batch(
+                account_id=acc_id,
+                owner_id=owner_id,
+                workspace_id=workspace_id,
+                job_id=job_id,
+                telegram_user_id=telegram_user_id,
+                is_group=is_group,
+                sender=sender_data,
+                messages=messages_batch,
+            )
 
-                db.table("conversations").update({
-                    "last_message_at": last_msg["sent_at"],
-                    "last_message_preview": preview,
-                }).eq("id", conversation_id).execute()
+            if result and result.get("status") == "ok":
+                messages_inserted = result.get("messages_inserted", len(messages_batch))
+                conversation_id = result.get("conversation_id")
+                
+                db.table("sync_history_jobs").update({
+                    "status": "completed",
+                    "processed_at": datetime.now(timezone.utc).isoformat(),
+                    "messages_synced": messages_inserted,
+                    "conversation_id": conversation_id,
+                }).eq("id", job_id).execute()
 
-            db.table("sync_history_jobs").update({
-                "status": "completed",
-                "processed_at": datetime.now(timezone.utc).isoformat(),
-                "messages_synced": messages_synced,
-            }).eq("id", job_id).execute()
-
-            print(f"[SYNC] Job {job_id} concluído: {messages_synced} mensagens")
+                print(f"[SYNC] Job {job_id} concluído: {messages_inserted} mensagens via n8n")
+            else:
+                raise Exception(f"n8n retornou erro: {result}")
 
         except Exception as e:
             import traceback
@@ -983,126 +980,7 @@ class TelegramWorker:
 
         return None
 
-    async def _get_or_create_sync_identity(self, db, owner_id: str, telegram_id: int, entity, is_group: bool, client, workspace_id: str = None):
-        """Busca ou cria identity para sync."""
-        telegram_id_str = str(telegram_id)
 
-        query = db.table("contact_identities").select(
-            "id, metadata"
-        ).eq("value", telegram_id_str).eq("type", "telegram_user")
-        
-        if workspace_id:
-            query = query.eq("workspace_id", workspace_id)
-        else:
-            query = query.eq("owner_id", owner_id)
-        
-        existing = query.execute()
-
-        if existing.data:
-            return existing.data[0]["id"], existing.data[0].get("metadata") or {}
-
-        metadata = {"is_group": is_group}
-
-        if is_group:
-            metadata["title"] = getattr(entity, 'title', None) or f"Grupo {telegram_id}"
-            metadata["username"] = getattr(entity, 'username', None)
-        else:
-            metadata["first_name"] = getattr(entity, 'first_name', None)
-            metadata["last_name"] = getattr(entity, 'last_name', None)
-            metadata["username"] = getattr(entity, 'username', None)
-
-        identity_id = str(uuid4())
-        identity_data = {
-            "id": identity_id,
-            "owner_id": owner_id,
-            "contact_id": None,
-            "type": "telegram_user",
-            "value": telegram_id_str,
-            "metadata": metadata,
-        }
-        if workspace_id:
-            identity_data["workspace_id"] = workspace_id
-        
-        db.table("contact_identities").insert(identity_data).execute()
-
-        return identity_id, metadata
-
-    async def _get_or_create_sync_conversation(self, db, owner_id: str, identity_id: str, workspace_id: str) -> str:
-        """Busca ou cria conversa para sync."""
-        existing = db.table("conversations").select(
-            "id"
-        ).eq("owner_id", owner_id).eq("primary_identity_id", identity_id).execute()
-
-        if existing.data:
-            return existing.data[0]["id"]
-
-        conv_id = str(uuid4())
-        db.table("conversations").insert({
-            "id": conv_id,
-            "owner_id": owner_id,
-            "workspace_id": workspace_id,
-            "contact_id": None,
-            "primary_identity_id": identity_id,
-            "status": "open",
-            "last_channel": "telegram",
-            "last_message_at": datetime.now(timezone.utc).isoformat(),
-        }).execute()
-
-        return conv_id
-
-    async def _process_incoming_media(self, client, db, owner_id: str, message_id: str, msg):
-        """Processa mídia para sync histórico."""
-        try:
-            from telethon.tl.types import DocumentAttributeAudio, DocumentAttributeFilename
-
-            media_bytes = await client.download_media(msg, file=bytes)
-            if not media_bytes:
-                return
-
-            file_name = "media"
-            mime_type = "application/octet-stream"
-
-            if hasattr(msg.media, "photo"):
-                file_name = f"photo_{msg.id}.jpg"
-                mime_type = "image/jpeg"
-            elif hasattr(msg.media, "document"):
-                doc = msg.media.document
-                mime_type = doc.mime_type or "application/octet-stream"
-
-                for attr in doc.attributes:
-                    if isinstance(attr, DocumentAttributeFilename):
-                        file_name = attr.file_name
-                        break
-                else:
-                    ext = mime_type.split("/")[-1] if "/" in mime_type else "bin"
-                    file_name = f"file_{msg.id}.{ext}"
-
-            storage_path = f"telegram/{owner_id}/{message_id}/{file_name}"
-
-            supabase_url = os.environ["SUPABASE_URL"]
-            supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-            storage_client = create_supabase_client(supabase_url, supabase_key)
-
-            storage_client.storage.from_("attachments").upload(
-                storage_path,
-                media_bytes,
-                {"content-type": mime_type}
-            )
-
-            attachment_id = str(uuid4())
-            db.table("attachments").insert({
-                "id": attachment_id,
-                "owner_id": owner_id,
-                "message_id": message_id,
-                "storage_bucket": "attachments",
-                "storage_path": storage_path,
-                "file_name": file_name,
-                "mime_type": mime_type,
-                "byte_size": len(media_bytes),
-            }).execute()
-
-        except Exception as e:
-            print(f"[SYNC] Erro ao processar mídia: {e}")
 
     # =============================================
     # MESSAGE JOBS - MANTÉM NO WORKER
