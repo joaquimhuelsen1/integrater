@@ -138,6 +138,9 @@ async def send_message(req: SendRequest):
                 error=f"Não foi possível encontrar usuário {req.telegram_user_id}"
             )
         
+        # Marca pending ANTES de enviar (evita race condition com handler Raw)
+        worker._mark_pending_send(req.telegram_user_id)
+        
         # Envia mensagem
         sent = None
         
@@ -162,7 +165,7 @@ async def send_message(req: SendRequest):
         if sent:
             print(f"[API] Mensagem enviada: {sent.id} para {req.telegram_user_id}")
             # Marca no cache para o handler Raw ignorar (evita duplicata)
-            worker._mark_sent_via_api(sent.id)
+            worker._mark_sent_via_api(sent.id, req.telegram_user_id)
             return SendResponse(
                 success=True,
                 telegram_msg_id=sent.id

@@ -96,6 +96,7 @@ class TelegramWorker:
         self.entity_fail_cache: dict[int, float] = {}
         self.presence_cache: dict[int, tuple] = {}
         self.sent_via_api: dict[int, float] = {}  # msg_id -> timestamp (msgs enviadas via API)
+        self.pending_sends: dict[int, float] = {}  # user_id -> timestamp (envios em progresso)
 
     def _get_cached_entity(self, user_id: int):
         """Retorna entity do cache se válida."""
@@ -126,21 +127,38 @@ class TelegramWorker:
         import time
         self.entity_fail_cache[user_id] = time.time()
 
-    def _mark_sent_via_api(self, msg_id: int):
+    def _mark_pending_send(self, user_id: int):
+        """Marca que há envio em progresso para este user (chamar ANTES de enviar)."""
+        import time
+        self.pending_sends[user_id] = time.time()
+        # Limpa pendentes antigos (mais de 10s)
+        cutoff = time.time() - 10
+        self.pending_sends = {k: v for k, v in self.pending_sends.items() if v > cutoff}
+
+    def _mark_sent_via_api(self, msg_id: int, user_id: int):
         """Marca mensagem como enviada via API (para ignorar no handler Raw)."""
         import time
         self.sent_via_api[msg_id] = time.time()
+        # Remove do pending
+        if user_id in self.pending_sends:
+            del self.pending_sends[user_id]
         # Limpa msgs antigas (mais de 60s)
         cutoff = time.time() - 60
         self.sent_via_api = {k: v for k, v in self.sent_via_api.items() if v > cutoff}
 
-    def _was_sent_via_api(self, msg_id: int) -> bool:
-        """Verifica se mensagem foi enviada via API."""
+    def _was_sent_via_api(self, msg_id: int, user_id: int) -> bool:
+        """Verifica se mensagem foi enviada via API (por msg_id ou pending send)."""
         import time
+        # Verifica por msg_id
         if msg_id in self.sent_via_api:
             if time.time() - self.sent_via_api[msg_id] < 60:
                 return True
             del self.sent_via_api[msg_id]
+        # Verifica se há envio pendente para este user (race condition protection)
+        if user_id in self.pending_sends:
+            if time.time() - self.pending_sends[user_id] < 10:
+                return True
+            del self.pending_sends[user_id]
         return False
 
     def _should_update_presence(self, user_id: int, is_online: bool, is_typing: bool) -> bool:
@@ -357,7 +375,7 @@ class TelegramWorker:
             if isinstance(update, UpdateShortMessage):
                 if update.out:
                     # Ignora se foi enviada via API (evita duplicata)
-                    if self._was_sent_via_api(update.id):
+                    if self._was_sent_via_api(update.id, update.user_id):
                         print(f"[RAW] UpdateShortMessage OUT ignorada (via API): id={update.id}")
                         return
                     print(f"[RAW] UpdateShortMessage OUT: id={update.id} user={update.user_id}")
@@ -379,7 +397,7 @@ class TelegramWorker:
                 if hasattr(msg, 'peer_id') and isinstance(msg.peer_id, PeerUser):
                     if hasattr(msg, 'out') and msg.out:
                         # Ignora se foi enviada via API (evita duplicata)
-                        if self._was_sent_via_api(msg.id):
+                        if self._was_sent_via_api(msg.id, msg.peer_id.user_id):
                             print(f"[RAW] UpdateNewMessage OUT ignorada (via API): id={msg.id}")
                             return
                         print(f"[RAW] UpdateNewMessage OUT: id={msg.id}")
