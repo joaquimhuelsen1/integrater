@@ -996,20 +996,15 @@ I'll be waiting.`
       messageId = messageData.id
       console.log("Message created with ID:", messageId)
 
-      // Sucesso: marcar como "sent" mas MANTER ID temporário
-      // O polling vai trazer a mensagem real e loadMessages vai substituir
-      setMessages(prev => prev.map(m =>
-        m.id === tempId ? { ...m, sending_status: "sent" as const } : m
-      ))
-
-      // Recarregar para pegar attachments vinculados
-      if (attachmentIds.length > 0) {
-        if (selectedContactId) {
-          loadContactMessages(selectedContactId)
-        } else {
-          loadMessages(selectedId)
-        }
+      // Sucesso: substituir temporária pela mensagem real da API (sem flash)
+      const realMessage: Message = {
+        ...messageData,
+        sending_status: "sent" as const,
+        attachments: messageData.attachments || [],
       }
+      setMessages(prev => prev.map(m =>
+        m.id === tempId ? realMessage : m
+      ))
     } catch (error) {
       console.error("Error sending message:", error)
       setMessages(prev => prev.map(m =>
