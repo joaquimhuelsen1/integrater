@@ -1,0 +1,53 @@
+// Gera SQL de batch insert para mensagens
+const messages = $('Webhook Sync').item.json.body.messages || [];
+const ownerId = $('Webhook Sync').item.json.body.owner_id;
+const conversationId = $('Upsert Conversation (Sync)').item.json.id;
+const accountId = $('Webhook Sync').item.json.body.account_id;
+const identityId = $('Upsert Identity (Sync)').item.json.id;
+
+if (messages.length === 0) {
+  return [{ json: { sql: 'SELECT 0 as messages_inserted', messages_count: 0 } }];
+}
+
+// Escapa aspas simples para SQL
+const escape = (str) => str ? str.replace(/'/g, "''") : null;
+
+// Gera VALUES para cada mensagem
+const values = messages.map(msg => {
+  const text = escape(msg.text || '');
+  const rawPayload = JSON.stringify({
+    media_url: msg.media_url || null,
+    media_type: msg.media_type || null,
+    media_name: msg.media_name || null,
+    synced: true
+  }).replace(/'/g, "''");
+  
+  return `(
+    '${msg.id}'::uuid,
+    '${ownerId}'::uuid,
+    '${conversationId}'::uuid,
+    '${accountId}'::uuid,
+    '${identityId}'::uuid,
+    'telegram',
+    '${msg.direction}',
+    ${text ? `E'${text}'` : 'NULL'},
+    '${msg.date}'::timestamptz,
+    '${msg.telegram_msg_id}',
+    '${rawPayload}'::jsonb
+  )`;
+}).join(',\n');
+
+const sql = `
+WITH inserted AS (
+  INSERT INTO messages (
+    id, owner_id, conversation_id, integration_account_id, identity_id,
+    channel, direction, text, sent_at, external_message_id, raw_payload
+  )
+  VALUES ${values}
+  ON CONFLICT (conversation_id, external_message_id) DO NOTHING
+  RETURNING id
+)
+SELECT COUNT(*) as messages_inserted FROM inserted;
+`;
+
+return [{ json: { sql, messages_count: messages.length } }];
