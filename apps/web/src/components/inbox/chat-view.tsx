@@ -28,9 +28,9 @@ const avatarColors = [
 
 // Gera cor do avatar baseado no ID (mesma lógica do conversation-item.tsx)
 function getAvatarColor(id: string | null): string {
-  if (!id) return avatarColors[0]
+  if (!id) return "bg-blue-500"
   const index = id.charCodeAt(0) % avatarColors.length
-  return avatarColors[index]
+  return avatarColors[index] ?? "bg-blue-500"
 }
 
 // Formata "última vez visto" de forma amigável
