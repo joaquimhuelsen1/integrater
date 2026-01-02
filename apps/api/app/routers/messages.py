@@ -157,17 +157,20 @@ async def send_message(
                             url = f"{settings.supabase_url}/storage/v1/object/public/{bucket}/{path}"
                             attachment_urls.append(url)
             
-            # Chamar API do Worker Telegram
+            # Chamar webhook n8n /send
             try:
                 import os
-                worker_url = os.environ.get("TELEGRAM_WORKER_URL", "http://telegram-worker:8001")
-                worker_api_key = os.environ.get("WORKER_API_KEY", "")
+                n8n_webhook_url = os.environ.get(
+                    "N8N_TELEGRAM_SEND_WEBHOOK", 
+                    "https://n8nwebhook.thereconquestmap.com/webhook/telegram/send"
+                )
+                n8n_api_key = os.environ.get("N8N_API_KEY", "")
                 
                 async with httpx.AsyncClient(timeout=30) as client:
                     response = await client.post(
-                        f"{worker_url}/send",
+                        n8n_webhook_url,
                         headers={
-                            "X-API-KEY": worker_api_key,
+                            "X-API-KEY": n8n_api_key,
                             "Content-Type": "application/json",
                         },
                         json={
@@ -175,6 +178,7 @@ async def send_message(
                             "telegram_user_id": telegram_user_id,
                             "text": data.text,
                             "attachments": attachment_urls,
+                            "message_id": str(message_id),  # ID da mensagem no banco
                         },
                     )
                 
@@ -183,16 +187,16 @@ async def send_message(
                     if resp_data.get("success"):
                         external_id = str(resp_data.get("telegram_msg_id"))
                         send_status = "sent"
-                        print(f"[Telegram] Enviado com sucesso: {external_id}")
+                        print(f"[Telegram] Enviado via n8n com sucesso: {external_id}")
                     else:
                         send_status = "failed"
-                        print(f"[Telegram] Erro do Worker: {resp_data.get('error')}")
+                        print(f"[Telegram] Erro do n8n: {resp_data.get('error')}")
                 else:
                     send_status = "failed"
-                    print(f"[Telegram] Erro HTTP: {response.status_code} {response.text}")
+                    print(f"[Telegram] Erro HTTP n8n: {response.status_code} {response.text}")
             except Exception as e:
                 send_status = "failed"
-                print(f"[Telegram] Exceção ao enviar: {e}")
+                print(f"[Telegram] Exceção ao enviar via n8n: {e}")
         else:
             print(f"[Telegram] telegram_user_id ou integration_account_id não encontrado")
 
