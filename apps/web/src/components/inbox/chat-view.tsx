@@ -14,6 +14,25 @@ import { ContactManager } from "./contact-manager"
 import { groupMessagesByDate } from "@/lib/group-messages-by-date"
 import type { Tag } from "./conversation-list"
 
+// Cores para avatar (mesmas do conversation-item.tsx)
+const avatarColors = [
+  "bg-blue-500",
+  "bg-green-500",
+  "bg-purple-500",
+  "bg-orange-500",
+  "bg-pink-500",
+  "bg-teal-500",
+  "bg-indigo-500",
+  "bg-rose-500",
+]
+
+// Gera cor do avatar baseado no ID (mesma lógica do conversation-item.tsx)
+function getAvatarColor(id: string | null): string {
+  if (!id) return avatarColors[0]
+  const index = id.charCodeAt(0) % avatarColors.length
+  return avatarColors[index]
+}
+
 // Formata "última vez visto" de forma amigável
 function formatLastSeen(dateStr: string): string {
   const date = new Date(dateStr)
@@ -835,7 +854,7 @@ export function ChatView({
               />
             </button>
           ) : (
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-blue-500 text-sm font-medium text-white">
+            <div className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-medium text-white ${getAvatarColor(conversationId)}`}>
               {displayName
                 ? displayName
                     .split(" ")
