@@ -71,22 +71,23 @@ export function useRealtimeMessages({
     payload: RealtimePostgresChangesPayload<RealtimeMessage>
   ) => {
     const { eventType, new: newRecord, old: oldRecord } = payload
+    const record = (newRecord || oldRecord) as RealtimeMessage | undefined
     
-    console.log(`[Realtime] ${eventType}:`, newRecord?.id || oldRecord?.id)
+    console.log(`[Realtime] ${eventType}:`, record?.id)
     
     switch (eventType) {
       case "INSERT":
-        if (newRecord && onInsertRef.current) {
+        if (newRecord && 'id' in newRecord && onInsertRef.current) {
           onInsertRef.current(newRecord as RealtimeMessage)
         }
         break
       case "UPDATE":
-        if (newRecord && onUpdateRef.current) {
+        if (newRecord && 'id' in newRecord && onUpdateRef.current) {
           onUpdateRef.current(newRecord as RealtimeMessage)
         }
         break
       case "DELETE":
-        if (oldRecord && onDeleteRef.current) {
+        if (oldRecord && 'id' in oldRecord && onDeleteRef.current) {
           onDeleteRef.current(oldRecord as RealtimeMessage)
         }
         break
