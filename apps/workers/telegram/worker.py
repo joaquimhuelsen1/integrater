@@ -2191,8 +2191,10 @@ class TelegramWorker:
                 if not telegram_user_id:
                     raise Exception("telegram_user_id não encontrado no payload")
 
-                # Envia ação de digitando para o Telegram
-                await client.action(int(telegram_user_id), 'typing')
+                # Envia ação de digitando para o Telegram (context manager, não awaitable)
+                from telethon.tl.functions.messages import SetTypingRequest
+                from telethon.tl.types import SendMessageTypingAction
+                await client(SetTypingRequest(peer=int(telegram_user_id), action=SendMessageTypingAction()))
                 print(f"[JOB] Typing enviado para {telegram_user_id}")
 
                 # Marca como completed
