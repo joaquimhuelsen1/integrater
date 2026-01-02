@@ -32,8 +32,8 @@ async def send_message(
 
     conv = conv_result.data
 
-    # Criar mensagem
-    message_id = uuid4()
+    # Criar mensagem - usa ID do frontend se fornecido (evita duplicata com Realtime)
+    message_id = data.id if data.id else uuid4()
     now = datetime.utcnow().isoformat()
 
     # Buscar identity_id da conversa

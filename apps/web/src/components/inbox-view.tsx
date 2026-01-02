@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, MutableRefObject } f
 import { createClient } from "@/lib/supabase"
 import { ConversationList, type Conversation, ChannelTabs, type ChannelId } from "@/components/inbox"
 import { ChatView, type Message, type Template, type AISuggestion } from "@/components/inbox"
+import { useRealtimeMessages, type RealtimeMessage } from "@/hooks/use-realtime-messages"
 
 // Tipo para canais disponíveis do contato
 interface ContactChannel {
@@ -849,12 +850,13 @@ I'll be waiting.`
       }
     }
 
-    // ID temporário para optimistic update
-    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    // Gera UUID real (mesmo ID usado pelo frontend e backend)
+    // Isso evita duplicatas: quando o Realtime receber o INSERT, o ID já existe
+    const messageId = crypto.randomUUID()
 
-    // Mensagem temporária (aparece instantaneamente)
-    const tempMessage: Message = {
-      id: tempId,
+    // Mensagem com ID real (aparece instantaneamente)
+    const optimisticMessage: Message = {
+      id: messageId,
       conversation_id: targetConversationId,
       direction: "outbound",
       text: text || "",
@@ -865,14 +867,14 @@ I'll be waiting.`
     }
 
     // Optimistic update: adiciona imediatamente na lista
-    setMessages(prev => [...prev, tempMessage])
+    setMessages(prev => [...prev, optimisticMessage])
 
     // Buscar dados necessários para criar a mensagem
     const { data: userData } = await supabase.auth.getUser()
     if (!userData.user) {
       // Falhou: marcar como erro
       setMessages(prev => prev.map(m =>
-        m.id === tempId ? { ...m, sending_status: "failed" as const } : m
+        m.id === messageId ? { ...m, sending_status: "failed" as const } : m
       ))
       return
     }
@@ -889,7 +891,7 @@ I'll be waiting.`
     if (convError) {
       console.error("Error fetching conversation details:", convError)
       setMessages(prev => prev.map(m =>
-        m.id === tempId ? { ...m, sending_status: "failed" as const } : m
+        m.id === messageId ? { ...m, sending_status: "failed" as const } : m
       ))
       return
     }
@@ -908,7 +910,7 @@ I'll be waiting.`
       if (idError) {
         console.error("Error fetching identity:", idError)
         setMessages(prev => prev.map(m =>
-          m.id === tempId ? { ...m, sending_status: "failed" as const } : m
+          m.id === messageId ? { ...m, sending_status: "failed" as const } : m
         ))
         return
       }
@@ -918,7 +920,7 @@ I'll be waiting.`
     if (!identityId) {
       console.error("No identity found for conversation")
       setMessages(prev => prev.map(m =>
-        m.id === tempId ? { ...m, sending_status: "failed" as const } : m
+        m.id === messageId ? { ...m, sending_status: "failed" as const } : m
       ))
       return
     }
@@ -963,9 +965,7 @@ I'll be waiting.`
       }
     }
 
-    let messageId: string | null = null
-
-    // 2. Criar mensagem no servidor (com attachment IDs já prontos)
+    // 2. Criar mensagem no servidor (com mesmo ID do frontend)
     try {
       const response = await fetch(`${apiUrl}/messages/send`, {
         method: "POST",
@@ -974,6 +974,7 @@ I'll be waiting.`
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
+          id: messageId, // Mesmo ID do frontend - evita duplicata com Realtime
           conversation_id: targetConversationId,
           text: text || "",
           channel: channel,
@@ -987,28 +988,23 @@ I'll be waiting.`
         console.error("Error sending message:", response.status, errorText)
         // Marcar como falha
         setMessages(prev => prev.map(m =>
-          m.id === tempId ? { ...m, sending_status: "failed" as const } : m
+          m.id === messageId ? { ...m, sending_status: "failed" as const } : m
         ))
         return
       }
 
       const messageData = await response.json()
-      messageId = messageData.id
-      console.log("Message created with ID:", messageId)
+      console.log("Message created with ID:", messageData.id)
 
-      // Sucesso: substituir temporária pela mensagem real da API (sem flash)
-      const realMessage: Message = {
-        ...messageData,
-        sending_status: "sent" as const,
-        attachments: messageData.attachments || [],
-      }
+      // Sucesso: apenas atualiza o status (Realtime vai trazer os dados completos)
+      // O ID já é o mesmo, então não precisa substituir
       setMessages(prev => prev.map(m =>
-        m.id === tempId ? realMessage : m
+        m.id === messageId ? { ...m, ...messageData, sending_status: "sent" as const } : m
       ))
     } catch (error) {
       console.error("Error sending message:", error)
       setMessages(prev => prev.map(m =>
-        m.id === tempId ? { ...m, sending_status: "failed" as const } : m
+        m.id === messageId ? { ...m, sending_status: "failed" as const } : m
       ))
       return
     }
@@ -1051,26 +1047,67 @@ I'll be waiting.`
     loadTemplates()
   }, [loadTemplates])
 
-  // Polling fallback para mensagens (caso realtime falhe) - 3 segundos
+  // IDs das conversas para o Realtime (1 conversa ou várias se contato)
+  const realtimeConversationIds = useMemo(() => {
+    if (contactChannels.length > 0) {
+      return contactChannels.map(ch => ch.conversationId)
+    }
+    return selectedId ? [selectedId] : []
+  }, [selectedId, contactChannels])
+
+  // Handlers do Realtime
+  const handleRealtimeInsert = useCallback((msg: RealtimeMessage) => {
+    console.log("[Realtime] INSERT recebido:", msg.id)
+    setMessages(prev => {
+      // Verifica se já existe (pelo ID ou se é uma msg temporária com mesmo texto/timestamp)
+      const exists = prev.some(m => m.id === msg.id)
+      if (exists) {
+        // Já existe - apenas atualiza (pode ter vindo do optimistic update)
+        return prev.map(m => m.id === msg.id ? { ...m, ...msg, sending_status: "sent" as const } : m)
+      }
+      // Nova mensagem - adiciona no final
+      return [...prev, { ...msg, attachments: [] }]
+    })
+    // Atualiza lista de conversas (nova mensagem = conversa sobe no topo)
+    loadConversations(searchQueryRef.current)
+  }, [loadConversations])
+
+  const handleRealtimeUpdate = useCallback((msg: RealtimeMessage) => {
+    console.log("[Realtime] UPDATE recebido:", msg.id)
+    setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, ...msg } : m))
+  }, [])
+
+  const handleRealtimeDelete = useCallback((msg: RealtimeMessage) => {
+    console.log("[Realtime] DELETE recebido:", msg.id)
+    // Soft delete - marca deleted_at
+    setMessages(prev => prev.map(m => 
+      m.id === msg.id ? { ...m, deleted_at: msg.deleted_at } : m
+    ))
+  }, [])
+
+  // Hook de Realtime para mensagens
+  const { isConnected: isRealtimeConnected } = useRealtimeMessages({
+    conversationIds: realtimeConversationIds,
+    enabled: realtimeConversationIds.length > 0,
+    onInsert: handleRealtimeInsert,
+    onUpdate: handleRealtimeUpdate,
+    onDelete: handleRealtimeDelete,
+  })
+
+  // Polling de fallback para conversas (não mensagens) - 30 segundos
+  // Mensagens são atualizadas via Realtime
   useEffect(() => {
     if (!currentWorkspace?.id) return
 
-    const pollMessages = () => {
-      // Recarrega conversas
+    const pollConversations = () => {
       loadConversations(searchQuery)
-      // Recarrega mensagens se tem conversa selecionada
-      if (selectedContactId) {
-        loadContactMessages(selectedContactId)
-      } else if (selectedId) {
-        loadMessages(selectedId)
-      }
     }
 
-    // Polling a cada 3 segundos
-    const interval = setInterval(pollMessages, 3000)
+    // Polling a cada 30 segundos (fallback, não principal)
+    const interval = setInterval(pollConversations, 30000)
 
     return () => clearInterval(interval)
-  }, [currentWorkspace?.id, selectedId, selectedContactId, searchQuery, loadConversations, loadMessages, loadContactMessages])
+  }, [currentWorkspace?.id, searchQuery, loadConversations])
 
   // Polling de read status para lista de conversas - 3 segundos
   useEffect(() => {

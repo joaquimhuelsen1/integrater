@@ -15,6 +15,7 @@ class MessageBase(BaseModel):
 
 
 class MessageSendRequest(BaseModel):
+    id: UUID | None = None  # Se fornecido, usa esse ID (evita duplicata com Realtime)
     conversation_id: UUID
     channel: ChannelType | None = None
     integration_account_id: UUID | None = None  # Resolvido pela API se não fornecido
