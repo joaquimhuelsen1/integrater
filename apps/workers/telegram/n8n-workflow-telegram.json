@@ -190,7 +190,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO unread_conversations (owner_id, conversation_id, unread_count)\nVALUES (\n  '{{ $('Webhook Inbound').item.json.body.owner_id }}',\n  '{{ $('Upsert Conversation (Inbound)').item.json.id }}',\n  1\n)\nON CONFLICT (owner_id, conversation_id) DO UPDATE SET\n  unread_count = unread_conversations.unread_count + 1,\n  updated_at = NOW()\nRETURNING conversation_id, unread_count;",
+        "query": "UPDATE conversations SET\n  unread_count = COALESCE(unread_count, 0) + 1,\n  updated_at = NOW()\nWHERE id = '{{ $('Upsert Conversation (Inbound)').item.json.id }}'\nRETURNING id, unread_count;",
         "options": {}
       },
       "id": "increment-unread",
