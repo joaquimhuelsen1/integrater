@@ -373,6 +373,11 @@ class TelegramWorker:
         try:
             workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
             
+            # Debug: log all update types (exceto presence)
+            update_type = type(update).__name__
+            if 'User' not in update_type and 'Status' not in update_type:
+                print(f"[RAW-DEBUG] Update type: {update_type}")
+            
             if isinstance(update, UpdateShortMessage):
                 if update.out:
                     # Ignora se foi enviada via API (evita duplicata)
@@ -744,8 +749,10 @@ class TelegramWorker:
             
             # Detecta MessageService (join/leave/etc)
             if isinstance(msg, MessageService):
+                print(f"[SERVICE] MessageService detectado: chat_id={chat.id} action={type(msg.action).__name__}")
                 service_data = await self._process_service_message(msg)
                 if service_data:
+                    print(f"[SERVICE] Processado: {service_data}")
                     group_data = await self._get_group_data(client, chat)
                     
                     content = {
