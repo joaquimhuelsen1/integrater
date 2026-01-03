@@ -271,6 +271,11 @@ class TelegramWorker:
 
             await client.connect()
             await client.catch_up()
+            
+            # Carrega dialogs para ativar recebimento de updates de grupos/channels
+            dialogs = await client.get_dialogs()
+            groups_count = sum(1 for d in dialogs if d.is_group or d.is_channel)
+            print(f"[DIALOGS] Carregados {len(dialogs)} dialogs ({groups_count} grupos/channels)")
 
             if not await client.is_user_authorized():
                 print(f"Conta {acc_id} não autorizada, removendo...")
