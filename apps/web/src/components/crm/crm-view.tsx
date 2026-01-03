@@ -12,6 +12,7 @@ import { DealFilters, defaultFilters, type DealFiltersState } from "./deal-filte
 import { WorkspaceSelector } from "@/components/workspace-selector"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { useWorkspace } from "@/contexts/workspace-context"
+import { apiFetch } from "@/lib/api"
 
 interface Pipeline {
   id: string
@@ -74,14 +75,13 @@ export function CRMView() {
     targetStageId: string
   } | null>(null)
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
   const { currentWorkspace } = useWorkspace()
 
   const loadPipelines = useCallback(async () => {
     if (!currentWorkspace) return []
 
     try {
-      const res = await fetch(`${API_URL}/pipelines?workspace_id=${currentWorkspace.id}`)
+      const res = await apiFetch(`/pipelines?workspace_id=${currentWorkspace.id}`)
       if (res.ok) {
         const data = await res.json()
         setPipelines(data)
@@ -98,14 +98,14 @@ export function CRMView() {
       setIsLoading(false)
       return []
     }
-  }, [API_URL, currentWorkspace])
+  }, [currentWorkspace])
 
   const loadStages = useCallback(async () => {
     if (!selectedPipelineId) return
 
     setIsLoading(true)
     try {
-      const res = await fetch(`${API_URL}/deals/by-pipeline/${selectedPipelineId}`)
+      const res = await apiFetch(`/deals/by-pipeline/${selectedPipelineId}`)
       if (res.ok) {
         const data = await res.json()
         setStages(data)
@@ -115,11 +115,11 @@ export function CRMView() {
     } finally {
       setIsLoading(false)
     }
-  }, [API_URL, selectedPipelineId])
+  }, [selectedPipelineId])
 
   const loadTags = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/deal-tags`)
+      const res = await apiFetch(`/deal-tags`)
       if (res.ok) {
         const data = await res.json()
         setTags(data)
@@ -127,7 +127,7 @@ export function CRMView() {
     } catch (error) {
       console.error("Erro ao carregar tags:", error)
     }
-  }, [API_URL])
+  }, [])
 
   useEffect(() => {
     loadPipelines().then((data) => {
@@ -200,9 +200,8 @@ export function CRMView() {
 
     // Chama API em background
     try {
-      const res = await fetch(`${API_URL}/deals/${deal.id}/move`, {
+      const res = await apiFetch(`/deals/${deal.id}/move`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ stage_id: newStageId }),
       })
 
@@ -213,7 +212,7 @@ export function CRMView() {
 
       // Se é stage de ganho, marca como ganho
       if (isWin) {
-        await fetch(`${API_URL}/deals/${deal.id}/win`, { method: "POST" })
+        await apiFetch(`/deals/${deal.id}/win`, { method: "POST" })
         loadStages()
       }
     } catch (error) {
@@ -243,9 +242,8 @@ export function CRMView() {
 
     try {
       // Move para nova stage
-      await fetch(`${API_URL}/deals/${deal.id}/move`, {
+      await apiFetch(`/deals/${deal.id}/move`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ stage_id: targetStageId }),
       })
 
@@ -272,9 +270,8 @@ export function CRMView() {
         losePayload.description = description
       }
 
-      await fetch(`${API_URL}/deals/${deal.id}/lose`, {
+      await apiFetch(`/deals/${deal.id}/lose`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(losePayload),
       })
 
