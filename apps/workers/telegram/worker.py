@@ -760,6 +760,28 @@ class TelegramWorker:
                     print(f"[SERVICE] Processado: {service_data}")
                     group_data = await self._get_group_data(client, chat)
                     
+                    # Busca nome do usuário que fez a ação (join/leave)
+                    sender_data = None
+                    action_user_id = service_data["user_ids"][0] if service_data.get("user_ids") else None
+                    if action_user_id:
+                        try:
+                            user_entity = await client.get_entity(action_user_id)
+                            if user_entity:
+                                first_name = getattr(user_entity, 'first_name', '') or ''
+                                last_name = getattr(user_entity, 'last_name', '') or ''
+                                full_name = f"{first_name} {last_name}".strip()
+                                sender_data = {
+                                    "telegram_user_id": action_user_id,
+                                    "first_name": first_name,
+                                    "last_name": last_name if last_name else None,
+                                    "username": getattr(user_entity, 'username', None),
+                                }
+                                # Adiciona nome ao service_event para o n8n usar
+                                service_data["action_user_name"] = full_name
+                                print(f"[SERVICE] User {action_user_id} = {full_name}")
+                        except Exception as e:
+                            print(f"[SERVICE] Erro ao buscar user {action_user_id}: {e}")
+                    
                     content = {
                         "text": service_data.get("text"),
                         "service_event": service_data,
@@ -771,7 +793,7 @@ class TelegramWorker:
                         workspace_id=workspace_id,
                         telegram_user_id=chat.id,
                         telegram_msg_id=msg.id,
-                        sender=None,
+                        sender=sender_data,
                         content=content,
                         timestamp=msg.date,
                         is_group=True,
