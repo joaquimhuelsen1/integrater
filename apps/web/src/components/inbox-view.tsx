@@ -726,10 +726,56 @@ I'll be waiting.`
       }
     }
 
-    // Recarrega mensagens após sync
+// Recarrega mensagens após sync
     loadMessages(conversationId)
     loadConversations(searchQuery)
   }, [supabase, loadMessages, loadConversations, searchQuery])
+
+  // Sincronizar contatos OpenPhone (atualiza nomes)
+  const syncOpenPhoneContacts = useCallback(async () => {
+    if (!currentWorkspace) return
+
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+    const { data: sessionData } = await supabase.auth.getSession()
+    const token = sessionData?.session?.access_token
+
+    // Buscar conta OpenPhone do workspace
+    const { data: accounts } = await supabase
+      .from("integration_accounts")
+      .select("id")
+      .eq("workspace_id", currentWorkspace.id)
+      .eq("type", "openphone")
+      .limit(1)
+
+    if (!accounts || accounts.length === 0) {
+      console.warn("Nenhuma conta OpenPhone encontrada")
+      return
+    }
+
+    const accountId = accounts[0].id
+
+    const response = await fetch(
+      `${apiUrl}/openphone/contacts/sync?account_id=${accountId}&workspace_id=${currentWorkspace.id}`,
+      {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      }
+    )
+
+    if (!response.ok) {
+      const error = await response.text()
+      console.error("Erro ao sincronizar contatos:", error)
+      throw new Error(error)
+    }
+
+    const result = await response.json()
+    console.log(`Sync contatos: ${result.synced} atualizados, ${result.skipped} ignorados`)
+
+    // Recarrega conversas para mostrar nomes atualizados
+    loadConversations(searchQuery)
+  }, [supabase, currentWorkspace, loadConversations, searchQuery])
 
   // Carregar templates
   const loadTemplates = useCallback(async () => {
@@ -1449,6 +1495,7 @@ I'll be waiting.`
             onMarkAsRead={selectedId ? () => markAsRead(selectedId) : undefined}
             onMarkAsUnread={selectedId ? () => markAsUnread(selectedId) : undefined}
             onSyncHistory={selectedId ? () => syncHistory(selectedId) : undefined}
+            onSyncContacts={syncOpenPhoneContacts}
             showChannelIndicator={!!selectedContactId}
             availableChannels={contactChannels.map(ch => ({ type: ch.type, label: ch.type }))}
             selectedSendChannel={selectedSendChannel}

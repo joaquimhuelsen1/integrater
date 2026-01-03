@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useEffect, useState, useCallback, useMemo } from "react"
-import { Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical, Unlink, MessageSquare, Phone, Briefcase } from "lucide-react"
+import { Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical, Unlink, MessageSquare, Phone, Briefcase, Users } from "lucide-react"
 import { createClient } from "@/lib/supabase"
 import { apiFetch } from "@/lib/api"
 import { MessageItem } from "./message-item"
@@ -145,8 +145,10 @@ interface ChatViewProps {
   onMessageUpdate?: (messageId: string, updates: Partial<Message>) => void
   // Callback para remover mensagem localmente (delete)
   onMessageDelete?: (messageId: string) => void
-  // Callback quando usuário está digitando (para enviar typing ao Telegram)
+// Callback quando usuário está digitando (para enviar typing ao Telegram)
   onTyping?: () => void
+  // Callback para sync de contatos OpenPhone (SMS)
+  onSyncContacts?: () => Promise<void>
 }
 
 export function ChatView({
@@ -187,8 +189,9 @@ export function ChatView({
   channel = null,
   onOpenCRMPanel,
   onMessageUpdate,
-  onMessageDelete,
+onMessageDelete,
   onTyping,
+  onSyncContacts,
 }: ChatViewProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -199,9 +202,10 @@ export function ChatView({
   const [isTranslating, setIsTranslating] = useState(false)
 
   // IA States (loading only - suggestion/summary from props)
-  const [isSuggesting, setIsSuggesting] = useState(false)
+const [isSuggesting, setIsSuggesting] = useState(false)
   const [isSummarizing, setIsSummarizing] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [isSyncingContacts, setIsSyncingContacts] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const [showAvatarModal, setShowAvatarModal] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -724,7 +728,7 @@ export function ChatView({
     setReplyToMessage(null) // Limpa reply após enviar
   }, [onSendMessage, onDraftChange])
 
-  // Sincronizar histórico
+// Sincronizar histórico
   const handleSyncHistory = useCallback(async () => {
     if (!onSyncHistory || isSyncing) return
     setIsSyncing(true)
@@ -734,6 +738,17 @@ export function ChatView({
       setIsSyncing(false)
     }
   }, [onSyncHistory, isSyncing])
+
+  // Sincronizar contatos OpenPhone
+  const handleSyncContacts = useCallback(async () => {
+    if (!onSyncContacts || isSyncingContacts) return
+    setIsSyncingContacts(true)
+    try {
+      await onSyncContacts()
+    } finally {
+      setIsSyncingContacts(false)
+    }
+  }, [onSyncContacts, isSyncingContacts])
 
   if (!conversationId) {
     return (
@@ -1018,8 +1033,8 @@ export function ChatView({
                     {unreadCount > 0 ? "Marcar como lida" : "Marcar como não lida"}
                   </button>
                 )}
-                {/* Sync histórico */}
-                {onSyncHistory && (
+{/* Sync histórico - apenas para Telegram/Email (não SMS) */}
+                {onSyncHistory && channel !== "openphone_sms" && (
                   <button
                     onClick={() => { handleSyncHistory(); setShowMenu(false); }}
                     disabled={isSyncing}
@@ -1027,6 +1042,17 @@ export function ChatView({
                   >
                     <RefreshCw className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`} />
                     {isSyncing ? "Sincronizando..." : "Sincronizar histórico"}
+                  </button>
+                )}
+                {/* Sync contatos OpenPhone - apenas para SMS */}
+                {onSyncContacts && channel === "openphone_sms" && (
+                  <button
+                    onClick={() => { handleSyncContacts(); setShowMenu(false); }}
+                    disabled={isSyncingContacts}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-blue-600 hover:bg-zinc-100 disabled:opacity-50 dark:text-blue-400 dark:hover:bg-zinc-700"
+                  >
+                    <Users className={`h-4 w-4 ${isSyncingContacts ? "animate-spin" : ""}`} />
+                    {isSyncingContacts ? "Sincronizando..." : "Sync contatos OpenPhone"}
                   </button>
                 )}
               </div>
