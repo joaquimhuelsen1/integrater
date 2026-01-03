@@ -78,6 +78,7 @@ class EmailWorker:
             server.serve(),
             self._sync_loop(),
             self._idle_loop(),
+            self._keepalive_loop(),  # NOOP keepalive para evitar desconexao
         )
 
     async def _sync_loop(self):
@@ -98,6 +99,28 @@ class EmailWorker:
                 await asyncio.sleep(30)  # Poll a cada 30s como fallback
             except Exception as e:
                 print(f"Erro no idle loop: {e}")
+                await asyncio.sleep(10)
+
+    async def _keepalive_loop(self):
+        """Loop de NOOP keepalive para manter conexoes IMAP ativas."""
+        while self.running:
+            try:
+                await asyncio.sleep(240)  # 4 minutos
+                for acc_id, client in list(self.clients.items()):
+                    try:
+                        client.noop()
+                        print(f"[NOOP] Keepalive enviado para {acc_id[:8]}...")
+                    except Exception as e:
+                        print(f"[NOOP] Erro {acc_id[:8]}: {e} - reconectando...")
+                        # Marca para reconectar no proximo sync
+                        if acc_id in self.clients:
+                            try:
+                                self.clients[acc_id].logout()
+                            except:
+                                pass
+                            del self.clients[acc_id]
+            except Exception as e:
+                print(f"Erro no keepalive loop: {e}")
                 await asyncio.sleep(10)
 
     async def _sync_accounts(self):
@@ -173,11 +196,21 @@ class EmailWorker:
                 "last_error": None,
             }).eq("id", acc_id).execute()
 
-            # Guarda o maior UID atual para so processar emails novos
-            all_uids = client.search(["ALL"])
-            last_uid = max(all_uids) if all_uids else 0
+            # Le last_email_uid do banco (config JSONB) ou usa max(UID) como fallback
+            saved_uid = config.get("last_email_uid")
+            if saved_uid:
+                last_uid = saved_uid
+                print(f"Ultimo UID do banco: {last_uid}")
+            else:
+                # Primeira vez - usa max(UID) atual
+                all_uids = client.search(["ALL"])
+                last_uid = max(all_uids) if all_uids else 0
+                print(f"Primeiro sync - ultimo UID: {last_uid}")
+                # Salva no banco para proxima vez
+                self._save_last_uid(acc_id, last_uid)
+            
             self.account_info[acc_id]["last_uid"] = last_uid
-            print(f"Ultimo UID: {last_uid}. Pronto para receber novos emails")
+            print(f"Pronto para receber novos emails (UID > {last_uid})")
 
         except Exception as e:
             print(f"Erro ao conectar conta email {acc_id}: {e}")
@@ -248,8 +281,10 @@ class EmailWorker:
 
                 await self._process_incoming_email(acc_id, msg, uid)
 
-                # Atualiza last_uid apos processar
-                info["last_uid"] = max(info.get("last_uid", 0), uid)
+                # Atualiza last_uid apos processar (memoria + banco)
+                new_uid = max(info.get("last_uid", 0), uid)
+                info["last_uid"] = new_uid
+                self._save_last_uid(acc_id, new_uid)
 
         except Exception as e:
             print(f"Erro ao buscar emails {acc_id}: {e}")
@@ -544,6 +579,22 @@ class EmailWorker:
         db.table("integration_accounts").update({
             "last_error": error,
         }).eq("id", acc_id).execute()
+
+    def _save_last_uid(self, acc_id: str, uid: int):
+        """Salva last_email_uid no banco (config JSONB)."""
+        try:
+            db = get_supabase()
+            # Busca config atual
+            result = db.table("integration_accounts").select("config").eq("id", acc_id).single().execute()
+            config = result.data.get("config") or {}
+            config["last_email_uid"] = uid
+            
+            # Atualiza
+            db.table("integration_accounts").update({
+                "config": config
+            }).eq("id", acc_id).execute()
+        except Exception as e:
+            print(f"Erro ao salvar last_uid: {e}")
 
     def _extract_name_from_header(self, header: str) -> str | None:
         """Extrai nome do header 'Name <email@example.com>'."""
