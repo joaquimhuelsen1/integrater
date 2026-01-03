@@ -145,8 +145,8 @@ export function DealTimeline({ dealId, isClosed, filterType }: DealTimelineProps
 
   const handleDeleteActivity = async (activityId: string) => {
     try {
-      const res = await fetch(
-        `${API_URL}/deals/${dealId}/activities/${activityId}`,
+      const res = await apiFetch(
+        `/deals/${dealId}/activities/${activityId}`,
         { method: "DELETE" }
       )
 
