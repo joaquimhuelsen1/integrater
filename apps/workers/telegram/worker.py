@@ -732,6 +732,11 @@ class TelegramWorker:
             chat = await event.get_chat()
             is_group = isinstance(chat, (Chat, Channel))
             
+            # Debug log
+            chat_id = getattr(chat, 'id', 'unknown')
+            chat_title = getattr(chat, 'title', None) or getattr(chat, 'first_name', 'unknown')
+            print(f"[NewMessage] chat_id={chat_id} title={chat_title} is_group={is_group} out={is_outgoing}")
+            
             if not is_group:
                 return  # 1:1 handled by Raw handler
             
