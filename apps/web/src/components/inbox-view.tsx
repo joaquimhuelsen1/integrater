@@ -747,12 +747,13 @@ I'll be waiting.`
       .eq("type", "openphone")
       .limit(1)
 
-    if (!accounts || accounts.length === 0) {
+    const account = accounts?.[0]
+    if (!account) {
       console.warn("Nenhuma conta OpenPhone encontrada")
       return
     }
 
-    const accountId = accounts[0].id
+    const accountId = account.id
 
     const response = await fetch(
       `${apiUrl}/openphone/contacts/sync?account_id=${accountId}&workspace_id=${currentWorkspace.id}`,
