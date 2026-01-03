@@ -1,13 +1,19 @@
 """
 Router OpenPhone SMS - Webhook inbound/status e envio outbound (M7).
 
-SEGURANÇA:
+ARQUITETURA COM n8n:
+- Webhooks recebem eventos do OpenPhone, validam assinatura, encaminham para n8n
+- n8n orquestra toda a logica de negocio (criar identity, conversa, inserir mensagens)
+- Envio via messages.py que chama n8n
+
+SEGURANCA:
 - Webhooks validam assinatura HMAC-SHA256
 - Inputs validados com regex E.164
-- Limite de tamanho em conteúdo SMS
+- Limite de tamanho em conteudo SMS
 """
 
 import logging
+import os
 import re
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from supabase import Client
@@ -25,15 +31,19 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/openphone", tags=["openphone"])
 
-# Regex para validação E.164: +[código país][número] (8-15 dígitos total)
+# Regex para validacao E.164: +[codigo pais][numero] (8-15 digitos total)
 E164_REGEX = re.compile(r'^\+[1-9]\d{7,14}$')
+
+# n8n Webhooks
+N8N_WEBHOOK_OPENPHONE_INBOUND = os.environ.get("N8N_WEBHOOK_OPENPHONE_INBOUND", "")
+N8N_API_KEY = os.environ.get("N8N_API_KEY", "")
 
 
 def validate_e164(phone: str) -> str:
-    """Valida e normaliza número de telefone E.164."""
+    """Valida e normaliza numero de telefone E.164."""
     phone = phone.strip()
     if not E164_REGEX.match(phone):
-        raise ValueError(f"Telefone inválido. Use formato E.164: +5511999999999")
+        raise ValueError(f"Telefone invalido. Use formato E.164: +5511999999999")
     return phone
 
 
@@ -78,54 +88,24 @@ class SendSMSResponse(BaseModel):
     status: str
 
 
-# --- Webhook Payload Models ---
-
-class WebhookMessageData(BaseModel):
-    """Dados da mensagem no webhook."""
-    id: str
-    from_: str  # 'from' é palavra reservada
-    to: str
-    body: Optional[str] = None
-    direction: str
-    status: str
-    phoneNumberId: str
-    conversationId: Optional[str] = None
-    createdAt: str
-    media: Optional[list] = None
-
-    class Config:
-        populate_by_name = True
-        fields = {'from_': 'from'}
-
-
 # --- Helper Functions ---
 
 def _verify_webhook_signature(payload: bytes, signature: str | None, webhook_type: str) -> bool:
     """
     Verifica assinatura HMAC-SHA256 do webhook OpenPhone.
     
-    SEGURANÇA: Usa hmac.compare_digest para evitar timing attacks.
-    
-    Args:
-        payload: Corpo da requisição em bytes
-        signature: Header x-openphone-signature
-        webhook_type: "inbound" ou "status"
-    
-    Returns:
-        True se válida, False se inválida ou sem secret configurado
+    SEGURANCA: Usa hmac.compare_digest para evitar timing attacks.
     """
     settings = get_settings()
     
-    # Seleciona secret correto baseado no tipo de webhook
     if webhook_type == "inbound":
         secret = settings.openphone_webhook_secret_inbound
     else:
         secret = settings.openphone_webhook_secret_status
     
-    # Se não tem secret configurado, loga warning mas permite (para migração)
     if not secret:
-        logger.warning(f"OPENPHONE_WEBHOOK_SECRET_{webhook_type.upper()} não configurado - webhook não validado!")
-        return True  # Permite durante migração, mas loga warning
+        logger.warning(f"OPENPHONE_WEBHOOK_SECRET_{webhook_type.upper()} nao configurado - webhook nao validado!")
+        return True
     
     if not signature:
         logger.warning("Webhook recebido sem assinatura")
@@ -140,75 +120,61 @@ def _verify_webhook_signature(payload: bytes, signature: str | None, webhook_typ
     is_valid = hmac.compare_digest(signature.lower(), expected.lower())
     
     if not is_valid:
-        logger.warning(f"Assinatura de webhook {webhook_type} inválida")
+        logger.warning(f"Assinatura de webhook {webhook_type} invalida")
     
     return is_valid
 
 
-async def _get_openphone_account(db: Client, phone_number_id: str):
-    """Busca conta OpenPhone pelo phoneNumberId."""
+async def _get_openphone_account(db: Client, phone_number_id: str = None, phone_number: str = None):
+    """Busca conta OpenPhone pelo phoneNumberId ou phone_number."""
     result = db.table("integration_accounts").select("*").eq(
         "type", "openphone"
     ).execute()
 
     for acc in result.data or []:
-        if acc.get("config", {}).get("phone_number_id") == phone_number_id:
+        config = acc.get("config", {})
+        if phone_number_id and config.get("phone_number_id") == phone_number_id:
+            return acc
+        if phone_number and config.get("phone_number") == phone_number:
             return acc
     return None
 
 
-async def _get_or_create_identity(db: Client, owner_id: str, phone: str, workspace_id: str = None):
-    """Busca ou cria identity pelo telefone."""
-    # Busca identity existente
-    result = db.table("contact_identities").select(
-        "id, contact_id"
-    ).eq("owner_id", owner_id).eq(
-        "type", "phone"
-    ).eq("value", phone).execute()
-
-    if result.data:
-        return result.data[0]
-
-    # Cria apenas identity (sem contato - igual ao Telegram)
-    identity_id = str(uuid4())
-    db.table("contact_identities").insert({
-        "id": identity_id,
-        "owner_id": owner_id,
-        "contact_id": None,
-        "type": "phone",
-        "value": phone,
-        "metadata": {
-            "display_name": phone,
-        },
-    }).execute()
-
-    return {"id": identity_id, "contact_id": None}
-
-
-async def _get_or_create_conversation(
-    db: Client, owner_id: str, identity_id: str, workspace_id: str = None
-):
-    """Busca ou cria conversa para a identity."""
-    result = db.table("conversations").select("id").eq(
-        "owner_id", owner_id
-    ).eq("primary_identity_id", identity_id).limit(1).execute()
-
-    if result.data:
-        return result.data[0]["id"]
-
-    # Cria conversa
-    conv_data = {
-        "owner_id": owner_id,
-        "primary_identity_id": identity_id,
-        "status": "open",
-        "last_channel": "openphone_sms",
+async def _send_to_n8n(payload: dict) -> dict | None:
+    """Envia payload para webhook do n8n."""
+    if not N8N_WEBHOOK_OPENPHONE_INBOUND:
+        logger.warning("[WEBHOOK] URL nao configurada, pulando envio")
+        return None
+        
+    if not N8N_API_KEY:
+        logger.warning("[WEBHOOK] API Key nao configurada")
+        return None
+    
+    headers = {
+        "Content-Type": "application/json",
+        "X-API-KEY": N8N_API_KEY,
     }
-    if workspace_id:
-        conv_data["workspace_id"] = workspace_id
-
-    new_conv = db.table("conversations").insert(conv_data).execute()
-
-    return new_conv.data[0]["id"] if new_conv.data else None
+    
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(N8N_WEBHOOK_OPENPHONE_INBOUND, json=payload, headers=headers)
+            
+            if response.status_code == 200:
+                logger.info(f"[WEBHOOK] Enviado com sucesso para n8n")
+                try:
+                    return response.json()
+                except Exception:
+                    return {"status": "ok"}
+            else:
+                logger.error(f"[WEBHOOK] Erro {response.status_code}: {response.text}")
+                return None
+                
+    except httpx.TimeoutException:
+        logger.error(f"[WEBHOOK] Timeout ao chamar n8n")
+        return None
+    except Exception as e:
+        logger.error(f"[WEBHOOK] Erro ao chamar n8n: {e}")
+        return None
 
 
 # --- Account Management ---
@@ -222,7 +188,6 @@ async def create_account(
     """Cadastra conta OpenPhone."""
     from ..utils.crypto import encrypt
 
-    # Criptografa API key
     encrypted_key = encrypt(request.api_key)
 
     account_id = uuid4()
@@ -293,7 +258,7 @@ async def delete_account(
     return {"success": True}
 
 
-# --- Send SMS ---
+# --- Send SMS (mantido para compatibilidade - use messages.py para envio via n8n) ---
 
 @router.post("/send", response_model=SendSMSResponse)
 async def send_sms(
@@ -302,22 +267,20 @@ async def send_sms(
     owner_id: UUID = Depends(get_current_user_id),
     db: Client = Depends(get_supabase),
 ):
-    """Envia SMS via OpenPhone."""
+    """Envia SMS via OpenPhone (direto - para uso administrativo)."""
     from ..utils.crypto import decrypt
 
-    # Busca conta
     result = db.table("integration_accounts").select("*").eq(
         "id", str(account_id)
     ).eq("owner_id", str(owner_id)).eq("type", "openphone").single().execute()
 
     if not result.data:
-        raise HTTPException(status_code=404, detail="Conta não encontrada")
+        raise HTTPException(status_code=404, detail="Conta nao encontrada")
 
     account = result.data
     api_key = decrypt(account["secrets_encrypted"])
     from_number = account["config"]["phone_number"]
 
-    # Envia via API OpenPhone
     async with httpx.AsyncClient() as client:
         response = await client.post(
             "https://api.openphone.com/v1/messages",
@@ -341,25 +304,13 @@ async def send_sms(
     data = response.json().get("data", {})
     message_id = data.get("id", str(uuid4()))
 
-    # Salva mensagem no banco
-    if request.conversation_id:
-        db.table("messages").insert({
-            "conversation_id": request.conversation_id,
-            "direction": "outbound",
-            "channel": "sms",
-            "text": request.content,
-            "external_id": message_id,
-            "integration_account_id": str(account_id),
-            "metadata": {"openphone_status": data.get("status", "queued")},
-        }).execute()
-
     return SendSMSResponse(
         message_id=message_id,
         status=data.get("status", "queued"),
     )
 
 
-# --- Webhooks ---
+# --- Webhooks - Encaminham para n8n ---
 
 @router.post("/webhook/inbound")
 async def webhook_inbound(
@@ -370,16 +321,14 @@ async def webhook_inbound(
     """
     Webhook para SMS recebido (message.received).
     
-    SEGURANÇA:
-    - Valida assinatura HMAC-SHA256 do webhook
-    - Cria contato/conversa se necessário e salva mensagem
+    Valida assinatura e encaminha para n8n processar.
     """
     payload = await request.body()
     
-    # SEGURANÇA: Validar assinatura do webhook
+    # Validar assinatura
     if not _verify_webhook_signature(payload, x_openphone_signature, "inbound"):
-        logger.warning("Webhook inbound rejeitado: assinatura inválida")
-        raise HTTPException(status_code=401, detail="Assinatura inválida")
+        logger.warning("Webhook inbound rejeitado: assinatura invalida")
+        raise HTTPException(status_code=401, detail="Assinatura invalida")
     
     data = await request.json()
     
@@ -398,76 +347,47 @@ async def webhook_inbound(
 
     phone_number_id = msg.get("phoneNumberId")
     from_phone = msg.get("from")
+    to_phone = msg.get("to")
     body = msg.get("body", "")
     external_id = msg.get("id")
     media = msg.get("media", [])
-    to_phone = msg.get("to")
+    created_at = msg.get("createdAt")
 
     logger.info(f"SMS recebido: from={from_phone}, to={to_phone}")
 
-    # Busca conta OpenPhone
-    account = await _get_openphone_account(db, phone_number_id)
+    # Busca conta OpenPhone para obter owner_id e workspace_id
+    account = await _get_openphone_account(db, phone_number_id=phone_number_id, phone_number=to_phone)
+    
     if not account:
-        # Tenta buscar por número
-        result = db.table("integration_accounts").select("*").eq(
-            "type", "openphone"
-        ).execute()
-
-        for acc in result.data or []:
-            acc_phone = acc.get("config", {}).get("phone_number")
-            if acc_phone == to_phone:
-                account = acc
-                break
-
-    if not account:
-        logger.warning(f"Conta não encontrada para {to_phone}")
+        logger.warning(f"Conta nao encontrada para {to_phone}")
         return {"status": "ignored", "reason": "account not found"}
 
     owner_id = account["owner_id"]
     account_id = account["id"]
     workspace_id = account.get("workspace_id")
 
-    # Busca/cria identity
-    identity = await _get_or_create_identity(db, owner_id, from_phone, workspace_id)
-    if not identity:
-        raise HTTPException(status_code=500, detail="Erro ao criar identity")
-
-    identity_id = identity["id"]
-
-    # Busca/cria conversa
-    conversation_id = await _get_or_create_conversation(
-        db, owner_id, identity_id, workspace_id
-    )
-    if not conversation_id:
-        raise HTTPException(status_code=500, detail="Erro ao criar conversa")
-
-    # Salva mensagem
-    message_data = {
-        "conversation_id": conversation_id,
-        "identity_id": identity_id,
-        "direction": "inbound",
-        "channel": "openphone_sms",
-        "text": body,
-        "external_message_id": external_id,
-        "integration_account_id": account_id,
+    # Encaminha para n8n
+    n8n_payload = {
+        "event": "inbound",
+        "account_id": account_id,
         "owner_id": owner_id,
-        "sent_at": msg.get("createdAt"),
+        "workspace_id": workspace_id,
+        "from_phone": from_phone,
+        "to_phone": to_phone,
+        "body": body,
+        "external_id": external_id,
+        "media": media,
+        "timestamp": created_at,
     }
 
-    # Se tem mídia, adiciona no payload
-    if media:
-        message_data["payload"] = {"media": media}
-
-    db.table("messages").insert(message_data).execute()
-
-    # Atualiza last_message_at da conversa
-    db.table("conversations").update({
-        "last_message_at": msg.get("createdAt"),
-        "status": "open",
-    }).eq("id", conversation_id).execute()
-
-    logger.info(f"SMS processado: conversation={conversation_id}")
-    return {"status": "processed", "conversation_id": conversation_id}
+    result = await _send_to_n8n(n8n_payload)
+    
+    if result and result.get("status") == "ok":
+        logger.info(f"SMS processado via n8n: conversation={result.get('conversation_id')}")
+        return {"status": "processed", "conversation_id": result.get("conversation_id")}
+    else:
+        logger.error("Erro ao processar SMS via n8n")
+        return {"status": "error", "reason": "n8n processing failed"}
 
 
 @router.post("/webhook/status")
@@ -479,17 +399,15 @@ async def webhook_status(
     """
     Webhook para status de entrega (message.delivered).
     
-    SEGURANÇA:
-    - Valida assinatura HMAC-SHA256 do webhook
-    - Cria conversa/mensagem para outgoing e atualiza status
+    Valida assinatura e encaminha para n8n processar.
     """
     try:
         payload = await request.body()
         
-        # SEGURANÇA: Validar assinatura do webhook
+        # Validar assinatura
         if not _verify_webhook_signature(payload, x_openphone_signature, "status"):
-            logger.warning("Webhook status rejeitado: assinatura inválida")
-            raise HTTPException(status_code=401, detail="Assinatura inválida")
+            logger.warning("Webhook status rejeitado: assinatura invalida")
+            raise HTTPException(status_code=401, detail="Assinatura invalida")
         
         data = await request.json()
         logger.debug(f"Webhook status recebido: type={data.get('type')}")
@@ -506,76 +424,44 @@ async def webhook_status(
         to_phone = msg.get("to")
         body = msg.get("body", "")
         phone_number_id = msg.get("phoneNumberId")
+        created_at = msg.get("createdAt")
 
         if not external_id:
             return {"status": "ignored", "reason": "no message id"}
 
         logger.info(f"Status update: {external_id} -> {status}")
 
-        # Se é outgoing, cria conversa e mensagem
+        # Para outgoing, busca conta e encaminha para n8n
         if direction == "outgoing":
-            # Busca conta OpenPhone pelo phoneNumberId ou from
-            account = await _get_openphone_account(db, phone_number_id)
+            account = await _get_openphone_account(db, phone_number_id=phone_number_id, phone_number=from_phone)
+            
             if not account:
-                result = db.table("integration_accounts").select("*").eq(
-                    "type", "openphone"
-                ).execute()
-                for acc in result.data or []:
-                    if acc.get("config", {}).get("phone_number") == from_phone:
-                        account = acc
-                        break
-
-            if not account:
-                logger.warning(f"Conta não encontrada para {from_phone}")
+                logger.warning(f"Conta nao encontrada para {from_phone}")
                 return {"status": "ignored", "reason": "account not found"}
 
             owner_id = account["owner_id"]
             account_id = account["id"]
             workspace_id = account.get("workspace_id")
 
-            # Verifica se mensagem já existe
-            existing = db.table("messages").select("id").eq(
-                "external_message_id", external_id
-            ).execute()
-            if existing.data:
-                logger.debug(f"Mensagem já existe: {external_id}")
-                return {"status": "ok", "message_status": status}
-
-            # Cria identity para o destinatário (to_phone)
-            identity = await _get_or_create_identity(db, owner_id, to_phone, workspace_id)
-            if not identity:
-                return {"status": "error", "reason": "failed to create identity"}
-
-            identity_id = identity["id"]
-
-            # Cria/busca conversa
-            conversation_id = await _get_or_create_conversation(
-                db, owner_id, identity_id, workspace_id
-            )
-            if not conversation_id:
-                return {"status": "error", "reason": "failed to create conversation"}
-
-            # Salva mensagem outgoing
-            message_data = {
-                "conversation_id": conversation_id,
-                "identity_id": identity_id,
-                "direction": "outbound",
-                "channel": "openphone_sms",
-                "text": body,
-                "external_message_id": external_id,
-                "integration_account_id": account_id,
+            # Encaminha para n8n
+            n8n_payload = {
+                "event": "outbound",
+                "account_id": account_id,
                 "owner_id": owner_id,
-                "sent_at": msg.get("createdAt"),
+                "workspace_id": workspace_id,
+                "from_phone": from_phone,
+                "to_phone": to_phone,
+                "body": body,
+                "external_id": external_id,
+                "status": status,
+                "timestamp": created_at,
             }
-            db.table("messages").insert(message_data).execute()
 
-            # Atualiza conversa
-            db.table("conversations").update({
-                "last_message_at": msg.get("createdAt"),
-            }).eq("id", conversation_id).execute()
-
-            logger.info(f"Mensagem outgoing criada: {conversation_id}")
-            return {"status": "created", "conversation_id": conversation_id}
+            result = await _send_to_n8n(n8n_payload)
+            
+            if result and result.get("status") == "ok":
+                logger.info(f"Mensagem outgoing processada via n8n")
+                return {"status": "processed", "conversation_id": result.get("conversation_id")}
 
         return {"status": "ok", "message_status": status}
 

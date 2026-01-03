@@ -10,6 +10,40 @@ Tarefas relacionadas aos workers Telegram/Email (apps/workers).
 
 <!-- Tarefas sendo trabalhadas -->
 
+#### [WORKERS-009] Reestruturar Email e OpenPhone com n8n
+**Contexto:** Seguir mesmo padrao do Telegram - toda logica de negocio no n8n
+**Arquivos:** 
+- `apps/workers/email/worker.py`
+- `apps/workers/email/api.py`
+- `apps/workers/email/webhooks.py`
+- `apps/api/app/routers/openphone.py`
+- `apps/api/app/routers/messages.py`
+**Milestone:** `M9`
+**Bloqueio:** nao
+**Proximos passos:**
+1. ~~Criar webhooks.py para Email~~
+2. ~~Criar api.py com FastAPI para Email~~
+3. ~~Modificar worker Email para enviar eventos para n8n~~
+4. ~~Modificar openphone.py para encaminhar webhooks para n8n~~
+5. ~~Modificar messages.py para envio via n8n~~
+6. ~~Gerar JSON dos workflows n8n~~
+7. ~~Atualizar .env.example com novas variaveis~~
+8. Configurar workflows no n8n de producao
+9. Testar fluxo completo Email inbound/send
+10. Testar fluxo completo OpenPhone inbound/send
+
+**Referencias:**
+- Workflow Email: `docs/api/n8n-workflow-email.json`
+- Workflow OpenPhone: `docs/api/n8n-workflow-openphone.json`
+
+**Atualizacoes:**
+- 2026-01-02: Criados webhooks.py e api.py para Email Worker
+- 2026-01-02: Worker Email refatorado, envia eventos para n8n
+- 2026-01-02: OpenPhone refatorado, webhooks encaminham para n8n
+- 2026-01-02: messages.py atualizado - todos canais via n8n
+- 2026-01-02: Gerados JSONs dos workflows n8n
+- 2026-01-02: Atualizado .env.example com variaveis n8n
+
 #### [WORKERS-008] Reestruturar Worker Telegram com n8n
 **Contexto:** Worker muito complexo, delay em mensagens. Reestruturar para usar n8n como orquestrador.
 **Arquivo:** `apps/workers/telegram/worker.py`
@@ -25,7 +59,7 @@ Tarefas relacionadas aos workers Telegram/Email (apps/workers).
 7. Ajustar URLs e API keys em producao
 
 **Referencias:**
-- Workflow: `apps/workers/telegram/n8n-workflow-telegram.json`
+- Workflow: `docs/api/n8n-workflow-telegram.json`
 - API: `apps/workers/telegram/api.py`
 - Webhooks: `apps/workers/telegram/webhooks.py`
 

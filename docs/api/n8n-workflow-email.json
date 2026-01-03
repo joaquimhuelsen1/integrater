@@ -1,0 +1,247 @@
+{
+  "name": "Email Inbound/Send",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "email/inbound",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "webhook-email-inbound",
+      "name": "Webhook Email Inbound",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "email-inbound"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "email/send",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "webhook-email-send",
+      "name": "Webhook Email Send",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 600],
+      "webhookId": "email-send"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Buscar ou criar identity\nWITH existing_identity AS (\n  SELECT id, contact_id FROM contact_identities\n  WHERE owner_id = '{{ $json.owner_id }}'\n    AND type = 'email'\n    AND value = '{{ $json.from_email }}'\n  LIMIT 1\n),\nnew_identity AS (\n  INSERT INTO contact_identities (id, owner_id, type, value, metadata, workspace_id)\n  SELECT \n    gen_random_uuid(),\n    '{{ $json.owner_id }}',\n    'email',\n    '{{ $json.from_email }}',\n    jsonb_build_object('display_name', '{{ $json.sender_name }}'::text),\n    '{{ $json.workspace_id }}'\n  WHERE NOT EXISTS (SELECT 1 FROM existing_identity)\n  RETURNING id, contact_id\n)\nSELECT id, contact_id FROM existing_identity\nUNION ALL\nSELECT id, contact_id FROM new_identity;",
+        "options": {}
+      },
+      "id": "get-or-create-identity",
+      "name": "Get/Create Identity",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [500, 300],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Buscar conversa por threading ou criar nova\nWITH threading_conv AS (\n  SELECT conversation_id FROM messages\n  WHERE owner_id = '{{ $json.owner_id }}'\n    AND external_message_id = '{{ $json.in_reply_to }}'\n  LIMIT 1\n),\nexisting_conv AS (\n  SELECT id FROM conversations\n  WHERE owner_id = '{{ $json.owner_id }}'\n    AND primary_identity_id = '{{ $node[\"Get/Create Identity\"].json.id }}'\n    AND (SELECT conversation_id FROM threading_conv) IS NULL\n  LIMIT 1\n),\nnew_conv AS (\n  INSERT INTO conversations (id, owner_id, workspace_id, primary_identity_id, status, last_channel, last_message_at)\n  SELECT\n    gen_random_uuid(),\n    '{{ $json.owner_id }}',\n    '{{ $json.workspace_id }}',\n    '{{ $node[\"Get/Create Identity\"].json.id }}',\n    'open',\n    'email',\n    NOW()\n  WHERE NOT EXISTS (SELECT 1 FROM threading_conv)\n    AND NOT EXISTS (SELECT 1 FROM existing_conv)\n  RETURNING id\n)\nSELECT COALESCE(\n  (SELECT conversation_id FROM threading_conv),\n  (SELECT id FROM existing_conv),\n  (SELECT id FROM new_conv)\n) as id;",
+        "options": {}
+      },
+      "id": "get-or-create-conversation",
+      "name": "Get/Create Conversation",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [750, 300],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Inserir mensagem inbound\nINSERT INTO messages (\n  id, owner_id, conversation_id, integration_account_id, identity_id,\n  channel, direction, text, html, subject, from_address, to_address,\n  sent_at, external_message_id, external_reply_to_message_id, raw_payload\n) VALUES (\n  gen_random_uuid(),\n  '{{ $json.owner_id }}',\n  '{{ $node[\"Get/Create Conversation\"].json.id }}',\n  '{{ $json.account_id }}',\n  '{{ $node[\"Get/Create Identity\"].json.id }}',\n  'email',\n  'inbound',\n  '{{ $json.body }}',\n  '{{ $json.html }}',\n  '{{ $json.subject }}',\n  '{{ $json.from_email }}',\n  '{{ $json.to_email }}',\n  '{{ $json.timestamp }}',\n  '{{ $json.message_id }}',\n  '{{ $json.in_reply_to }}',\n  jsonb_build_object('references', '{{ $json.references }}'::text, 'attachments', '{{ JSON.stringify($json.attachments) }}'::jsonb)\n)\nRETURNING id;",
+        "options": {}
+      },
+      "id": "insert-message-inbound",
+      "name": "Insert Message",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1000, 300],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Atualizar conversa\nUPDATE conversations SET\n  last_message_at = NOW(),\n  last_channel = 'email',\n  last_message_preview = LEFT('{{ $json.body || $json.subject }}', 100)\nWHERE id = '{{ $node[\"Get/Create Conversation\"].json.id }}';",
+        "options": {}
+      },
+      "id": "update-conversation",
+      "name": "Update Conversation",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1250, 300],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\"status\": \"ok\", \"message_id\": $node[\"Insert Message\"].json.id, \"conversation_id\": $node[\"Get/Create Conversation\"].json.id} }}"
+      },
+      "id": "respond-inbound",
+      "name": "Respond Inbound OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Buscar dados da conversa para envio\nSELECT \n  c.id as conversation_id,\n  c.owner_id,\n  c.workspace_id,\n  c.primary_identity_id,\n  ci.value as to_email,\n  ia.id as account_id,\n  ia.config->>'email' as from_email\nFROM conversations c\nJOIN contact_identities ci ON ci.id = c.primary_identity_id\nJOIN integration_accounts ia ON ia.workspace_id = c.workspace_id AND ia.type = 'email_imap_smtp' AND ia.is_active = true\nWHERE c.id = '{{ $json.conversation_id }}'\nLIMIT 1;",
+        "options": {}
+      },
+      "id": "get-send-context",
+      "name": "Get Send Context",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [500, 600],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://email-worker:8002/send",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {"name": "account_id", "value": "={{ $node[\"Get Send Context\"].json.account_id }}"},
+            {"name": "to_email", "value": "={{ $node[\"Get Send Context\"].json.to_email }}"},
+            {"name": "subject", "value": "={{ $json.subject }}"},
+            {"name": "body", "value": "={{ $json.text }}"},
+            {"name": "in_reply_to", "value": "={{ $json.in_reply_to }}"},
+            {"name": "attachments", "value": "={{ $json.attachments }}"}
+          ]
+        },
+        "options": {}
+      },
+      "id": "call-email-worker",
+      "name": "Call Email Worker",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, 600],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "EMAIL_WORKER_AUTH_CREDENTIAL_ID",
+          "name": "Email Worker API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Inserir mensagem outbound\nINSERT INTO messages (\n  id, owner_id, conversation_id, integration_account_id, identity_id,\n  channel, direction, text, subject, from_address, to_address,\n  sent_at, external_message_id\n) VALUES (\n  '{{ $json.id }}',\n  '{{ $node[\"Get Send Context\"].json.owner_id }}',\n  '{{ $json.conversation_id }}',\n  '{{ $node[\"Get Send Context\"].json.account_id }}',\n  '{{ $node[\"Get Send Context\"].json.primary_identity_id }}',\n  'email',\n  'outbound',\n  '{{ $json.text }}',\n  '{{ $json.subject }}',\n  '{{ $node[\"Get Send Context\"].json.from_email }}',\n  '{{ $node[\"Get Send Context\"].json.to_email }}',\n  NOW(),\n  '{{ $node[\"Call Email Worker\"].json.message_id }}'\n)\nRETURNING id;",
+        "options": {}
+      },
+      "id": "insert-message-outbound",
+      "name": "Insert Outbound Message",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1000, 600],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Atualizar conversa apos envio\nUPDATE conversations SET\n  last_message_at = NOW(),\n  last_channel = 'email',\n  last_message_preview = LEFT('{{ $json.text }}', 100)\nWHERE id = '{{ $json.conversation_id }}';",
+        "options": {}
+      },
+      "id": "update-conversation-send",
+      "name": "Update Conversation Send",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1250, 600],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\"status\": \"ok\", \"message_id\": $node[\"Call Email Worker\"].json.message_id} }}"
+      },
+      "id": "respond-send",
+      "name": "Respond Send OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1500, 600]
+    }
+  ],
+  "connections": {
+    "Webhook Email Inbound": {
+      "main": [[{"node": "Get/Create Identity", "type": "main", "index": 0}]]
+    },
+    "Get/Create Identity": {
+      "main": [[{"node": "Get/Create Conversation", "type": "main", "index": 0}]]
+    },
+    "Get/Create Conversation": {
+      "main": [[{"node": "Insert Message", "type": "main", "index": 0}]]
+    },
+    "Insert Message": {
+      "main": [[{"node": "Update Conversation", "type": "main", "index": 0}]]
+    },
+    "Update Conversation": {
+      "main": [[{"node": "Respond Inbound OK", "type": "main", "index": 0}]]
+    },
+    "Webhook Email Send": {
+      "main": [[{"node": "Get Send Context", "type": "main", "index": 0}]]
+    },
+    "Get Send Context": {
+      "main": [[{"node": "Call Email Worker", "type": "main", "index": 0}]]
+    },
+    "Call Email Worker": {
+      "main": [[{"node": "Insert Outbound Message", "type": "main", "index": 0}]]
+    },
+    "Insert Outbound Message": {
+      "main": [[{"node": "Update Conversation Send", "type": "main", "index": 0}]]
+    },
+    "Update Conversation Send": {
+      "main": [[{"node": "Respond Send OK", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

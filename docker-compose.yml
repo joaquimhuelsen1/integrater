@@ -39,6 +39,8 @@ services:
     build: ./apps/workers
     container_name: inbox-email-worker
     command: python email/worker.py
+    ports:
+      - "8002:8002"
     env_file:
       - ./apps/workers/.env
     restart: unless-stopped

@@ -110,6 +110,162 @@ async def send_message(
             raise HTTPException(status_code=500, detail=str(e))
 
     # ============================================
+    # EMAIL: n8n faz tudo (nao insere no banco)
+    # ============================================
+    if channel == "email":
+        print(f"[Email] Enviando email para conversa {data.conversation_id}")
+        
+        # Buscar attachments URLs se houver
+        attachment_urls = []
+        if data.attachments:
+            for att_id in data.attachments:
+                att_result = db.table("attachments").select(
+                    "storage_bucket, storage_path"
+                ).eq("id", str(att_id)).single().execute()
+                if att_result.data:
+                    bucket = att_result.data.get("storage_bucket", "attachments")
+                    path = att_result.data.get("storage_path")
+                    if path:
+                        from ..config import get_settings
+                        settings = get_settings()
+                        url = f"{settings.supabase_url}/storage/v1/object/public/{bucket}/{path}"
+                        attachment_urls.append(url)
+        
+        # Buscar ultima mensagem inbound para threading
+        email_reply_to = None
+        email_subject = None
+        last_inbound = db.table("messages").select(
+            "external_message_id, subject"
+        ).eq("conversation_id", str(data.conversation_id)).eq(
+            "direction", "inbound"
+        ).eq("channel", "email").order(
+            "sent_at", desc=True
+        ).limit(1).execute()
+
+        if last_inbound.data:
+            email_reply_to = last_inbound.data[0].get("external_message_id")
+            original_subject = last_inbound.data[0].get("subject", "")
+            if original_subject:
+                if not original_subject.lower().startswith("re:"):
+                    email_subject = f"Re: {original_subject}"
+                else:
+                    email_subject = original_subject
+        
+        # Chamar webhook n8n /email/send - n8n insere no banco
+        try:
+            import os
+            n8n_webhook_url = os.environ.get(
+                "N8N_WEBHOOK_EMAIL_SEND", 
+                "https://n8nwebhook.thereconquestmap.com/webhook/email/send"
+            )
+            n8n_api_key = os.environ.get("N8N_API_KEY", "")
+            
+            # Usar ID do frontend se fornecido, senao gerar novo
+            message_id = str(data.id) if data.id else str(uuid4())
+            
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    n8n_webhook_url,
+                    headers={
+                        "X-API-KEY": n8n_api_key,
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "id": message_id,
+                        "conversation_id": str(data.conversation_id),
+                        "text": data.text or "",
+                        "subject": email_subject,
+                        "in_reply_to": email_reply_to,
+                        "attachments": attachment_urls,
+                    },
+                )
+            
+            if response.status_code == 200:
+                resp_data = response.json()
+                if resp_data.get("status") == "ok":
+                    print(f"[Email] Enviado via n8n com sucesso: {resp_data.get('message_id')}")
+                    return {
+                        "id": message_id,
+                        "conversation_id": str(data.conversation_id),
+                        "direction": "outbound",
+                        "text": data.text,
+                        "channel": "email",
+                        "subject": email_subject,
+                        "sent_at": datetime.utcnow().isoformat(),
+                        "external_message_id": resp_data.get("message_id"),
+                        "sending_status": "sent",
+                    }
+                else:
+                    print(f"[Email] Erro do n8n: {resp_data.get('error')}")
+                    raise HTTPException(status_code=500, detail=resp_data.get('error', 'Erro ao enviar'))
+            else:
+                print(f"[Email] Erro HTTP n8n: {response.status_code} {response.text}")
+                raise HTTPException(status_code=500, detail=f"Erro n8n: {response.status_code}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[Email] Excecao ao enviar via n8n: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # ============================================
+    # OPENPHONE SMS: n8n faz tudo (nao insere no banco)
+    # ============================================
+    if channel == "openphone_sms":
+        print(f"[OpenPhone] Enviando SMS para conversa {data.conversation_id}")
+        
+        # Chamar webhook n8n /openphone/send - n8n insere no banco
+        try:
+            import os
+            n8n_webhook_url = os.environ.get(
+                "N8N_WEBHOOK_OPENPHONE_SEND", 
+                "https://n8nwebhook.thereconquestmap.com/webhook/openphone/send"
+            )
+            n8n_api_key = os.environ.get("N8N_API_KEY", "")
+            
+            # Usar ID do frontend se fornecido, senao gerar novo
+            message_id = str(data.id) if data.id else str(uuid4())
+            
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    n8n_webhook_url,
+                    headers={
+                        "X-API-KEY": n8n_api_key,
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "id": message_id,
+                        "conversation_id": str(data.conversation_id),
+                        "text": data.text or "",
+                    },
+                )
+            
+            if response.status_code == 200:
+                resp_data = response.json()
+                if resp_data.get("status") == "ok":
+                    print(f"[OpenPhone] Enviado via n8n com sucesso: {resp_data.get('external_id')}")
+                    return {
+                        "id": message_id,
+                        "conversation_id": str(data.conversation_id),
+                        "direction": "outbound",
+                        "text": data.text,
+                        "channel": "openphone_sms",
+                        "sent_at": datetime.utcnow().isoformat(),
+                        "external_message_id": resp_data.get("external_id"),
+                        "sending_status": "sent",
+                    }
+                else:
+                    print(f"[OpenPhone] Erro do n8n: {resp_data.get('error')}")
+                    raise HTTPException(status_code=500, detail=resp_data.get('error', 'Erro ao enviar'))
+            else:
+                print(f"[OpenPhone] Erro HTTP n8n: {response.status_code} {response.text}")
+                raise HTTPException(status_code=500, detail=f"Erro n8n: {response.status_code}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[OpenPhone] Excecao ao enviar via n8n: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # ============================================
     # OUTROS CANAIS: API insere no banco
     # ============================================
     message_id = data.id if data.id else uuid4()
@@ -129,27 +285,6 @@ async def send_message(
     # Buscar integration_account_id
     integration_account_id = data.integration_account_id
 
-    # Para emails: buscar última mensagem inbound para threading
-    email_reply_to = None
-    email_subject = None
-    if channel == "email":
-        last_inbound = db.table("messages").select(
-            "external_message_id, subject"
-        ).eq("conversation_id", str(data.conversation_id)).eq(
-            "direction", "inbound"
-        ).eq("channel", "email").order(
-            "sent_at", desc=True
-        ).limit(1).execute()
-
-        if last_inbound.data:
-            email_reply_to = last_inbound.data[0].get("external_message_id")
-            original_subject = last_inbound.data[0].get("subject", "")
-            if original_subject:
-                if not original_subject.lower().startswith("re:"):
-                    email_subject = f"Re: {original_subject}"
-                else:
-                    email_subject = original_subject
-
     message_payload = {
         "id": str(message_id),
         "owner_id": str(owner_id),
@@ -159,8 +294,6 @@ async def send_message(
         "channel": channel,
         "direction": MessageDirection.outbound.value,
         "external_message_id": external_message_id,
-        "external_reply_to_message_id": email_reply_to,
-        "subject": email_subject,
         "text": data.text,
         "sent_at": now,
         "raw_payload": {},
@@ -182,85 +315,7 @@ async def send_message(
         "last_message_preview": preview,
     }).eq("id", str(data.conversation_id)).execute()
 
-    # Enviar via canal apropriado
-    send_status = "sent"
-    external_id = None
-
-    if channel == "openphone_sms":
-        print(f"[OpenPhone] Enviando SMS para conversa {data.conversation_id}")
-
-        account_id = data.integration_account_id
-        if not account_id:
-            acc_search = db.table("integration_accounts").select("id").eq(
-                "owner_id", str(owner_id)
-            ).eq("type", "openphone").eq("is_active", True).limit(1).execute()
-            if acc_search.data:
-                account_id = acc_search.data[0]["id"]
-
-        if account_id:
-            acc_result = db.table("integration_accounts").select("*").eq(
-                "id", str(account_id)
-            ).single().execute()
-
-            if acc_result.data:
-                account = acc_result.data
-                to_phone = None
-
-                if conv.get("primary_identity_id"):
-                    identity_result = db.table("contact_identities").select("value, type").eq(
-                        "id", conv["primary_identity_id"]
-                    ).single().execute()
-                    if identity_result.data and identity_result.data.get("type") == "phone":
-                        to_phone = identity_result.data.get("value")
-
-                if not to_phone and conv.get("contact_id"):
-                    identity_result = db.table("contact_identities").select("value").eq(
-                        "contact_id", conv["contact_id"]
-                    ).eq("type", "phone").limit(1).execute()
-                    if identity_result.data:
-                        to_phone = identity_result.data[0].get("value")
-
-                if to_phone:
-                    api_key = decrypt(account["secrets_encrypted"])
-                    from_number = account["config"]["phone_number"]
-
-                    try:
-                        async with httpx.AsyncClient() as client:
-                            response = await client.post(
-                                "https://api.openphone.com/v1/messages",
-                                headers={
-                                    "Authorization": api_key,
-                                    "Content-Type": "application/json",
-                                },
-                                json={
-                                    "from": from_number,
-                                    "to": [to_phone],
-                                    "content": data.text,
-                                },
-                            )
-
-                        if response.status_code in (200, 201, 202):
-                            resp_data = response.json().get("data", {})
-                            external_id = resp_data.get("id")
-                            send_status = "sent"
-                        else:
-                            send_status = "failed"
-                    except Exception as e:
-                        send_status = "failed"
-                        print(f"[OpenPhone] Exceção: {e}")
-
-    # Atualizar external_message_id se enviou com sucesso
-    if external_id:
-        db.table("messages").update({
-            "external_message_id": external_id
-        }).eq("id", str(message_id)).execute()
-
-    # Se envio falhou, deletar mensagem e retornar erro
-    if send_status == "failed":
-        db.table("messages").delete().eq("id", str(message_id)).execute()
-        raise HTTPException(status_code=500, detail="Falha ao enviar mensagem")
-
-    # Retornar mensagem atualizada
+    # Retornar mensagem
     final_result = db.table("messages").select("*").eq("id", str(message_id)).single().execute()
     return final_result.data
 

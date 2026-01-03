@@ -1,0 +1,244 @@
+{
+  "name": "OpenPhone Inbound/Send",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "openphone/inbound",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "webhook-openphone-inbound",
+      "name": "Webhook OpenPhone Inbound",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "openphone-inbound"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "openphone/send",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "id": "webhook-openphone-send",
+      "name": "Webhook OpenPhone Send",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 600],
+      "webhookId": "openphone-send"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Buscar ou criar identity para telefone\nWITH existing_identity AS (\n  SELECT id, contact_id FROM contact_identities\n  WHERE owner_id = '{{ $json.owner_id }}'\n    AND type = 'phone'\n    AND value = '{{ $json.from_phone }}'\n  LIMIT 1\n),\nnew_identity AS (\n  INSERT INTO contact_identities (id, owner_id, type, value, metadata, workspace_id)\n  SELECT \n    gen_random_uuid(),\n    '{{ $json.owner_id }}',\n    'phone',\n    '{{ $json.from_phone }}',\n    jsonb_build_object('display_name', '{{ $json.from_phone }}'::text),\n    '{{ $json.workspace_id }}'\n  WHERE NOT EXISTS (SELECT 1 FROM existing_identity)\n  RETURNING id, contact_id\n)\nSELECT id, contact_id FROM existing_identity\nUNION ALL\nSELECT id, contact_id FROM new_identity;",
+        "options": {}
+      },
+      "id": "get-or-create-identity-inbound",
+      "name": "Get/Create Identity Inbound",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [500, 300],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Buscar ou criar conversa\nWITH existing_conv AS (\n  SELECT id FROM conversations\n  WHERE owner_id = '{{ $json.owner_id }}'\n    AND primary_identity_id = '{{ $node[\"Get/Create Identity Inbound\"].json.id }}'\n  LIMIT 1\n),\nnew_conv AS (\n  INSERT INTO conversations (id, owner_id, workspace_id, primary_identity_id, status, last_channel, last_message_at)\n  SELECT\n    gen_random_uuid(),\n    '{{ $json.owner_id }}',\n    '{{ $json.workspace_id }}',\n    '{{ $node[\"Get/Create Identity Inbound\"].json.id }}',\n    'open',\n    'openphone_sms',\n    NOW()\n  WHERE NOT EXISTS (SELECT 1 FROM existing_conv)\n  RETURNING id\n)\nSELECT id FROM existing_conv\nUNION ALL\nSELECT id FROM new_conv;",
+        "options": {}
+      },
+      "id": "get-or-create-conversation-inbound",
+      "name": "Get/Create Conversation Inbound",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [750, 300],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Inserir mensagem inbound\nINSERT INTO messages (\n  id, owner_id, conversation_id, integration_account_id, identity_id,\n  channel, direction, text, sent_at, external_message_id, raw_payload\n) VALUES (\n  gen_random_uuid(),\n  '{{ $json.owner_id }}',\n  '{{ $node[\"Get/Create Conversation Inbound\"].json.id }}',\n  '{{ $json.account_id }}',\n  '{{ $node[\"Get/Create Identity Inbound\"].json.id }}',\n  'openphone_sms',\n  'inbound',\n  '{{ $json.body }}',\n  '{{ $json.timestamp }}',\n  '{{ $json.external_id }}',\n  jsonb_build_object('media', '{{ JSON.stringify($json.media || []) }}'::jsonb)\n)\nRETURNING id;",
+        "options": {}
+      },
+      "id": "insert-message-inbound",
+      "name": "Insert Message Inbound",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1000, 300],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Atualizar conversa\nUPDATE conversations SET\n  last_message_at = NOW(),\n  last_channel = 'openphone_sms',\n  last_message_preview = LEFT('{{ $json.body }}', 100),\n  status = 'open'\nWHERE id = '{{ $node[\"Get/Create Conversation Inbound\"].json.id }}';",
+        "options": {}
+      },
+      "id": "update-conversation-inbound",
+      "name": "Update Conversation Inbound",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1250, 300],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\"status\": \"ok\", \"message_id\": $node[\"Insert Message Inbound\"].json.id, \"conversation_id\": $node[\"Get/Create Conversation Inbound\"].json.id} }}"
+      },
+      "id": "respond-inbound",
+      "name": "Respond Inbound OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Buscar dados da conversa para envio\nSELECT \n  c.id as conversation_id,\n  c.owner_id,\n  c.workspace_id,\n  c.primary_identity_id,\n  ci.value as to_phone,\n  ia.id as account_id,\n  ia.config->>'phone_number' as from_phone,\n  ia.secrets_encrypted\nFROM conversations c\nJOIN contact_identities ci ON ci.id = c.primary_identity_id\nJOIN integration_accounts ia ON ia.workspace_id = c.workspace_id AND ia.type = 'openphone' AND ia.is_active = true\nWHERE c.id = '{{ $json.conversation_id }}'\nLIMIT 1;",
+        "options": {}
+      },
+      "id": "get-send-context",
+      "name": "Get Send Context",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [500, 600],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openphone.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {"name": "from", "value": "={{ $node[\"Get Send Context\"].json.from_phone }}"},
+            {"name": "to", "value": "={{ [$node[\"Get Send Context\"].json.to_phone] }}"},
+            {"name": "content", "value": "={{ $json.text }}"}
+          ]
+        },
+        "options": {}
+      },
+      "id": "call-openphone-api",
+      "name": "Call OpenPhone API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, 600],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "OPENPHONE_API_KEY_CREDENTIAL_ID",
+          "name": "OpenPhone API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Inserir mensagem outbound\nINSERT INTO messages (\n  id, owner_id, conversation_id, integration_account_id, identity_id,\n  channel, direction, text, sent_at, external_message_id\n) VALUES (\n  '{{ $json.id }}',\n  '{{ $node[\"Get Send Context\"].json.owner_id }}',\n  '{{ $json.conversation_id }}',\n  '{{ $node[\"Get Send Context\"].json.account_id }}',\n  '{{ $node[\"Get Send Context\"].json.primary_identity_id }}',\n  'openphone_sms',\n  'outbound',\n  '{{ $json.text }}',\n  NOW(),\n  '{{ $node[\"Call OpenPhone API\"].json.data.id }}'\n)\nRETURNING id;",
+        "options": {}
+      },
+      "id": "insert-message-outbound",
+      "name": "Insert Outbound Message",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1000, 600],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Atualizar conversa apos envio\nUPDATE conversations SET\n  last_message_at = NOW(),\n  last_channel = 'openphone_sms',\n  last_message_preview = LEFT('{{ $json.text }}', 100)\nWHERE id = '{{ $json.conversation_id }}';",
+        "options": {}
+      },
+      "id": "update-conversation-send",
+      "name": "Update Conversation Send",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1250, 600],
+      "credentials": {
+        "postgres": {
+          "id": "SUPABASE_POSTGRES_CREDENTIAL_ID",
+          "name": "Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\"status\": \"ok\", \"external_id\": $node[\"Call OpenPhone API\"].json.data.id} }}"
+      },
+      "id": "respond-send",
+      "name": "Respond Send OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1500, 600]
+    }
+  ],
+  "connections": {
+    "Webhook OpenPhone Inbound": {
+      "main": [[{"node": "Get/Create Identity Inbound", "type": "main", "index": 0}]]
+    },
+    "Get/Create Identity Inbound": {
+      "main": [[{"node": "Get/Create Conversation Inbound", "type": "main", "index": 0}]]
+    },
+    "Get/Create Conversation Inbound": {
+      "main": [[{"node": "Insert Message Inbound", "type": "main", "index": 0}]]
+    },
+    "Insert Message Inbound": {
+      "main": [[{"node": "Update Conversation Inbound", "type": "main", "index": 0}]]
+    },
+    "Update Conversation Inbound": {
+      "main": [[{"node": "Respond Inbound OK", "type": "main", "index": 0}]]
+    },
+    "Webhook OpenPhone Send": {
+      "main": [[{"node": "Get Send Context", "type": "main", "index": 0}]]
+    },
+    "Get Send Context": {
+      "main": [[{"node": "Call OpenPhone API", "type": "main", "index": 0}]]
+    },
+    "Call OpenPhone API": {
+      "main": [[{"node": "Insert Outbound Message", "type": "main", "index": 0}]]
+    },
+    "Insert Outbound Message": {
+      "main": [[{"node": "Update Conversation Send", "type": "main", "index": 0}]]
+    },
+    "Update Conversation Send": {
+      "main": [[{"node": "Respond Send OK", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

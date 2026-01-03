@@ -114,6 +114,14 @@ Se porta ocupada: **MATAR O PROCESSO** antes de iniciar. Nunca usar porta altern
 
 ## 2. Arquitetura e Decisões Chave
 
+### Credenciais de Acesso
+
+| Serviço | Usuário/Host | Senha/API Key |
+|---------|--------------|---------------|
+| **App (Vercel)** | joaquimhuelsen@gmail.com | 7HAxL6MWMw |
+| **Servidor SSH** | root@64.23.142.132 | tCjthm7m81c |
+| **n8n API** | https://n8nbackend.thereconquestmap.com | `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YTI4NWQ2ZS1mNzliLTQyOTItYmE5NS1jMTI0OWFjYzUxMWEiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY3NDA0NDM1fQ.pCAoJSBwIcgUUV3uMddYiS8i8euUZN96EYJ6cd4lNcw` |
+
 ### Deploy (Produção)
 - **Frontend:** Vercel - https://integrater.vercel.app
 - **Backend/API:** Digital Ocean Droplet - https://api.thereconquestmap.com
@@ -211,6 +219,24 @@ git pull
 docker compose up --build -d
 docker compose logs -f api  # verificar logs
 ```
+
+### SSH com Senha (Automação via Python)
+
+Windows não tem `sshpass`. Use `paramiko` para SSH com senha:
+
+```python
+import paramiko
+
+ssh = paramiko.SSHClient()
+ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+ssh.connect('64.23.142.132', username='root', password='tCjthm7m81c')
+
+stdin, stdout, stderr = ssh.exec_command('cd /opt/integrater && git pull && docker compose up -d --build')
+print(stdout.read().decode())
+ssh.close()
+```
+
+Ver documentação completa: `docs/api/anotacao-ssh-paramiko-2026-01-03.md`
 
 ## 4. Convenções de Código
 
@@ -499,7 +525,128 @@ npx openapi-typescript http://localhost:8000/openapi.json -o src/api/schema.d.ts
 - Verificar RLS permite SELECT
 - Ver console do browser
 
-## 12. Uso de Subagents (Agentes Especializados)
+## 12. n8n (Orquestrador de Workflows)
+
+O n8n orquestra toda a lógica de negócio (criar identity, conversa, inserir mensagens). Workers e API apenas encaminham eventos para o n8n.
+
+### Acesso à API
+
+```
+URL Base: https://n8nbackend.thereconquestmap.com
+API Key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YTI4NWQ2ZS1mNzliLTQyOTItYmE5NS1jMTI0OWFjYzUxMWEiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY3NDA0NDM1fQ.pCAoJSBwIcgUUV3uMddYiS8i8euUZN96EYJ6cd4lNcw
+```
+
+### Comandos Úteis via curl
+
+```bash
+# Listar workflows
+curl -s -H "X-N8N-API-KEY: <API_KEY>" "https://n8nbackend.thereconquestmap.com/api/v1/workflows"
+
+# Ver workflow específico
+curl -s -H "X-N8N-API-KEY: <API_KEY>" "https://n8nbackend.thereconquestmap.com/api/v1/workflows/<ID>"
+
+# Listar execuções (últimas 10)
+curl -s -H "X-N8N-API-KEY: <API_KEY>" "https://n8nbackend.thereconquestmap.com/api/v1/executions?limit=10"
+
+# Ver execução específica
+curl -s -H "X-N8N-API-KEY: <API_KEY>" "https://n8nbackend.thereconquestmap.com/api/v1/executions/<ID>"
+
+# Ativar workflow
+curl -X PATCH -H "X-N8N-API-KEY: <API_KEY>" -H "Content-Type: application/json" \
+  -d '{"active": true}' "https://n8nbackend.thereconquestmap.com/api/v1/workflows/<ID>"
+```
+
+### Workflows Ativos (Integrater)
+
+| ID | Nome | Função |
+|----|------|--------|
+| `EQx2y1v8lqg30dLN` | Integrater - Telegram/Inbound | Recebe mensagens do Telegram |
+| `kKcqwx9vbAEa9L1l` | Integrater - Telegram/Outbond | Captura mensagens enviadas pelo usuário |
+| `IqbxxdHZp0dYxKj1` | Integrater - Telegram/Send | Envia mensagens via Telegram |
+| `jRzDAgdUCncJ5PUj` | Integrater - Telegram/Sync | Sincroniza histórico de conversas |
+| `YZGHeromO7Pkr4a7` | Integrater - Email/Inbound | Recebe emails |
+| `VzWI2wvVFLb1rYyU` | Integrater - Email/Send | Envia emails |
+| `gFmRfEfAcslRQ1va` | Integrater - Sms/Inbound | Recebe SMS (OpenPhone) |
+| `KIiU67DKVQOfpmFk` | Integrater - Sms/Outbound | Envia SMS (OpenPhone) |
+
+### Webhooks (URLs que recebem eventos)
+
+```
+# Telegram
+https://n8nwebhook.thereconquestmap.com/webhook/telegram/inbound
+https://n8nwebhook.thereconquestmap.com/webhook/telegram/outbound
+https://n8nwebhook.thereconquestmap.com/webhook/telegram/send
+https://n8nwebhook.thereconquestmap.com/webhook/telegram/sync
+
+# Email
+https://n8nwebhook.thereconquestmap.com/webhook/email/inbound
+https://n8nwebhook.thereconquestmap.com/webhook/email/send
+
+# OpenPhone (SMS)
+https://n8nwebhook.thereconquestmap.com/webhook/openphone/inbound
+https://n8nwebhook.thereconquestmap.com/webhook/openphone/send
+```
+
+### Arquitetura com n8n
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   Workers       │     │      n8n        │     │    Supabase     │
+│  (Telegram/     │────▶│  (Orquestra     │────▶│   (Banco de     │
+│   Email)        │     │   lógica)       │     │    Dados)       │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+        │                       │
+        │                       │
+        ▼                       ▼
+┌─────────────────┐     ┌─────────────────┐
+│   API FastAPI   │────▶│  Workers /send  │
+│  (Frontend      │     │  (Envio real)   │
+│   chama)        │     │                 │
+└─────────────────┘     └─────────────────┘
+```
+
+### Fluxo de Mensagem Inbound
+
+1. Worker recebe mensagem (Telegram/Email)
+2. Worker envia para webhook n8n (`/inbound`)
+3. n8n cria/atualiza identity
+4. n8n cria/atualiza conversa
+5. n8n insere mensagem no Supabase
+6. Frontend recebe via Realtime
+
+### Fluxo de Mensagem Outbound (Envio)
+
+1. Frontend chama API `/messages/send`
+2. API envia para webhook n8n (`/send`)
+3. n8n busca dados da conversa
+4. n8n chama Worker `/send` (porta 8001/8002)
+5. Worker envia mensagem real
+6. n8n insere mensagem no Supabase
+
+### Templates de Workflows
+
+Arquivos JSON prontos para importar no n8n:
+- `docs/api/n8n-workflow-telegram.json`
+- `docs/api/n8n-workflow-email.json`
+- `docs/api/n8n-workflow-openphone.json`
+
+### Troubleshooting n8n
+
+**Mensagem não chega:**
+1. Verificar se workflow está ATIVO
+2. Ver execuções recentes: `GET /api/v1/executions?workflowId=<ID>`
+3. Ver logs da execução com erro
+
+**Erro no workflow:**
+1. Acessar painel n8n: https://n8nbackend.thereconquestmap.com
+2. Abrir workflow > Executions
+3. Ver detalhes do erro em cada nó
+
+**Worker não envia para n8n:**
+1. Verificar variável `N8N_WEBHOOK_*` no `.env`
+2. Ver logs do container: `docker logs inbox-telegram-worker`
+
+## 13. Uso de Subagents (Agentes Especializados)
 
 **OBRIGATÓRIO** usar subagents para tarefas complexas. Disponíveis:
 
