@@ -1,0 +1,61 @@
+===========================================
+WORKFLOW: /send
+===========================================
+
+Após o node "Call Worker /send" retornar sucesso, o Worker agora
+retorna os dados do destinatário:
+
+{
+  "success": true,
+  "telegram_msg_id": 12345,
+  "recipient": {
+    "telegram_user_id": 1481095930,
+    "first_name": "João",
+    "last_name": "Silva",
+    "username": "joaosilva",
+    "photo_url": "https://xxx.supabase.co/storage/v1/object/public/avatars/telegram/1481095930.jpg"
+  }
+}
+
+
+===========================================
+NOVO NODE: Update Identity (Send)
+===========================================
+
+Adicione este node ANTES do "Insert Message (Send)" para atualizar
+os dados do contato (nome, foto):
+
+UPDATE contact_identities SET
+  metadata = jsonb_build_object(
+    'first_name', COALESCE(NULLIF('{{ $('Call Worker /send').item.json.recipient.first_name || '' }}', ''), metadata->>'first_name', ''),
+    'last_name', COALESCE(NULLIF('{{ $('Call Worker /send').item.json.recipient.last_name || '' }}', ''), metadata->>'last_name', ''),
+    'username', COALESCE(NULLIF('{{ $('Call Worker /send').item.json.recipient.username || '' }}', ''), metadata->>'username', ''),
+    'avatar_url', COALESCE(NULLIF('{{ $('Call Worker /send').item.json.recipient.photo_url || '' }}', ''), metadata->>'avatar_url', '')
+  ),
+  updated_at = NOW()
+WHERE id = '{{ $('Get Conversation').item.json.primary_identity_id }}'
+RETURNING id, metadata;
+
+
+===========================================
+FLUXO ATUALIZADO
+===========================================
+
+Webhook Send
+    ↓
+Get Conversation
+    ↓
+Get Integration Account
+    ↓
+Call Worker /send
+    ↓
+Send Success?
+    ↓ (true)
+Update Identity (Send)  ← NOVO
+    ↓
+Insert Message (Send)
+    ↓
+Update Conversation (Send)
+    ↓
+Respond Success (Send)
+

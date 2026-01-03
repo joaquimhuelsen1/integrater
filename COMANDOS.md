@@ -52,6 +52,14 @@ docker compose down
 docker compose up -d --build
 ```
 
+tCjthm7m81c
+
+
+supabase
+
+NSVmY5rNjQ6osdZT
+
+
 ### Ver logs
 ```bash
 docker logs inbox-api

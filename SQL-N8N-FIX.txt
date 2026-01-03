@@ -1,0 +1,6 @@
+SELECT ia.id as account_id
+FROM integration_accounts ia
+WHERE ia.workspace_id = '{{ $('Get Conversation').item.json.workspace_id }}'
+  AND ia.type = 'telegram_user'
+  AND ia.is_active = true
+LIMIT 1;

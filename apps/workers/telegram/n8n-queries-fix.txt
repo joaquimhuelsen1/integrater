@@ -1,0 +1,70 @@
+====================================
+NODE: Has Media? (Inbound) - campo value1
+====================================
+
+={{ $('Webhook Inbound').item.json.body.content.media_url }}
+
+
+====================================
+NODE: Insert Message (Inbound)
+====================================
+
+INSERT INTO messages (id, owner_id, conversation_id, integration_account_id, identity_id, channel, direction, text, sent_at, external_message_id, raw_payload)
+VALUES (
+  gen_random_uuid(),
+  '{{ $('Webhook Inbound').item.json.body.owner_id }}',
+  '{{ $('Upsert Conversation (Inbound)').item.json.id }}',
+  '{{ $('Webhook Inbound').item.json.body.account_id }}',
+  '{{ $('Upsert Identity (Inbound)').item.json.id }}',
+  'telegram',
+  'inbound',
+  E'{{ ($('Webhook Inbound').item.json.body.content.text || "").split("'").join("''") }}',
+  '{{ $('Webhook Inbound').item.json.body.timestamp }}',
+  '{{ $('Webhook Inbound').item.json.body.telegram_msg_id }}',
+  '{{ JSON.stringify($('Webhook Inbound').item.json.body.content || {}).split("'").join("''") }}'::jsonb
+)
+ON CONFLICT (conversation_id, external_message_id) DO NOTHING
+RETURNING id, conversation_id, direction, text, sent_at;
+
+
+====================================
+NODE: Increment Unread
+====================================
+
+UPDATE conversations SET
+  unread_count = COALESCE(unread_count, 0) + 1,
+  updated_at = NOW()
+WHERE id = '{{ $('Upsert Conversation (Inbound)').item.json.id }}'
+RETURNING id, unread_count;
+
+
+====================================
+NODE: Upsert Conversation (Inbound)
+(trocar 'closed' por 'resolved')
+====================================
+
+WITH identity AS (
+  SELECT id, owner_id, workspace_id FROM contact_identities
+  WHERE owner_id = '{{ $('Webhook Inbound').item.json.body.owner_id }}'
+    AND type = 'telegram_user'
+    AND value = '{{ $('Webhook Inbound').item.json.body.telegram_user_id }}'
+  LIMIT 1
+)
+INSERT INTO conversations (id, owner_id, workspace_id, primary_identity_id, status, last_channel, last_message_at)
+SELECT
+  COALESCE(
+    (SELECT id FROM conversations WHERE primary_identity_id = identity.id LIMIT 1),
+    gen_random_uuid()
+  ),
+  identity.owner_id,
+  identity.workspace_id,
+  identity.id,
+  'open',
+  'telegram',
+  NOW()
+FROM identity
+ON CONFLICT (primary_identity_id) DO UPDATE SET
+  last_message_at = NOW(),
+  last_channel = 'telegram',
+  status = CASE WHEN conversations.status = 'resolved' THEN 'open' ELSE conversations.status END
+RETURNING id, owner_id, workspace_id, primary_identity_id, status;

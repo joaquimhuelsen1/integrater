@@ -1,0 +1,61 @@
+===========================================
+NODE: Upsert Identity (Inbound)
+===========================================
+
+INSERT INTO contact_identities (id, owner_id, workspace_id, type, value, metadata)
+VALUES (
+  COALESCE(
+    (SELECT id FROM contact_identities 
+     WHERE workspace_id = '{{ $json.body.workspace_id }}' 
+       AND type = 'telegram_user' 
+       AND value = '{{ $json.body.telegram_user_id }}' 
+     LIMIT 1),
+    gen_random_uuid()
+  ),
+  '{{ $json.body.owner_id }}',
+  '{{ $json.body.workspace_id }}',
+  'telegram_user',
+  '{{ $json.body.telegram_user_id }}',
+  '{"first_name": "{{ $json.body.sender.first_name || '' }}", "last_name": "{{ $json.body.sender.last_name || '' }}", "username": "{{ $json.body.sender.username || '' }}", "avatar_url": "{{ $json.body.sender.photo_url || '' }}"}'::jsonb
+)
+ON CONFLICT (workspace_id, type, value) DO UPDATE SET
+  metadata = jsonb_build_object(
+    'first_name', COALESCE(NULLIF('{{ $json.body.sender.first_name || '' }}', ''), contact_identities.metadata->>'first_name'),
+    'last_name', COALESCE(NULLIF('{{ $json.body.sender.last_name || '' }}', ''), contact_identities.metadata->>'last_name'),
+    'username', COALESCE(NULLIF('{{ $json.body.sender.username || '' }}', ''), contact_identities.metadata->>'username'),
+    'avatar_url', COALESCE(NULLIF('{{ $json.body.sender.photo_url || '' }}', ''), contact_identities.metadata->>'avatar_url')
+  ),
+  updated_at = NOW()
+RETURNING id, owner_id, workspace_id, type, value, metadata;
+
+
+===========================================
+NODE: Upsert Conversation (Inbound)
+===========================================
+
+WITH identity AS (
+  SELECT id, owner_id, workspace_id FROM contact_identities
+  WHERE workspace_id = '{{ $('Webhook Inbound').item.json.body.workspace_id }}'
+    AND type = 'telegram_user'
+    AND value = '{{ $('Webhook Inbound').item.json.body.telegram_user_id }}'
+  LIMIT 1
+)
+INSERT INTO conversations (id, owner_id, workspace_id, primary_identity_id, status, last_channel, last_message_at)
+SELECT
+  COALESCE(
+    (SELECT id FROM conversations WHERE workspace_id = identity.workspace_id AND primary_identity_id = identity.id LIMIT 1),
+    gen_random_uuid()
+  ),
+  identity.owner_id,
+  identity.workspace_id,
+  identity.id,
+  'open',
+  'telegram',
+  NOW()
+FROM identity
+ON CONFLICT (primary_identity_id) DO UPDATE SET
+  last_message_at = NOW(),
+  last_channel = 'telegram',
+  status = CASE WHEN conversations.status = 'resolved' THEN 'open' ELSE conversations.status END
+RETURNING id, owner_id, workspace_id, primary_identity_id, status;
+
