@@ -66,13 +66,13 @@ class HealthResponse(BaseModel):
 
 # ============ AUTH ============
 
-async def verify_api_key(x_api_key: str = Header(..., alias="X-API-KEY")):
-    """Verifica API Key no header."""
+async def verify_api_key(x_api_key: str | None = Header(None, alias="X-API-KEY")):
+    """Verifica API Key no header (opcional se EMAIL_WORKER_API_KEY nao configurado)."""
     if not EMAIL_WORKER_API_KEY:
         # Se nao configurou API key, aceita qualquer coisa (dev mode)
         return True
     
-    if x_api_key != EMAIL_WORKER_API_KEY:
+    if not x_api_key or x_api_key != EMAIL_WORKER_API_KEY:
         raise HTTPException(status_code=401, detail="API Key invalida")
     
     return True
