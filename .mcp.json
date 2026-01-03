@@ -1,5 +1,17 @@
 {
   "mcpServers": {
+    "vercel": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "vercel-mcp@latest"
+      ],
+      "env": {
+        "VERCEL_API_KEY": "RwZmijiu43V2FR3XK9FVGCDg"
+      }
+    },
     "n8n": {
       "command": "cmd",
       "args": [
