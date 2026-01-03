@@ -27,6 +27,7 @@ import {
 import { ContactSelector } from "./contact-selector"
 import { DealTimeline } from "./deal-timeline"
 import { ProductSelector } from "./product-selector"
+import { apiFetch } from "@/lib/api"
 
 interface Stage {
   id: string
@@ -141,8 +142,6 @@ export function DealModal({
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [isEditingValue, setIsEditingValue] = useState(false)
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-
   const isNew = !dealId
   const isWon = !!deal?.won_at
   const isLost = !!deal?.lost_at
@@ -163,10 +162,10 @@ export function DealModal({
     setIsLoading(true)
     try {
       const [dealRes, tagsRes, filesRes, allTagsRes] = await Promise.all([
-        fetch(`${API_URL}/deals/${dealId}`),
-        fetch(`${API_URL}/deals/${dealId}/tags`),
-        fetch(`${API_URL}/deals/${dealId}/files`),
-        fetch(`${API_URL}/deal-tags`),
+        apiFetch(`/deals/${dealId}`),
+        apiFetch(`/deals/${dealId}/tags`),
+        apiFetch(`/deals/${dealId}/files`),
+        apiFetch(`/deal-tags`),
       ])
 
       if (dealRes.ok) {
@@ -200,7 +199,7 @@ export function DealModal({
     } finally {
       setIsLoading(false)
     }
-  }, [API_URL, dealId])
+  }, [dealId])
 
   useEffect(() => {
     if (dealId) {
@@ -230,12 +229,11 @@ export function DealModal({
         contact_id: contactId,
       }
 
-      const url = isNew ? `${API_URL}/deals` : `${API_URL}/deals/${dealId}`
+      const url = isNew ? `/deals` : `/deals/${dealId}`
       const method = isNew ? "POST" : "PATCH"
 
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method,
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
 
@@ -257,7 +255,7 @@ export function DealModal({
     if (!dealId) return
 
     try {
-      const res = await fetch(`${API_URL}/deals/${dealId}/win`, { method: "POST" })
+      const res = await apiFetch(`/deals/${dealId}/win`, { method: "POST" })
       if (res.ok) {
         onSave()
       }
@@ -270,7 +268,7 @@ export function DealModal({
     if (!dealId) return
 
     try {
-      const res = await fetch(`${API_URL}/deals/${dealId}/lose`, {
+      const res = await apiFetch(`/deals/${dealId}/lose`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason: lostReason || null }),
@@ -287,7 +285,7 @@ export function DealModal({
     if (!dealId) return
 
     try {
-      const res = await fetch(`${API_URL}/deals/${dealId}/reopen`, { method: "POST" })
+      const res = await apiFetch(`/deals/${dealId}/reopen`, { method: "POST" })
       if (res.ok) {
         await loadDeal()
       }
@@ -300,7 +298,7 @@ export function DealModal({
     if (!dealId || !confirm("Tem certeza que deseja arquivar este deal?")) return
 
     try {
-      const res = await fetch(`${API_URL}/deals/${dealId}`, { method: "DELETE" })
+      const res = await apiFetch(`/deals/${dealId}`, { method: "DELETE" })
       if (res.ok) {
         onSave()
       }
@@ -315,7 +313,7 @@ export function DealModal({
 
     setIsAddingProduct(true)
     try {
-      const res = await fetch(`${API_URL}/deals/${dealId}/products`, {
+      const res = await apiFetch(`/deals/${dealId}/products`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ product_id: catalogProduct.id }),
@@ -339,7 +337,7 @@ export function DealModal({
 
     setIsAddingProduct(true)
     try {
-      const res = await fetch(`${API_URL}/deals/${dealId}/products`, {
+      const res = await apiFetch(`/deals/${dealId}/products`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -367,7 +365,7 @@ export function DealModal({
     if (!dealId) return
 
     try {
-      const res = await fetch(`${API_URL}/deals/${dealId}/products/${productId}`, { method: "DELETE" })
+      const res = await apiFetch(`/deals/${dealId}/products/${productId}`, { method: "DELETE" })
       if (res.ok) {
         setProducts((prev) => prev.filter((p) => p.id !== productId))
         setProductsTotal((prev) => prev - productValue)
@@ -382,7 +380,7 @@ export function DealModal({
     if (!dealId) return
 
     try {
-      await fetch(`${API_URL}/deals/${dealId}/tags/${tagId}`, { method: "POST" })
+      await apiFetch(`/deals/${dealId}/tags/${tagId}`, { method: "POST" })
       const tagToAdd = allTags.find((t) => t.id === tagId)
       if (tagToAdd) {
         setTags((prev) => [...prev, tagToAdd])
@@ -397,7 +395,7 @@ export function DealModal({
     if (!dealId) return
 
     try {
-      await fetch(`${API_URL}/deals/${dealId}/tags/${tagId}`, { method: "DELETE" })
+      await apiFetch(`/deals/${dealId}/tags/${tagId}`, { method: "DELETE" })
       setTags((prev) => prev.filter((t) => t.id !== tagId))
     } catch (error) {
       console.error("Erro ao remover tag:", error)
@@ -428,7 +426,7 @@ export function DealModal({
     if (!dealId) return
 
     try {
-      await fetch(`${API_URL}/deals/${dealId}/files/${fileId}`, { method: "DELETE" })
+      await apiFetch(`/deals/${dealId}/files/${fileId}`, { method: "DELETE" })
       setFiles((prev) => prev.filter((f) => f.id !== fileId))
     } catch (error) {
       console.error("Erro ao remover arquivo:", error)
@@ -441,7 +439,7 @@ export function DealModal({
 
     setIsSavingNote(true)
     try {
-      const res = await fetch(`${API_URL}/deals/${dealId}/activities`, {
+      const res = await apiFetch(`/deals/${dealId}/activities`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

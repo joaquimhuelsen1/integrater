@@ -15,6 +15,7 @@ import {
   Sparkles,
   Send,
 } from "lucide-react"
+import { apiFetch } from "@/lib/api"
 
 interface Activity {
   id: string
@@ -46,11 +47,9 @@ export function DealTimeline({ dealId, isClosed, filterType }: DealTimelineProps
   const [taskDueDate, setTaskDueDate] = useState("")
   const [isSaving, setIsSaving] = useState(false)
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-
   const loadActivities = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/deals/${dealId}/activities`)
+      const res = await apiFetch(`/deals/${dealId}/activities`)
       if (res.ok) {
         const data = await res.json()
         setActivities(data)
@@ -60,7 +59,7 @@ export function DealTimeline({ dealId, isClosed, filterType }: DealTimelineProps
     } finally {
       setIsLoading(false)
     }
-  }, [API_URL, dealId])
+  }, [dealId])
 
   useEffect(() => {
     loadActivities()
@@ -71,7 +70,7 @@ export function DealTimeline({ dealId, isClosed, filterType }: DealTimelineProps
 
     setIsSaving(true)
     try {
-      const res = await fetch(`${API_URL}/deals/${dealId}/activities`, {
+      const res = await apiFetch(`/deals/${dealId}/activities`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -98,7 +97,7 @@ export function DealTimeline({ dealId, isClosed, filterType }: DealTimelineProps
 
     setIsSaving(true)
     try {
-      const res = await fetch(`${API_URL}/deals/${dealId}/activities`, {
+      const res = await apiFetch(`/deals/${dealId}/activities`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -124,11 +123,10 @@ export function DealTimeline({ dealId, isClosed, filterType }: DealTimelineProps
 
   const handleToggleTask = async (activity: Activity) => {
     try {
-      const res = await fetch(
-        `${API_URL}/deals/${dealId}/activities/${activity.id}`,
+      const res = await apiFetch(
+        `/deals/${dealId}/activities/${activity.id}`,
         {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ is_completed: !activity.is_completed }),
         }
       )

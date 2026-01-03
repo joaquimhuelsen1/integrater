@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import { Search, User, X, Check, Loader2 } from "lucide-react"
+import { apiFetch } from "@/lib/api"
 
 interface Contact {
   id: string
@@ -32,8 +33,6 @@ export function ContactSelector({
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-
   // Busca contatos quando search muda
   useEffect(() => {
     const searchContacts = async () => {
@@ -44,7 +43,7 @@ export function ContactSelector({
           params.set("search", search.trim())
         }
 
-        const res = await fetch(`${API_URL}/contacts?${params}`)
+        const res = await apiFetch(`/contacts?${params}`)
         if (res.ok) {
           const data = await res.json()
           setContacts(data)
@@ -59,7 +58,7 @@ export function ContactSelector({
 
     const debounce = setTimeout(searchContacts, 300)
     return () => clearTimeout(debounce)
-  }, [API_URL, search])
+  }, [search])
 
   // Fecha dropdown ao clicar fora
   useEffect(() => {

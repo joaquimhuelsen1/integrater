@@ -19,6 +19,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
+import { apiFetch } from "@/lib/api"
 
 interface Pipeline {
   id: string
@@ -171,8 +172,6 @@ export function PipelineSettings({
   const [isLoadingStages, setIsLoadingStages] = useState(false)
   const [newStageName, setNewStageName] = useState("")
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-
   // Drag & drop sensors
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -188,7 +187,7 @@ export function PipelineSettings({
   const loadStages = async (pipelineId: string) => {
     setIsLoadingStages(true)
     try {
-      const res = await fetch(`${API_URL}/pipelines/${pipelineId}/stages`)
+      const res = await apiFetch(`/pipelines/${pipelineId}/stages`)
       if (res.ok) {
         const data = await res.json()
         setStages(data)
@@ -205,7 +204,7 @@ export function PipelineSettings({
 
     setIsCreating(true)
     try {
-      const res = await fetch(`${API_URL}/pipelines?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/pipelines?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newPipelineName.trim() }),
@@ -226,7 +225,7 @@ export function PipelineSettings({
     if (!confirm("Tem certeza que deseja arquivar este pipeline?")) return
 
     try {
-      const res = await fetch(`${API_URL}/pipelines/${pipelineId}`, {
+      const res = await apiFetch(`/pipelines/${pipelineId}`, {
         method: "DELETE",
       })
 
@@ -242,7 +241,7 @@ export function PipelineSettings({
     if (!newStageName.trim() || !selectedPipelineId) return
 
     try {
-      const res = await fetch(`${API_URL}/pipelines/${selectedPipelineId}/stages`, {
+      const res = await apiFetch(`/pipelines/${selectedPipelineId}/stages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newStageName.trim() }),
@@ -262,7 +261,7 @@ export function PipelineSettings({
     if (!selectedPipelineId) return
 
     try {
-      const res = await fetch(`${API_URL}/pipelines/${selectedPipelineId}/stages/${stageId}`, {
+      const res = await apiFetch(`/pipelines/${selectedPipelineId}/stages/${stageId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
@@ -282,7 +281,7 @@ export function PipelineSettings({
     if (!confirm("Tem certeza que deseja remover esta etapa?")) return
 
     try {
-      const res = await fetch(`${API_URL}/pipelines/${selectedPipelineId}/stages/${stageId}`, {
+      const res = await apiFetch(`/pipelines/${selectedPipelineId}/stages/${stageId}`, {
         method: "DELETE",
       })
 
@@ -325,7 +324,7 @@ export function PipelineSettings({
     // Send to API
     try {
       const orderedIds = newStages.map((s) => s.id)
-      const res = await fetch(`${API_URL}/pipelines/${selectedPipelineId}/stages/reorder`, {
+      const res = await apiFetch(`/pipelines/${selectedPipelineId}/stages/reorder`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ stage_ids: orderedIds }),

@@ -1,5 +1,18 @@
 {
   "mcpServers": {
+    "n8n": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "mcp-n8n@latest"
+      ],
+      "env": {
+        "N8N_BASE_URL": "https://n8nbackend.thereconquestmap.com",
+        "N8N_API_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YTI4NWQ2ZS1mNzliLTQyOTItYmE5NS1jMTI0OWFjYzUxMWEiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY3NDA0NDM1fQ.pCAoJSBwIcgUUV3uMddYiS8i8euUZN96EYJ6cd4lNcw"
+      }
+    },
     "supabase": {
       "command": "cmd",
       "args": [

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { X, Plus, AlertTriangle } from "lucide-react"
+import { apiFetch } from "@/lib/api"
 
 interface LossReason {
   id: string
@@ -35,11 +36,9 @@ export function LossReasonModal({
   const [showNewReason, setShowNewReason] = useState(false)
   const [newReasonName, setNewReasonName] = useState("")
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-
   const loadReasons = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/loss-reasons?pipeline_id=${pipelineId}`)
+      const res = await apiFetch(`/loss-reasons?pipeline_id=${pipelineId}`)
       if (res.ok) {
         const data = await res.json()
         setReasons(data)
@@ -49,7 +48,7 @@ export function LossReasonModal({
     } finally {
       setIsLoading(false)
     }
-  }, [API_URL, pipelineId])
+  }, [pipelineId])
 
   useEffect(() => {
     loadReasons()
@@ -59,7 +58,7 @@ export function LossReasonModal({
     if (!newReasonName.trim()) return
 
     try {
-      const res = await fetch(`${API_URL}/loss-reasons`, {
+      const res = await apiFetch(`/loss-reasons`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
