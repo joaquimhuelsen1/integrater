@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { ArrowLeft, Plus, Trash2, Wifi, WifiOff, Sparkles, Edit2, RotateCcw, Play, Save, X, ChevronDown, ChevronUp, MessageSquare, Mail, AlertCircle, CheckCircle, Loader2, Cpu, Settings2, RefreshCw, Clock } from "lucide-react"
+import { ArrowLeft, Plus, Trash2, Wifi, WifiOff, Sparkles, Edit2, RotateCcw, Play, Save, X, ChevronDown, ChevronUp, MessageSquare, Mail, AlertCircle, CheckCircle, Loader2, Cpu, Settings2, RefreshCw, Clock, Users } from "lucide-react"
 import Link from "next/link"
 import { TelegramAuthFlow } from "./telegram-auth-flow"
 import { WorkspaceSelector } from "./workspace-selector"
@@ -110,6 +110,8 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
   const [showAddOpenPhone, setShowAddOpenPhone] = useState(false)
   const [newOpenPhone, setNewOpenPhone] = useState({ label: "", phone_number: "", api_key: "" })
   const [addingOpenPhone, setAddingOpenPhone] = useState(false)
+  const [syncingOpenPhoneContacts, setSyncingOpenPhoneContacts] = useState<string | null>(null)
+  const [openPhoneSyncResult, setOpenPhoneSyncResult] = useState<{ synced: number; skipped: number; errors: number } | null>(null)
 
   // Email state
   const [emailAccounts, setEmailAccounts] = useState<EmailAccount[]>([])
@@ -371,6 +373,28 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
       }
     } catch {
       setError("Erro ao remover conta")
+    }
+  }
+
+  const syncOpenPhoneContacts = async (accountId: string) => {
+    if (!currentWorkspace) return
+    setSyncingOpenPhoneContacts(accountId)
+    setOpenPhoneSyncResult(null)
+    try {
+      const res = await apiFetch(`/openphone/contacts/sync?account_id=${accountId}&workspace_id=${currentWorkspace.id}`, {
+        method: "POST",
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setOpenPhoneSyncResult({ synced: data.synced, skipped: data.skipped, errors: data.errors })
+      } else {
+        const err = await res.json()
+        setError(err.detail || "Erro ao sincronizar contatos")
+      }
+    } catch {
+      setError("Erro ao sincronizar contatos")
+    } finally {
+      setSyncingOpenPhoneContacts(null)
     }
   }
 
@@ -775,14 +799,35 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
                         <p className="text-sm text-zinc-500">{account.phone_number}</p>
                       </div>
                     </div>
-                    <button
-                      onClick={() => deleteOpenPhoneAccount(account.id)}
-                      className="rounded-lg p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => syncOpenPhoneContacts(account.id)}
+                        disabled={syncingOpenPhoneContacts !== null}
+                        className="flex items-center gap-1 rounded bg-blue-500 px-2 py-1 text-xs text-white hover:bg-blue-600 disabled:opacity-50"
+                        title="Sincronizar nomes dos contatos do OpenPhone"
+                      >
+                        {syncingOpenPhoneContacts === account.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Users className="h-3 w-3" />
+                        )}
+                        Sync Contatos
+                      </button>
+                      <button
+                        onClick={() => deleteOpenPhoneAccount(account.id)}
+                        className="rounded-lg p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                 ))}
+                {openPhoneSyncResult && (
+                  <div className={`mt-2 p-2 rounded text-sm ${openPhoneSyncResult.errors === 0 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'}`}>
+                    Sync: {openPhoneSyncResult.synced} atualizados, {openPhoneSyncResult.skipped} ignorados
+                    {openPhoneSyncResult.errors > 0 && `, ${openPhoneSyncResult.errors} erros`}
+                  </div>
+                )}
               </div>
             )}
 
