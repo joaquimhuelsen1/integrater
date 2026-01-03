@@ -1031,10 +1031,25 @@ class TelegramWorker:
                 if msg.date.replace(tzinfo=timezone.utc) < three_months_ago:
                     continue
 
-                # Processa MessageService para grupos (join/leave)
+            # Processa MessageService para grupos (join/leave)
                 if isinstance(msg, MessageService) and is_group:
                     service_data = await self._process_service_message(msg)
                     if service_data:
+                        # Busca nome do usuário que fez a ação
+                        sender_telegram_id = service_data["user_ids"][0] if service_data.get("user_ids") else None
+                        sender_name = None
+                        if sender_telegram_id:
+                            try:
+                                sender_entity = await client.get_entity(sender_telegram_id)
+                                if sender_entity:
+                                    sender_name = getattr(sender_entity, 'first_name', '') or ''
+                                    if getattr(sender_entity, 'last_name', None):
+                                        sender_name += f" {sender_entity.last_name}"
+                                    sender_name = sender_name.strip()
+                                    print(f"[SYNC] Service message user {sender_telegram_id} = {sender_name}")
+                            except Exception as e:
+                                print(f"[SYNC] Erro ao buscar nome do user {sender_telegram_id}: {e}")
+                        
                         messages_batch.append({
                             "id": str(uuid4()),
                             "telegram_msg_id": msg.id,
@@ -1043,8 +1058,8 @@ class TelegramWorker:
                             "direction": "inbound",
                             "message_type": "service",
                             "service_event": service_data,
-                            "sender_telegram_id": service_data["user_ids"][0] if service_data.get("user_ids") else None,
-                            "sender_name": None,
+                            "sender_telegram_id": sender_telegram_id,
+                            "sender_name": sender_name,
                         })
                     continue
 
