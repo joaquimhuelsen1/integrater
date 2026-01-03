@@ -259,6 +259,9 @@ class EmailWorker:
         info = self.account_info[acc_id]
 
         try:
+            # Re-seleciona INBOX para ver novos emails (IMAP nao notifica automaticamente)
+            client.select_folder("INBOX")
+            
             # Busca emails com UID maior que o ultimo processado
             last_uid = info.get("last_uid", 0)
             new_messages = client.search(["UID", f"{last_uid + 1}:*"])
