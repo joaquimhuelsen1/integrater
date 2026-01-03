@@ -107,3 +107,18 @@ Tarefas relacionadas ao backend FastAPI (apps/api).
 **Arquivos:**
 - `apps/api/app/routers/messages.py:130-197` - lógica de envio Telegram
 - `apps/api/.env.example` - variáveis TELEGRAM_WORKER_URL e WORKER_API_KEY
+
+#### [API-009] Sincronização de Contatos OpenPhone ✅
+**Data:** 2026-01-03
+**Contexto:** OpenPhone não envia nome do contato nos webhooks, apenas telefone. Precisamos sincronizar contatos para exibir nomes no inbox.
+**Resultado:** Endpoint POST /openphone/contacts/sync que:
+1. Busca conta OpenPhone e valida ownership
+2. Chama GET https://api.openphone.com/v1/contacts
+3. Para cada contato, atualiza metadata.display_name na contact_identities correspondente
+**Endpoints:**
+- POST /openphone/contacts/sync - sincroniza contatos (params: account_id, workspace_id)
+**Response:** { synced: int, skipped: int, errors: int }
+**Arquivos:**
+- `apps/api/app/routers/openphone.py:283-398` - endpoint sync
+**Referências:**
+- Anotação: `docs/api/anotacao-openphone-contacts-sync-2026-01-03.md`

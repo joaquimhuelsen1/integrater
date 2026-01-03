@@ -10,6 +10,10 @@ SEGURANCA:
 - Webhooks validam assinatura HMAC-SHA256
 - Inputs validados com regex E.164
 - Limite de tamanho em conteudo SMS
+
+SYNC CONTATOS:
+- POST /openphone/contacts/sync busca contatos do OpenPhone
+- Atualiza contact_identities com nomes dos contatos
 """
 
 import logging
@@ -26,6 +30,7 @@ import hashlib
 
 from ..deps import get_supabase, get_current_user_id
 from ..config import get_settings
+from ..utils.crypto import encrypt, decrypt
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +91,13 @@ class SendSMSResponse(BaseModel):
     """Response do envio SMS."""
     message_id: str
     status: str
+
+
+class ContactSyncResponse(BaseModel):
+    """Response da sincronização de contatos."""
+    synced: int
+    skipped: int
+    errors: int
 
 
 # --- Helper Functions ---
@@ -186,8 +198,6 @@ async def create_account(
     db: Client = Depends(get_supabase),
 ):
     """Cadastra conta OpenPhone."""
-    from ..utils.crypto import encrypt
-
     encrypted_key = encrypt(request.api_key)
 
     account_id = uuid4()
@@ -258,6 +268,134 @@ async def delete_account(
     return {"success": True}
 
 
+# --- Contacts Sync ---
+
+@router.post("/contacts/sync", response_model=ContactSyncResponse)
+async def sync_contacts(
+    account_id: UUID,
+    workspace_id: UUID,
+    owner_id: UUID = Depends(get_current_user_id),
+    db: Client = Depends(get_supabase),
+):
+    """
+    Sincroniza contatos do OpenPhone para contact_identities.
+    
+    Busca todos os contatos da conta OpenPhone e atualiza metadata.display_name
+    nas identidades de telefone correspondentes.
+    """
+    # 1. Buscar conta OpenPhone e validar ownership
+    result = db.table("integration_accounts").select("*").eq(
+        "id", str(account_id)
+    ).eq("owner_id", str(owner_id)).eq("type", "openphone").single().execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Conta OpenPhone nao encontrada")
+
+    account = result.data
+    api_key = decrypt(account["secrets_encrypted"])
+
+    # 2. Buscar contatos do OpenPhone
+    synced = 0
+    skipped = 0
+    errors = 0
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.get(
+                "https://api.openphone.com/v1/contacts",
+                headers={
+                    "Authorization": api_key,
+                    "Content-Type": "application/json",
+                },
+            )
+
+        if response.status_code != 200:
+            logger.error(f"Erro ao buscar contatos OpenPhone: {response.status_code} - {response.text}")
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Erro OpenPhone: {response.text}"
+            )
+
+        contacts_data = response.json().get("data", [])
+        logger.info(f"OpenPhone retornou {len(contacts_data)} contatos")
+
+        # 3. Processar cada contato
+        for contact in contacts_data:
+            try:
+                default_fields = contact.get("defaultFields", {})
+                first_name = default_fields.get("firstName", "")
+                last_name = default_fields.get("lastName", "")
+                company = default_fields.get("company", "")
+                phone_numbers = default_fields.get("phoneNumbers", [])
+
+                # Montar display_name: nome completo ou empresa
+                display_name = f"{first_name} {last_name}".strip()
+                if not display_name and company:
+                    display_name = company
+                
+                if not display_name:
+                    skipped += 1
+                    continue
+
+                if not phone_numbers:
+                    skipped += 1
+                    continue
+
+                # Atualizar cada número de telefone
+                for phone_obj in phone_numbers:
+                    phone_value = phone_obj.get("value", "")
+                    if not phone_value:
+                        continue
+
+                    # Normalizar telefone (garantir formato E.164)
+                    phone_normalized = phone_value.strip()
+                    if not phone_normalized.startswith("+"):
+                        phone_normalized = f"+{phone_normalized}"
+
+                    # Buscar identity existente
+                    identity_result = db.table("contact_identities").select("id, metadata").eq(
+                        "workspace_id", str(workspace_id)
+                    ).eq("type", "phone").eq("value", phone_normalized).execute()
+
+                    if identity_result.data:
+                        # Atualizar metadata com display_name
+                        identity = identity_result.data[0]
+                        metadata = identity.get("metadata", {}) or {}
+                        metadata["display_name"] = display_name
+                        if company:
+                            metadata["company"] = company
+
+                        db.table("contact_identities").update({
+                            "metadata": metadata
+                        }).eq("id", identity["id"]).execute()
+
+                        synced += 1
+                        logger.debug(f"Atualizado: {phone_normalized} -> {display_name}")
+                    else:
+                        # Identity não existe ainda, skip
+                        skipped += 1
+
+            except Exception as e:
+                logger.error(f"Erro ao processar contato: {e}")
+                errors += 1
+
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Timeout ao conectar com OpenPhone")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao sincronizar contatos: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
+
+    logger.info(f"Sync concluido: {synced} sincronizados, {skipped} ignorados, {errors} erros")
+    
+    return ContactSyncResponse(
+        synced=synced,
+        skipped=skipped,
+        errors=errors,
+    )
+
+
 # --- Send SMS (mantido para compatibilidade - use messages.py para envio via n8n) ---
 
 @router.post("/send", response_model=SendSMSResponse)
@@ -268,8 +406,6 @@ async def send_sms(
     db: Client = Depends(get_supabase),
 ):
     """Envia SMS via OpenPhone (direto - para uso administrativo)."""
-    from ..utils.crypto import decrypt
-
     result = db.table("integration_accounts").select("*").eq(
         "id", str(account_id)
     ).eq("owner_id", str(owner_id)).eq("type", "openphone").single().execute()
