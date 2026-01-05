@@ -293,6 +293,11 @@ class TelegramWorker:
             async def handler_new_message(event, _acc_id=acc_id, _owner_id=owner_id):
                 await self._handle_new_message_fallback(_acc_id, _owner_id, event)
 
+            # Handler para eventos de chat (join/leave) - IMPORTANTE PARA GRUPOS
+            @client.on(events.ChatAction)
+            async def handler_chat_action(event, _acc_id=acc_id, _owner_id=owner_id):
+                await self._handle_chat_action(_acc_id, _owner_id, event)
+
             # Presence - MANTÉM NO WORKER (direto Supabase)
             @client.on(events.UserUpdate)
             async def handler_user_update(event, _acc_id=acc_id, _owner_id=owner_id):
@@ -866,6 +871,101 @@ class TelegramWorker:
             import traceback
             print(f"[FALLBACK] Erro: {e}")
             traceback.print_exc()
+
+    async def _handle_chat_action(self, acc_id: str, owner_id: str, event):
+        """Handler específico para eventos de chat (join/leave) - TEMPO REAL."""
+        try:
+            workspace_id = self.account_info.get(acc_id, {}).get("workspace_id")
+            client = self.clients[acc_id]
+            
+            chat = await event.get_chat()
+            is_group = isinstance(chat, (Chat, Channel))
+            
+            if not is_group:
+                return
+            
+            # Log detalhado
+            action_type = "unknown"
+            user_ids = []
+            
+            if event.user_joined:
+                action_type = "join"
+                user_ids = [event.user_id] if event.user_id else []
+            elif event.user_added:
+                action_type = "added"
+                user_ids = event.user_ids if hasattr(event, 'user_ids') else [event.user_id]
+            elif event.user_left:
+                action_type = "leave"
+                user_ids = [event.user_id] if event.user_id else []
+            elif event.user_kicked:
+                action_type = "kicked"
+                user_ids = [event.user_id] if event.user_id else []
+            
+            print(f"[CHAT-ACTION] {action_type} em grupo {chat.id} ({getattr(chat, 'title', 'unknown')}): users={user_ids}")
+            
+            if not user_ids:
+                return
+            
+            # Prepara dados do grupo
+            group_data = await self._get_group_data(client, chat)
+            
+            # Busca dados do usuário que entrou/saiu
+            sender_data = None
+            action_user_id = user_ids[0] if user_ids else None
+            action_user_name = None
+            
+            if action_user_id:
+                try:
+                    user_entity = await client.get_entity(action_user_id)
+                    if user_entity:
+                        first_name = getattr(user_entity, 'first_name', '') or ''
+                        last_name = getattr(user_entity, 'last_name', '') or ''
+                        action_user_name = f"{first_name} {last_name}".strip()
+                        sender_data = {
+                            "telegram_user_id": action_user_id,
+                            "first_name": first_name,
+                            "last_name": last_name if last_name else None,
+                            "username": getattr(user_entity, 'username', None),
+                        }
+                        print(f"[CHAT-ACTION] User {action_user_id} = {action_user_name}")
+                except Exception as e:
+                    print(f"[CHAT-ACTION] Erro ao buscar user {action_user_id}: {e}")
+            
+            # Monta service_data
+            service_data = {
+                "service_type": action_type,
+                "user_ids": user_ids,
+                "text": f"{action_user_name or action_user_id} {action_type}",
+                "action_user_name": action_user_name,
+            }
+            
+            content = {
+                "text": service_data.get("text"),
+                "service_event": service_data,
+            }
+            
+            # Envia para n8n
+            await notify_inbound_message(
+                account_id=acc_id,
+                owner_id=owner_id,
+                workspace_id=workspace_id,
+                telegram_user_id=chat.id,
+                telegram_msg_id=event.action_message.id if event.action_message else 0,
+                sender=sender_data,
+                content=content,
+                timestamp=datetime.now(timezone.utc),
+                is_group=True,
+                group_info=group_data,
+                message_type="service",
+            )
+            
+            print(f"[CHAT-ACTION] Enviado para n8n: {action_type} user={action_user_id} group={chat.id}")
+            
+        except Exception as e:
+            import traceback
+            print(f"[CHAT-ACTION] Erro: {e}")
+            traceback.print_exc()
+
     # =============================================
     # PRESENCE - MANTÉM NO WORKER (direto Supabase)
     # =============================================
