@@ -31,9 +31,17 @@ async def send_message(
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
 
     conv = conv_result.data
-    channel = data.channel.value if data.channel else conv.get("last_channel", "telegram")
     
-    print(f"[DEBUG] send_message: channel={channel}, data.channel={data.channel}, last_channel={conv.get('last_channel')}")
+    # Priorizar last_channel da conversa (mais confiável que channel do frontend)
+    last_channel = conv.get("last_channel")
+    if last_channel:
+        channel = last_channel
+    elif data.channel:
+        channel = data.channel.value
+    else:
+        channel = "telegram"
+    
+    print(f"[DEBUG] send_message: channel={channel}, data.channel={data.channel}, last_channel={last_channel}")
 
     # ============================================
     # TELEGRAM: n8n faz tudo (não insere no banco)
