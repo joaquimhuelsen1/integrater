@@ -32,6 +32,8 @@ async def send_message(
 
     conv = conv_result.data
     channel = data.channel.value if data.channel else conv.get("last_channel", "telegram")
+    
+    print(f"[DEBUG] send_message: channel={channel}, data.channel={data.channel}, last_channel={conv.get('last_channel')}")
 
     # ============================================
     # TELEGRAM: n8n faz tudo (não insere no banco)
