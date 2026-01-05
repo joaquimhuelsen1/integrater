@@ -446,6 +446,113 @@ async def send_sms(
     )
 
 
+# --- Endpoint interno para n8n enviar SMS ---
+
+class InternalSendSMSRequest(BaseModel):
+    """Request interno para n8n enviar SMS."""
+    conversation_id: str
+    text: str = Field(..., min_length=1, max_length=1600)
+    message_id: Optional[str] = None  # ID do frontend para evitar duplicata
+
+
+class InternalSendSMSResponse(BaseModel):
+    """Response interno para n8n."""
+    status: str
+    external_id: str
+    from_phone: str
+    to_phone: str
+
+
+@router.post("/internal/send", response_model=InternalSendSMSResponse)
+async def internal_send_sms(
+    request: InternalSendSMSRequest,
+    db: Client = Depends(get_supabase),
+    x_api_key: Optional[str] = Header(None, alias="X-API-KEY"),
+):
+    """
+    Endpoint interno para n8n enviar SMS.
+    
+    Descriptografa a API key do OpenPhone e envia a mensagem.
+    Autenticado via X-API-KEY (mesmo do n8n webhook).
+    """
+    # Validar API key do n8n
+    expected_key = N8N_API_KEY
+    if not expected_key or x_api_key != expected_key:
+        raise HTTPException(status_code=401, detail="API key invalida")
+    
+    # Buscar conversa
+    conv_result = db.table("conversations").select(
+        "id, owner_id, workspace_id, primary_identity_id"
+    ).eq("id", request.conversation_id).single().execute()
+    
+    if not conv_result.data:
+        raise HTTPException(status_code=404, detail="Conversa nao encontrada")
+    
+    conv = conv_result.data
+    
+    # Buscar identity (telefone destino)
+    identity_result = db.table("contact_identities").select(
+        "value"
+    ).eq("id", conv["primary_identity_id"]).single().execute()
+    
+    if not identity_result.data:
+        raise HTTPException(status_code=404, detail="Identity nao encontrada")
+    
+    to_phone = identity_result.data["value"]
+    
+    # Buscar conta OpenPhone
+    account_result = db.table("integration_accounts").select(
+        "id, config, secrets_encrypted"
+    ).eq("workspace_id", conv["workspace_id"]).eq(
+        "type", "openphone"
+    ).eq("is_active", True).limit(1).execute()
+    
+    if not account_result.data:
+        raise HTTPException(status_code=404, detail="Conta OpenPhone nao encontrada")
+    
+    account = account_result.data[0]
+    from_phone = account["config"]["phone_number"]
+    secrets_encrypted = account["secrets_encrypted"]
+    account_id = account["id"]
+    
+    # Descriptografar API key
+    api_key = decrypt(secrets_encrypted)
+    
+    # Enviar SMS via OpenPhone API
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(
+            "https://api.openphone.com/v1/messages",
+            headers={
+                "Authorization": api_key,
+                "Content-Type": "application/json",
+            },
+            json={
+                "from": from_phone,
+                "to": [to_phone],
+                "content": request.text,
+            },
+        )
+    
+    if response.status_code not in (200, 201, 202):
+        logger.error(f"Erro OpenPhone API: {response.status_code} {response.text}")
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=f"Erro OpenPhone: {response.text}"
+        )
+    
+    resp_data = response.json().get("data", {})
+    external_id = resp_data.get("id", str(uuid4()))
+    
+    logger.info(f"SMS enviado: {from_phone} -> {to_phone}, external_id={external_id}")
+    
+    return InternalSendSMSResponse(
+        status="ok",
+        external_id=external_id,
+        from_phone=from_phone,
+        to_phone=to_phone,
+    )
+
+
 # --- Webhooks - Encaminham para n8n ---
 
 @router.post("/webhook/inbound")
