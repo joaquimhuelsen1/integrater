@@ -95,6 +95,8 @@ export function ApiSettings({ workspaceId, workspaceName, pipelines, stages, sel
   const [expandedColor, setExpandedColor] = useState<string | null>(null)
   const [editingTagId, setEditingTagId] = useState<string | null>(null)
   const [editingTagName, setEditingTagName] = useState("")
+  const [editingTagColor, setEditingTagColor] = useState<string | null>(null)
+  const [colorPickerTagId, setColorPickerTagId] = useState<string | null>(null)
 
   // Load API key do workspace
   useEffect(() => {
@@ -196,6 +198,21 @@ export function ApiSettings({ workspaceId, workspaceName, pipelines, stages, sel
       }
     } catch (error) {
       console.error("Erro ao atualizar tag:", error)
+    }
+  }
+
+  const handleUpdateTagColor = async (tagId: string, color: string) => {
+    try {
+      const res = await apiFetch(`/deal-tags/${tagId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ color })
+      })
+      if (res.ok) {
+        setTags(tags.map(t => t.id === tagId ? { ...t, color } : t))
+        setColorPickerTagId(null)
+      }
+    } catch (error) {
+      console.error("Erro ao atualizar cor da tag:", error)
     }
   }
 
@@ -540,10 +557,38 @@ export function ApiSettings({ workspaceId, workspaceName, pipelines, stages, sel
                 key={tag.id}
                 className="flex items-center gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900"
               >
-                <div
-                  className="h-4 w-4 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: tag.color }}
-                />
+                {/* Color picker para tag existente */}
+                <div className="relative">
+                  <button
+                    onClick={() => setColorPickerTagId(colorPickerTagId === tag.id ? null : tag.id)}
+                    className="h-5 w-5 rounded-full flex-shrink-0 hover:ring-2 hover:ring-offset-1 hover:ring-zinc-400 transition-all"
+                    style={{ backgroundColor: tag.color }}
+                    title="Clique para mudar a cor"
+                  />
+                  
+                  {/* Color picker dropdown */}
+                  {colorPickerTagId === tag.id && (
+                    <div className="absolute top-7 left-0 z-20 rounded-lg bg-white p-2 shadow-lg border border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700">
+                      <div className="flex flex-wrap gap-1 w-48">
+                        {MAIN_COLORS.map((mainColor) => {
+                          const shades = COLOR_PALETTE[mainColor] ?? [mainColor]
+                          return shades.map((shade) => (
+                            <button
+                              key={shade}
+                              onClick={() => handleUpdateTagColor(tag.id, shade)}
+                              className={`h-5 w-5 rounded-full transition-all hover:scale-110 ${
+                                tag.color === shade 
+                                  ? "ring-2 ring-offset-1 ring-zinc-900 dark:ring-white" 
+                                  : ""
+                              }`}
+                              style={{ backgroundColor: shade }}
+                            />
+                          ))
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
                 
                 {editingTagId === tag.id ? (
                   <>
