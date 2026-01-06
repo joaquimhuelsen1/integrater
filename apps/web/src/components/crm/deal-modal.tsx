@@ -9,11 +9,9 @@ import {
   Plus,
   Package,
   User,
-  Calendar,
   DollarSign,
   Tag,
   FileText,
-  MessageSquare,
   History,
   ChevronDown,
   Maximize2,
@@ -21,8 +19,6 @@ import {
   RotateCcw,
   Upload,
   File,
-  Clock,
-  Building2,
 } from "lucide-react"
 import { ContactSelector } from "./contact-selector"
 import { DealTimeline } from "./deal-timeline"
@@ -52,6 +48,7 @@ interface Deal {
   lost_at: string | null
   lost_reason: string | null
   custom_fields: Record<string, unknown>
+  info: string | null
   created_at: string
   updated_at: string
   products?: { id: string; name: string; value: number }[]
@@ -105,12 +102,10 @@ export function DealModal({
   // Form fields
   const [title, setTitle] = useState("")
   const [value, setValue] = useState("")
-  const [probability, setProbability] = useState(50)
-  const [expectedCloseDate, setExpectedCloseDate] = useState("")
   const [stageId, setStageId] = useState(initialStageId || "")
-  const [lostReason, setLostReason] = useState("")
   const [contactId, setContactId] = useState<string | null>(null)
   const [selectedContact, setSelectedContact] = useState<Deal["contact"]>(null)
+  const [info, setInfo] = useState<string | null>(null)
 
   // Tabs
   const [activeTab, setActiveTab] = useState<TabType>("activity")
@@ -173,14 +168,12 @@ export function DealModal({
         setDeal(data)
         setTitle(data.title)
         setValue(data.value?.toString() || "0")
-        setProbability(data.probability || 50)
-        setExpectedCloseDate(data.expected_close_date || "")
         setStageId(data.stage_id)
-        setLostReason(data.lost_reason || "")
         setContactId(data.contact_id || null)
         setSelectedContact(data.contact || null)
         setProducts(data.products || [])
         setProductsTotal(data.products_total || 0)
+        setInfo(data.info || null)
       }
 
       if (tagsRes.ok) {
@@ -222,8 +215,6 @@ export function DealModal({
       const payload = {
         title: title.trim(),
         value: parseFloat(value) || 0,
-        probability,
-        expected_close_date: expectedCloseDate || null,
         stage_id: stageId,
         pipeline_id: pipelineId,
         contact_id: contactId,
@@ -271,7 +262,7 @@ export function DealModal({
       const res = await apiFetch(`/deals/${dealId}/lose`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: lostReason || null }),
+        body: JSON.stringify({ reason: null }),
       })
       if (res.ok) {
         onSave()
@@ -721,18 +712,7 @@ export function DealModal({
                   <span className="text-sm font-medium">Products</span>
                 </button>
 
-                {/* Contact/Organization */}
-                <div className="mb-4">
-                  <div className="flex items-center gap-2 text-zinc-500">
-                    <Building2 className="h-4 w-4" />
-                    <span className="text-sm">Organization</span>
-                  </div>
-                  <button className="mt-1 flex items-center gap-1 text-blue-600 hover:text-blue-700">
-                    <Plus className="h-4 w-4" />
-                    <span className="text-sm">Organization</span>
-                  </button>
-                </div>
-
+                {/* Person (Contact) */}
                 <div className="mb-4">
                   <div className="flex items-center gap-2 text-zinc-500">
                     <User className="h-4 w-4" />
@@ -827,46 +807,28 @@ export function DealModal({
                   </div>
                 </div>
 
-                {/* Expected Close Date */}
-                <div className="mb-4">
-                  <div className="flex items-center gap-2 text-zinc-500">
-                    <Calendar className="h-4 w-4" />
-                    <span className="text-sm">Set expected close date</span>
+                {/* Informações (dados do webhook) */}
+                {info && (
+                  <div className="mb-4">
+                    <div className="flex items-center gap-2 text-zinc-500 mb-2">
+                      <FileText className="h-4 w-4" />
+                      <span className="text-sm font-medium">Informações</span>
+                    </div>
+                    <div className="rounded-lg bg-zinc-50 dark:bg-zinc-800/50 p-3 text-sm space-y-1">
+                      {info.split('\n').map((line, index) => {
+                        const [label, ...valueParts] = line.split(':')
+                        const value = valueParts.join(':').trim()
+                        if (!label || !value) return null
+                        return (
+                          <div key={index} className="flex flex-col">
+                            <span className="text-xs text-zinc-500">{label.trim()}</span>
+                            <span className="text-zinc-900 dark:text-zinc-100">{value}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
-                  <input
-                    type="date"
-                    value={expectedCloseDate}
-                    onChange={(e) => {
-                      setExpectedCloseDate(e.target.value)
-                      if (dealId) handleSave()
-                    }}
-                    disabled={isClosed}
-                    className="mt-1 w-full rounded border border-zinc-200 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-800 disabled:opacity-50"
-                  />
-                </div>
-
-                {/* Probability */}
-                <div className="mb-4">
-                  <div className="flex items-center justify-between text-zinc-500">
-                    <span className="text-sm">Probabilidade</span>
-                    <span className="text-sm font-medium">{probability}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    value={probability}
-                    onChange={(e) => {
-                      setProbability(parseInt(e.target.value))
-                    }}
-                    onMouseUp={() => {
-                      if (dealId) handleSave()
-                    }}
-                    disabled={isClosed}
-                    min="0"
-                    max="100"
-                    step="5"
-                    className="mt-1 w-full"
-                  />
-                </div>
+                )}
 
                 {/* Contact Custom Fields */}
                 {selectedContact?.metadata && Object.keys(selectedContact.metadata).length > 0 && (
@@ -880,20 +842,6 @@ export function DealModal({
                         <div className="text-sm">{String(value)}</div>
                       </div>
                     ))}
-                  </div>
-                )}
-
-                {/* Lost reason if applicable */}
-                {!isNew && !isClosed && (
-                  <div className="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-700">
-                    <label className="text-xs text-zinc-500">Motivo da perda (se aplicável)</label>
-                    <input
-                      type="text"
-                      value={lostReason}
-                      onChange={(e) => setLostReason(e.target.value)}
-                      placeholder="Ex: Preço, concorrência..."
-                      className="mt-1 w-full rounded border border-zinc-200 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-800"
-                    />
                   </div>
                 )}
 

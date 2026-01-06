@@ -44,6 +44,7 @@ from shared.heartbeat import Heartbeat
 # Importa modulos locais
 from webhooks import notify_inbound_email, notify_outbound_email
 from api import app as fastapi_app, set_worker, EMAIL_WORKER_HTTP_PORT
+from ses import send_email_ses, is_ses_configured
 
 load_dotenv()
 
@@ -437,10 +438,14 @@ class EmailWorker:
         attachments: list[str],
     ) -> dict:
         """
-        Envia email via SMTP - chamado pela API quando n8n solicita.
+        Envia email via SMTP (primario) ou SES (fallback).
+        
+        Estrategia:
+        1. Tenta SMTP primeiro (conexao direta)
+        2. Se SMTP falhar com erro de conexao/timeout E SES configurado, tenta SES
         
         Returns:
-            {success: bool, message_id: str?, error: str?}
+            {success: bool, message_id: str?, error: str?, method: str?}
         """
         if account_id not in self.account_info:
             return {"success": False, "error": f"Conta {account_id} nao conectada"}
@@ -450,9 +455,117 @@ class EmailWorker:
         password = info["password"]
         owner_id = info["owner_id"]
         workspace_id = info.get("workspace_id")
+        from_email = config.get("email")
 
+        # Baixa attachments antes (usado por SMTP e SES)
+        attachment_data = []
+        if attachments:
+            attachment_data = await self._download_attachments(attachments)
+
+        # 1. Tenta SMTP primeiro
+        smtp_result = await self._send_via_smtp(
+            config, password, from_email, to_email, subject, body, html, 
+            in_reply_to, attachment_data
+        )
+        
+        if smtp_result["success"]:
+            # SMTP funcionou - salva na pasta Sent e notifica
+            message_id = smtp_result["message_id"]
+            msg = smtp_result.get("msg")
+            
+            if msg:
+                await self._save_to_sent_folder(account_id, msg, config, from_email, password)
+            
+            print(f"[SMTP] Email enviado para {to_email}: {subject}")
+            
+            await notify_outbound_email(
+                account_id=account_id,
+                owner_id=owner_id,
+                workspace_id=workspace_id,
+                from_email=from_email,
+                to_email=to_email,
+                subject=subject,
+                body=body,
+                html=html,
+                attachments=None,
+                message_id=message_id,
+                in_reply_to=in_reply_to,
+                timestamp=datetime.now(timezone.utc),
+            )
+            
+            return {"success": True, "message_id": message_id, "method": "smtp"}
+        
+        # 2. SMTP falhou - verifica se deve tentar SES
+        smtp_error = smtp_result.get("error", "")
+        is_connection_error = any(x in smtp_error.lower() for x in [
+            "timeout", "connection", "refused", "unreachable", "errno", "timed out"
+        ])
+        
+        if is_connection_error and is_ses_configured():
+            print(f"[SMTP] Falha de conexao ({smtp_error}), tentando SES...")
+            
+            # Prepara dados para SES
+            att_bytes = [a["bytes"] for a in attachment_data] if attachment_data else None
+            att_names = [a["filename"] for a in attachment_data] if attachment_data else None
+            att_types = [a["content_type"] for a in attachment_data] if attachment_data else None
+            
+            ses_result = await send_email_ses(
+                from_email=from_email,
+                to_email=to_email,
+                subject=subject or "Sem assunto",
+                body_text=body,
+                body_html=html,
+                in_reply_to=in_reply_to,
+                attachments=att_bytes,
+                attachment_names=att_names,
+                attachment_types=att_types,
+            )
+            
+            if ses_result["success"]:
+                message_id = ses_result["message_id"]
+                print(f"[SES] Email enviado para {to_email}: {subject}")
+                
+                await notify_outbound_email(
+                    account_id=account_id,
+                    owner_id=owner_id,
+                    workspace_id=workspace_id,
+                    from_email=from_email,
+                    to_email=to_email,
+                    subject=subject,
+                    body=body,
+                    html=html,
+                    attachments=None,
+                    message_id=message_id,
+                    in_reply_to=in_reply_to,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                
+                return {"success": True, "message_id": message_id, "method": "ses"}
+            else:
+                # SES tambem falhou
+                return {
+                    "success": False, 
+                    "error": f"SMTP: {smtp_error} | SES: {ses_result.get('error', 'unknown')}",
+                    "method": "both_failed"
+                }
+        
+        # SMTP falhou e SES nao disponivel ou nao e erro de conexao
+        return {"success": False, "error": smtp_error, "method": "smtp_only"}
+
+    async def _send_via_smtp(
+        self,
+        config: dict,
+        password: str,
+        from_email: str,
+        to_email: str,
+        subject: str | None,
+        body: str | None,
+        html: str | None,
+        in_reply_to: str | None,
+        attachment_data: list[dict],
+    ) -> dict:
+        """Envia email via SMTP. Retorna {success, message_id?, msg?, error?}"""
         try:
-            from_email = config.get("email")
             smtp_host = config.get("smtp_host", "smtp.gmail.com")
             smtp_port = config.get("smtp_port", 587)
 
@@ -476,55 +589,39 @@ class EmailWorker:
             else:
                 msg.set_content(body or "")
 
-            # Processa attachments (baixa URLs e anexa)
-            if attachments:
-                await self._add_attachments_to_email(msg, attachments)
+            # Adiciona attachments ja baixados
+            for att in attachment_data:
+                maintype, subtype = att["content_type"].split("/", 1) if "/" in att["content_type"] else ("application", "octet-stream")
+                msg.add_attachment(
+                    att["bytes"],
+                    maintype=maintype,
+                    subtype=subtype,
+                    filename=att["filename"]
+                )
 
-            # Envia via SMTP
+            # Envia via SMTP (com timeout de 30s)
             if smtp_port == 465:
-                with smtplib.SMTP_SSL(smtp_host, smtp_port) as server:
+                with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30) as server:
                     server.login(from_email, password)
                     server.send_message(msg)
             else:
-                with smtplib.SMTP(smtp_host, smtp_port) as server:
+                with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
                     server.starttls()
                     server.login(from_email, password)
                     server.send_message(msg)
 
-            # Salva na pasta Sent via IMAP
-            await self._save_to_sent_folder(account_id, msg, config, from_email, password)
-
-            message_id = msg["Message-ID"]
-            print(f"Email enviado para {to_email}: {subject}")
-
-            # Notifica n8n sobre o envio (para confirmacao)
-            await notify_outbound_email(
-                account_id=account_id,
-                owner_id=owner_id,
-                workspace_id=workspace_id,
-                from_email=from_email,
-                to_email=to_email,
-                subject=subject,
-                body=body,
-                html=html,
-                attachments=None,  # n8n ja tem os URLs
-                message_id=message_id,
-                in_reply_to=in_reply_to,
-                timestamp=datetime.now(timezone.utc),
-            )
-
-            return {"success": True, "message_id": message_id}
+            return {"success": True, "message_id": msg["Message-ID"], "msg": msg}
 
         except Exception as e:
-            print(f"Erro ao enviar email: {e}")
             import traceback
             traceback.print_exc()
             return {"success": False, "error": str(e)}
 
-    async def _add_attachments_to_email(self, msg: EmailMessage, attachment_urls: list[str]):
-        """Baixa attachments das URLs e adiciona ao email."""
+    async def _download_attachments(self, attachment_urls: list[str]) -> list[dict]:
+        """Baixa attachments das URLs. Retorna lista de {bytes, filename, content_type}"""
         import httpx
-
+        
+        results = []
         for url in attachment_urls:
             try:
                 async with httpx.AsyncClient(timeout=60) as client:
@@ -533,22 +630,17 @@ class EmailWorker:
                         print(f"Erro ao baixar attachment: {response.status_code}")
                         continue
 
-                    file_bytes = response.content
-                    content_type = response.headers.get("content-type", "application/octet-stream")
-                    filename = url.split("/")[-1].split("?")[0]
-
-                    # Adiciona ao email
-                    maintype, subtype = content_type.split("/", 1) if "/" in content_type else ("application", "octet-stream")
-                    msg.add_attachment(
-                        file_bytes,
-                        maintype=maintype,
-                        subtype=subtype,
-                        filename=filename
-                    )
-                    print(f"Attachment adicionado: {filename}")
+                    results.append({
+                        "bytes": response.content,
+                        "content_type": response.headers.get("content-type", "application/octet-stream"),
+                        "filename": url.split("/")[-1].split("?")[0],
+                    })
+                    print(f"Attachment baixado: {results[-1]['filename']}")
 
             except Exception as e:
-                print(f"Erro ao adicionar attachment {url}: {e}")
+                print(f"Erro ao baixar attachment {url}: {e}")
+        
+        return results
 
     async def _save_to_sent_folder(self, acc_id: str, msg: EmailMessage, config: dict, from_email: str, password: str):
         """Salva email na pasta Sent via IMAP."""
