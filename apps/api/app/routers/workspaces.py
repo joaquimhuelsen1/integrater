@@ -4,6 +4,7 @@ Router Workspaces - CRUD de workspaces.
 from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
 from uuid import UUID
+import secrets
 
 from app.deps import get_supabase, get_current_user_id
 from app.models.workspace import (
@@ -11,6 +12,11 @@ from app.models.workspace import (
     WorkspaceCreate,
     WorkspaceUpdate,
 )
+
+
+def generate_workspace_api_key() -> str:
+    """Gera API key única para workspace."""
+    return f"wk_{secrets.token_hex(24)}"
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 
@@ -34,13 +40,21 @@ async def create_workspace(
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
-    """Cria novo workspace."""
+    """Cria novo workspace e gera API key automaticamente."""
     payload = data.model_dump()
     payload["owner_id"] = str(owner_id)
     payload["is_default"] = False  # Novos workspaces nunca são default
 
     result = db.table("workspaces").insert(payload).execute()
-    return result.data[0]
+    workspace = result.data[0]
+
+    # Gera API key automaticamente
+    db.table("workspace_api_keys").insert({
+        "workspace_id": workspace["id"],
+        "api_key": generate_workspace_api_key()
+    }).execute()
+
+    return workspace
 
 
 @router.post("/migrate-data")
@@ -173,5 +187,73 @@ async def set_default_workspace(
     result = db.table("workspaces").update({"is_default": True}).eq(
         "id", str(workspace_id)
     ).eq("owner_id", str(owner_id)).execute()
+
+    return result.data[0]
+
+
+# ============================================
+# API Key endpoints
+# ============================================
+
+@router.get("/{workspace_id}/api-key")
+async def get_workspace_api_key(
+    workspace_id: UUID,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Retorna API key do workspace."""
+    # Verifica se workspace pertence ao usuário
+    workspace = db.table("workspaces").select("id").eq(
+        "id", str(workspace_id)
+    ).eq("owner_id", str(owner_id)).single().execute()
+
+    if not workspace.data:
+        raise HTTPException(status_code=404, detail="Workspace não encontrado")
+
+    # Busca API key
+    api_key_result = db.table("workspace_api_keys").select("*").eq(
+        "workspace_id", str(workspace_id)
+    ).execute()
+
+    if not api_key_result.data:
+        return None
+
+    return api_key_result.data[0]
+
+
+@router.post("/{workspace_id}/api-key")
+async def create_or_regenerate_workspace_api_key(
+    workspace_id: UUID,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Cria ou regenera API key do workspace."""
+    # Verifica se workspace pertence ao usuário
+    workspace = db.table("workspaces").select("id").eq(
+        "id", str(workspace_id)
+    ).eq("owner_id", str(owner_id)).single().execute()
+
+    if not workspace.data:
+        raise HTTPException(status_code=404, detail="Workspace não encontrado")
+
+    new_api_key = generate_workspace_api_key()
+
+    # Verifica se já existe
+    existing = db.table("workspace_api_keys").select("id").eq(
+        "workspace_id", str(workspace_id)
+    ).execute()
+
+    if existing.data:
+        # Atualiza
+        result = db.table("workspace_api_keys").update({
+            "api_key": new_api_key,
+            "updated_at": "now()"
+        }).eq("workspace_id", str(workspace_id)).execute()
+    else:
+        # Cria nova
+        result = db.table("workspace_api_keys").insert({
+            "workspace_id": str(workspace_id),
+            "api_key": new_api_key
+        }).execute()
 
     return result.data[0]
