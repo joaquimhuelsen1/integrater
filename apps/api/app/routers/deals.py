@@ -94,9 +94,26 @@ async def list_deals_by_pipeline(
         "owner_id", str(owner_id)
     ).is_("archived_at", "null").order("updated_at", desc=True).execute()
 
-    # Agrupa por stage
+    # Busca todas as tags associadas aos deals deste pipeline
+    deal_ids = [d["id"] for d in (deals_result.data or [])]
+    deal_tags_map = {}
+    if deal_ids:
+        tags_result = db.table("deal_tag_links").select(
+            "deal_id, deal_tags(id, name, color)"
+        ).in_("deal_id", deal_ids).execute()
+        
+        for link in (tags_result.data or []):
+            deal_id = link["deal_id"]
+            tag = link.get("deal_tags")
+            if tag:
+                if deal_id not in deal_tags_map:
+                    deal_tags_map[deal_id] = []
+                deal_tags_map[deal_id].append(tag)
+
+    # Agrupa por stage e adiciona tags
     deals_by_stage = {}
     for deal in deals_result.data or []:
+        deal["tags"] = deal_tags_map.get(deal["id"], [])
         stage_id = deal["stage_id"]
         if stage_id not in deals_by_stage:
             deals_by_stage[stage_id] = []
@@ -279,16 +296,31 @@ async def update_deal(
     return result.data[0]
 
 
-@router.delete("/{deal_id}", status_code=204)
+@router.post("/{deal_id}/archive", status_code=204)
 async def archive_deal(
     deal_id: UUID,
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
-    """Arquiva deal."""
+    """Arquiva deal (soft delete)."""
     result = db.table("deals").update(
         {"archived_at": datetime.utcnow().isoformat()}
     ).eq("id", str(deal_id)).eq("owner_id", str(owner_id)).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Deal não encontrado")
+
+
+@router.delete("/{deal_id}", status_code=204)
+async def delete_deal(
+    deal_id: UUID,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Exclui deal permanentemente."""
+    result = db.table("deals").delete().eq(
+        "id", str(deal_id)
+    ).eq("owner_id", str(owner_id)).execute()
 
     if not result.data:
         raise HTTPException(status_code=404, detail="Deal não encontrado")

@@ -1,8 +1,15 @@
 "use client"
 
+import { useState } from "react"
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { Trophy, XCircle } from "lucide-react"
+import { Trophy, XCircle, MoreVertical, Trash2, Archive } from "lucide-react"
+
+interface DealTag {
+  id: string
+  name: string
+  color: string
+}
 
 interface Deal {
   id: string
@@ -14,6 +21,7 @@ interface Deal {
   contact_id: string | null
   conversation_id?: string | null
   contact?: { id: string; display_name: string | null } | null
+  tags?: DealTag[]
   won_at: string | null
   lost_at: string | null
   created_at: string
@@ -24,9 +32,13 @@ interface DealCardProps {
   deal: Deal
   onClick?: () => void
   isDragging?: boolean
+  onArchive?: (dealId: string) => void
+  onDelete?: (dealId: string) => void
 }
 
-export function DealCard({ deal, onClick, isDragging }: DealCardProps) {
+export function DealCard({ deal, onClick, isDragging, onArchive, onDelete }: DealCardProps) {
+  const [showMenu, setShowMenu] = useState(false)
+  
   const {
     attributes,
     listeners,
@@ -89,6 +101,25 @@ export function DealCard({ deal, onClick, isDragging }: DealCardProps) {
   const isLost = !!deal.lost_at
   const isClosed = isWon || isLost
 
+  const handleMenuClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setShowMenu(!showMenu)
+  }
+
+  const handleArchive = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setShowMenu(false)
+    onArchive?.(deal.id)
+  }
+
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setShowMenu(false)
+    if (confirm("Tem certeza que deseja excluir este deal permanentemente?")) {
+      onDelete?.(deal.id)
+    }
+  }
+
   return (
     <div
       ref={setNodeRef}
@@ -96,7 +127,7 @@ export function DealCard({ deal, onClick, isDragging }: DealCardProps) {
       {...attributes}
       {...listeners}
       onClick={onClick}
-      className={`cursor-pointer rounded-lg border bg-white p-3 shadow-sm transition-all hover:shadow-md dark:bg-zinc-800 ${
+      className={`group relative cursor-pointer rounded-lg border bg-white p-3 shadow-sm transition-all hover:shadow-md dark:bg-zinc-800 ${
         isDragging || isSortableDragging
           ? "opacity-50 shadow-lg ring-2 ring-blue-500"
           : ""
@@ -108,6 +139,41 @@ export function DealCard({ deal, onClick, isDragging }: DealCardProps) {
           : "border-zinc-200 dark:border-zinc-700"
       }`}
     >
+      {/* Menu de 3 pontinhos */}
+      <div className="absolute top-2 right-2">
+        <button
+          onClick={handleMenuClick}
+          className="rounded p-1 opacity-0 group-hover:opacity-100 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-opacity"
+        >
+          <MoreVertical className="h-4 w-4 text-zinc-500" />
+        </button>
+        
+        {showMenu && (
+          <>
+            <div 
+              className="fixed inset-0 z-10" 
+              onClick={(e) => { e.stopPropagation(); setShowMenu(false) }}
+            />
+            <div className="absolute right-0 top-7 z-20 w-36 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+              <button
+                onClick={handleArchive}
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
+              >
+                <Archive className="h-4 w-4" />
+                Arquivar
+              </button>
+              <button
+                onClick={handleDelete}
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+              >
+                <Trash2 className="h-4 w-4" />
+                Excluir
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
       {/* Header: Status badge */}
       {isClosed && (
         <div className="mb-2">
@@ -126,9 +192,29 @@ export function DealCard({ deal, onClick, isDragging }: DealCardProps) {
       )}
 
       {/* Title */}
-      <h4 className="mb-2 font-medium text-sm text-zinc-900 dark:text-white line-clamp-2 leading-tight">
+      <h4 className="mb-2 font-medium text-sm text-zinc-900 dark:text-white line-clamp-2 leading-tight pr-6">
         {deal.title}
       </h4>
+
+      {/* Tags */}
+      {deal.tags && deal.tags.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1">
+          {deal.tags.slice(0, 3).map((tag) => (
+            <span
+              key={tag.id}
+              className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium text-white"
+              style={{ backgroundColor: tag.color }}
+            >
+              {tag.name}
+            </span>
+          ))}
+          {deal.tags.length > 3 && (
+            <span className="inline-flex items-center rounded-full bg-zinc-200 px-2 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-700 dark:text-zinc-400">
+              +{deal.tags.length - 3}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Contact with Avatar */}
       {deal.contact?.display_name && (

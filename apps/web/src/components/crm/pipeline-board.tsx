@@ -28,6 +28,7 @@ interface Deal {
   stage_id: string
   contact_id: string | null
   contact?: { id: string; display_name: string | null } | null
+  tags?: { id: string; name: string; color: string }[]
   won_at: string | null
   lost_at: string | null
   created_at: string
@@ -49,6 +50,8 @@ interface PipelineBoardProps {
   onDealMove: (dealId: string, newStageId: string) => void
   onDealClick: (dealId: string) => void
   onCreateDeal: (stageId: string) => void
+  onArchiveDeal?: (dealId: string) => void
+  onDeleteDeal?: (dealId: string) => void
 }
 
 export function PipelineBoard({
@@ -56,6 +59,8 @@ export function PipelineBoard({
   onDealMove,
   onDealClick,
   onCreateDeal,
+  onArchiveDeal,
+  onDeleteDeal,
 }: PipelineBoardProps) {
   const [activeDeal, setActiveDeal] = useState<Deal | null>(null)
 
@@ -161,6 +166,8 @@ export function PipelineBoard({
             stage={stage}
             onDealClick={onDealClick}
             onCreateDeal={onCreateDeal}
+            onArchiveDeal={onArchiveDeal}
+            onDeleteDeal={onDeleteDeal}
           />
         ))}
       </div>

@@ -42,6 +42,7 @@ interface Deal {
   stage_id: string
   contact_id: string | null
   contact?: { id: string; display_name: string | null } | null
+  tags?: { id: string; name: string; color: string }[]
   won_at: string | null
   lost_at: string | null
   created_at: string
@@ -307,6 +308,24 @@ export function CRMView() {
     setShowSettings(false)
   }
 
+  const handleArchiveDeal = async (dealId: string) => {
+    try {
+      await apiFetch(`/deals/${dealId}/archive`, { method: "POST" })
+      loadStages()
+    } catch (error) {
+      console.error("Erro ao arquivar deal:", error)
+    }
+  }
+
+  const handleDeleteDeal = async (dealId: string) => {
+    try {
+      await apiFetch(`/deals/${dealId}`, { method: "DELETE" })
+      loadStages()
+    } catch (error) {
+      console.error("Erro ao excluir deal:", error)
+    }
+  }
+
   // Apply filters to stages/deals
   const filteredStages = useMemo(() => {
     return stages.map((stage) => {
@@ -471,6 +490,8 @@ export function CRMView() {
             onDealMove={handleDealMove}
             onDealClick={handleDealClick}
             onCreateDeal={handleCreateDeal}
+            onArchiveDeal={handleArchiveDeal}
+            onDeleteDeal={handleDeleteDeal}
           />
         )}
       </div>
