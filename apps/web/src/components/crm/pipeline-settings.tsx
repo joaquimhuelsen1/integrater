@@ -42,6 +42,7 @@ interface PipelineSettingsProps {
   pipelines: Pipeline[]
   selectedPipelineId: string | null
   workspaceId: string
+  workspaceName: string
   onClose: () => void
   onPipelineCreated: () => void
   onPipelineUpdated: () => void
@@ -160,6 +161,7 @@ export function PipelineSettings({
   pipelines,
   selectedPipelineId,
   workspaceId,
+  workspaceName,
   onClose,
   onPipelineCreated,
   onPipelineUpdated,
@@ -343,10 +345,10 @@ export function PipelineSettings({
     }
   }
 
-  // Load stages when switching to stages tab
+  // Load stages when switching to stages or api tab
   const handleTabChange = (tab: "pipelines" | "stages" | "api") => {
     setActiveTab(tab)
-    if (tab === "stages" && selectedPipelineId) {
+    if ((tab === "stages" || tab === "api") && selectedPipelineId) {
       loadStages(selectedPipelineId)
     }
   }
@@ -419,8 +421,11 @@ export function PipelineSettings({
         <div className="max-h-[60vh] overflow-y-auto p-4">
           {activeTab === "api" && selectedPipelineId ? (
             <ApiSettings 
-              pipelineId={selectedPipelineId} 
-              pipelineName={pipelines.find(p => p.id === selectedPipelineId)?.name || "Pipeline"} 
+              workspaceId={workspaceId}
+              workspaceName={workspaceName}
+              pipelines={pipelines}
+              stages={stages}
+              selectedPipelineId={selectedPipelineId}
             />
           ) : activeTab === "pipelines" ? (
             <div className="space-y-4">

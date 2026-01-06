@@ -4,9 +4,9 @@ import { useState, useEffect } from "react"
 import { Copy, RefreshCw, Plus, Trash2, Check, X } from "lucide-react"
 import { apiFetch } from "@/lib/api"
 
-interface ApiKey {
+interface WorkspaceApiKey {
   id: string
-  pipeline_id: string
+  workspace_id: string
   api_key: string
   created_at: string
   updated_at: string
@@ -18,9 +18,25 @@ interface Tag {
   color: string
 }
 
+interface Stage {
+  id: string
+  name: string
+  position: number
+  color: string
+}
+
+interface Pipeline {
+  id: string
+  name: string
+  color: string
+}
+
 interface ApiSettingsProps {
-  pipelineId: string
-  pipelineName: string
+  workspaceId: string
+  workspaceName: string
+  pipelines: Pipeline[]
+  stages: Stage[]
+  selectedPipelineId: string | null
 }
 
 // Cores principais (tom forte) com seus tons mais claros
@@ -64,11 +80,11 @@ const COLOR_PALETTE: Record<string, string[]> = {
 // Cores principais (tons fortes) para mostrar inicialmente
 const MAIN_COLORS = Object.keys(COLOR_PALETTE) as (keyof typeof COLOR_PALETTE)[]
 
-export function ApiSettings({ pipelineId, pipelineName }: ApiSettingsProps) {
-  const [apiKey, setApiKey] = useState<ApiKey | null>(null)
+export function ApiSettings({ workspaceId, workspaceName, pipelines, stages, selectedPipelineId }: ApiSettingsProps) {
+  const [apiKey, setApiKey] = useState<WorkspaceApiKey | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isGenerating, setIsGenerating] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState<string | null>(null)
   
   // Tags state
   const [tags, setTags] = useState<Tag[]>([])
@@ -80,11 +96,11 @@ export function ApiSettings({ pipelineId, pipelineName }: ApiSettingsProps) {
   const [editingTagId, setEditingTagId] = useState<string | null>(null)
   const [editingTagName, setEditingTagName] = useState("")
 
-  // Load API key
+  // Load API key do workspace
   useEffect(() => {
     const loadApiKey = async () => {
       try {
-        const res = await apiFetch(`/pipelines/${pipelineId}/api-key`)
+        const res = await apiFetch(`/workspaces/${workspaceId}/api-key`)
         if (res.ok) {
           const data = await res.json()
           setApiKey(data)
@@ -96,7 +112,7 @@ export function ApiSettings({ pipelineId, pipelineName }: ApiSettingsProps) {
       }
     }
     loadApiKey()
-  }, [pipelineId])
+  }, [workspaceId])
 
   // Load tags
   useEffect(() => {
@@ -119,7 +135,7 @@ export function ApiSettings({ pipelineId, pipelineName }: ApiSettingsProps) {
   const handleGenerateKey = async () => {
     setIsGenerating(true)
     try {
-      const res = await apiFetch(`/pipelines/${pipelineId}/api-key`, {
+      const res = await apiFetch(`/workspaces/${workspaceId}/api-key`, {
         method: "POST"
       })
       if (res.ok) {
@@ -133,12 +149,10 @@ export function ApiSettings({ pipelineId, pipelineName }: ApiSettingsProps) {
     }
   }
 
-  const handleCopyKey = () => {
-    if (apiKey) {
-      navigator.clipboard.writeText(apiKey.api_key)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    }
+  const handleCopy = (field: string, value: string) => {
+    navigator.clipboard.writeText(value)
+    setCopied(field)
+    setTimeout(() => setCopied(null), 2000)
   }
 
   const handleCreateTag = async () => {
@@ -200,47 +214,50 @@ export function ApiSettings({ pipelineId, pipelineName }: ApiSettingsProps) {
     }
   }
 
-  const apiUrl = typeof window !== "undefined" 
-    ? `${window.location.origin.replace('integrater.vercel.app', 'api.thereconquestmap.com')}/webhooks/deals`
-    : "https://api.thereconquestmap.com/webhooks/deals"
+  const webhookUrl = `https://api.thereconquestmap.com/webhooks/${workspaceId}/deals`
+  
+  const selectedPipeline = pipelines.find(p => p.id === selectedPipelineId)
+  const selectedStages = stages.filter(s => selectedPipelineId ? true : false)
 
   const examplePayload = `{
   "title": "Nome do Lead",
-  "value": 0,
+  "value": 1500,
   "info": "Email: exemplo@email.com\\nTelefone: +55 11 99999-9999\\nFonte: Google Forms",
-  "tags": ["Google Forms", "WhatsApp"]
+  "tags": ["Google Forms", "WhatsApp"],
+  "contact_id": "uuid-opcional"
 }`
 
   const exampleCurl = apiKey 
-    ? `curl -X POST "${apiUrl}" \\
+    ? `curl -X POST "${webhookUrl}" \\
   -H "Content-Type: application/json" \\
-  -H "X-API-Key: ${apiKey.api_key}" \\
+  -H "X-API-Key: ${apiKey.api_key}" \\${selectedPipelineId ? `
+  -H "X-Pipeline-Id: ${selectedPipelineId}" \\` : ''}
   -d '${examplePayload}'`
     : "Gere uma API key primeiro"
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* API Key Section */}
       <div>
-        <h3 className="text-lg font-semibold mb-4">API Key</h3>
+        <h3 className="text-lg font-semibold mb-2">API Key do Workspace</h3>
         <p className="text-sm text-zinc-500 mb-4">
-          Use esta API key para criar deals via webhook no pipeline "{pipelineName}".
+          Esta chave autentica requisicoes para o workspace "{workspaceName}".
         </p>
 
         {isLoading ? (
           <div className="text-zinc-500">Carregando...</div>
         ) : apiKey ? (
-          <div className="space-y-4">
+          <div className="space-y-2">
             <div className="flex items-center gap-2">
               <code className="flex-1 rounded-lg bg-zinc-100 px-4 py-3 font-mono text-sm dark:bg-zinc-800 break-all">
                 {apiKey.api_key}
               </code>
               <button
-                onClick={handleCopyKey}
+                onClick={() => handleCopy("apiKey", apiKey.api_key)}
                 className="rounded-lg border border-zinc-300 p-3 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
                 title="Copiar"
               >
-                {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                {copied === "apiKey" ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
               </button>
               <button
                 onClick={handleGenerateKey}
@@ -271,48 +288,157 @@ export function ApiSettings({ pipelineId, pipelineName }: ApiSettingsProps) {
         )}
       </div>
 
-      {/* Endpoint Info */}
+      {/* Endpoint */}
       <div>
-        <h3 className="text-lg font-semibold mb-4">Endpoint</h3>
-        <div className="rounded-lg bg-zinc-100 px-4 py-3 font-mono text-sm dark:bg-zinc-800">
-          POST {apiUrl}
+        <h3 className="text-lg font-semibold mb-2">Endpoint</h3>
+        <div className="flex items-center gap-2">
+          <code className="flex-1 rounded-lg bg-zinc-100 px-4 py-3 font-mono text-sm dark:bg-zinc-800 break-all">
+            POST {webhookUrl}
+          </code>
+          <button
+            onClick={() => handleCopy("endpoint", webhookUrl)}
+            className="rounded-lg border border-zinc-300 p-3 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+            title="Copiar"
+          >
+            {copied === "endpoint" ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+          </button>
         </div>
       </div>
 
       {/* Headers */}
       <div>
-        <h3 className="text-lg font-semibold mb-4">Headers</h3>
-        <div className="rounded-lg bg-zinc-100 px-4 py-3 font-mono text-sm dark:bg-zinc-800 space-y-1">
-          <div>Content-Type: application/json</div>
-          <div>X-API-Key: {apiKey?.api_key || "<sua-api-key>"}</div>
+        <h3 className="text-lg font-semibold mb-2">Headers</h3>
+        <div className="rounded-lg bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="border-b border-zinc-200 dark:border-zinc-700">
+              <tr>
+                <th className="px-4 py-2 text-left font-medium">Header</th>
+                <th className="px-4 py-2 text-left font-medium">Valor</th>
+                <th className="px-4 py-2 text-left font-medium">Obrigatorio</th>
+                <th className="px-4 py-2 w-10"></th>
+              </tr>
+            </thead>
+            <tbody className="font-mono text-xs">
+              <tr className="border-b border-zinc-200 dark:border-zinc-700">
+                <td className="px-4 py-2">Content-Type</td>
+                <td className="px-4 py-2">application/json</td>
+                <td className="px-4 py-2 text-green-600">Sim</td>
+                <td className="px-4 py-2"></td>
+              </tr>
+              <tr className="border-b border-zinc-200 dark:border-zinc-700">
+                <td className="px-4 py-2">X-API-Key</td>
+                <td className="px-4 py-2 max-w-[200px] truncate">{apiKey?.api_key || "<sua-api-key>"}</td>
+                <td className="px-4 py-2 text-green-600">Sim</td>
+                <td className="px-4 py-2">
+                  {apiKey && (
+                    <button onClick={() => handleCopy("xApiKey", apiKey.api_key)} title="Copiar">
+                      {copied === "xApiKey" ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3 text-zinc-400" />}
+                    </button>
+                  )}
+                </td>
+              </tr>
+              <tr className="border-b border-zinc-200 dark:border-zinc-700">
+                <td className="px-4 py-2">X-Pipeline-Id</td>
+                <td className="px-4 py-2">{selectedPipelineId || "<pipeline-id>"}</td>
+                <td className="px-4 py-2 text-zinc-500">Nao (usa primeiro)</td>
+                <td className="px-4 py-2">
+                  {selectedPipelineId && (
+                    <button onClick={() => handleCopy("pipelineId", selectedPipelineId)} title="Copiar">
+                      {copied === "pipelineId" ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3 text-zinc-400" />}
+                    </button>
+                  )}
+                </td>
+              </tr>
+              <tr>
+                <td className="px-4 py-2">X-Stage-Id</td>
+                <td className="px-4 py-2">{"<stage-id>"}</td>
+                <td className="px-4 py-2 text-zinc-500">Nao (usa primeiro)</td>
+                <td className="px-4 py-2"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Pipelines & Stages IDs */}
+      <div>
+        <h3 className="text-lg font-semibold mb-2">Pipelines e Etapas</h3>
+        <p className="text-sm text-zinc-500 mb-3">
+          IDs para usar nos headers X-Pipeline-Id e X-Stage-Id:
+        </p>
+        <div className="space-y-3">
+          {pipelines.map((pipeline) => (
+            <div key={pipeline.id} className="rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+              <div className="flex items-center justify-between bg-zinc-50 dark:bg-zinc-800/50 px-4 py-2">
+                <div className="flex items-center gap-2">
+                  <div className="h-3 w-3 rounded-full" style={{ backgroundColor: pipeline.color }} />
+                  <span className="font-medium text-sm">{pipeline.name}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <code className="text-xs font-mono text-zinc-500">{pipeline.id}</code>
+                  <button onClick={() => handleCopy(`pipeline-${pipeline.id}`, pipeline.id)} title="Copiar ID">
+                    {copied === `pipeline-${pipeline.id}` ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3 text-zinc-400" />}
+                  </button>
+                </div>
+              </div>
+              {pipeline.id === selectedPipelineId && stages.length > 0 && (
+                <div className="px-4 py-2 space-y-1">
+                  {stages.map((stage) => (
+                    <div key={stage.id} className="flex items-center justify-between text-sm py-1">
+                      <div className="flex items-center gap-2">
+                        <div className="h-2 w-2 rounded-full" style={{ backgroundColor: stage.color }} />
+                        <span className="text-zinc-600 dark:text-zinc-400">{stage.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <code className="text-xs font-mono text-zinc-400">{stage.id}</code>
+                        <button onClick={() => handleCopy(`stage-${stage.id}`, stage.id)} title="Copiar ID">
+                          {copied === `stage-${stage.id}` ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3 text-zinc-400" />}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       </div>
 
       {/* Payload Example */}
       <div>
-        <h3 className="text-lg font-semibold mb-4">Exemplo de Payload</h3>
+        <h3 className="text-lg font-semibold mb-2">Payload (Body)</h3>
         <pre className="rounded-lg bg-zinc-100 px-4 py-3 font-mono text-sm dark:bg-zinc-800 overflow-x-auto">
           {examplePayload}
         </pre>
-        <div className="mt-2 text-sm text-zinc-500">
+        <div className="mt-3 text-sm text-zinc-500">
           <strong>Campos:</strong>
           <ul className="list-disc list-inside mt-1 space-y-1">
-            <li><code>title</code> (obrigatório): Nome do deal</li>
-            <li><code>value</code> (opcional): Valor do deal (default: 0)</li>
-            <li><code>info</code> (opcional): Informações formatadas (usa \n para quebra de linha)</li>
-            <li><code>tags</code> (opcional): Lista de nomes de tags (cria automaticamente se não existir)</li>
-            <li><code>stage_id</code> (opcional): ID do stage (default: primeiro stage)</li>
-            <li><code>contact_id</code> (opcional): ID do contato para vincular</li>
+            <li><code className="bg-zinc-200 dark:bg-zinc-700 px-1 rounded">title</code> (obrigatorio): Nome do deal</li>
+            <li><code className="bg-zinc-200 dark:bg-zinc-700 px-1 rounded">value</code> (opcional): Valor em centavos (default: 0)</li>
+            <li><code className="bg-zinc-200 dark:bg-zinc-700 px-1 rounded">info</code> (opcional): Informacoes (use \n para quebra de linha)</li>
+            <li><code className="bg-zinc-200 dark:bg-zinc-700 px-1 rounded">tags</code> (opcional): Lista de nomes - cria tag automaticamente se nao existir</li>
+            <li><code className="bg-zinc-200 dark:bg-zinc-700 px-1 rounded">contact_id</code> (opcional): UUID do contato para vincular</li>
           </ul>
         </div>
       </div>
 
       {/* cURL Example */}
       <div>
-        <h3 className="text-lg font-semibold mb-4">Exemplo cURL</h3>
-        <pre className="rounded-lg bg-zinc-900 px-4 py-3 font-mono text-sm text-green-400 overflow-x-auto whitespace-pre-wrap">
-          {exampleCurl}
-        </pre>
+        <h3 className="text-lg font-semibold mb-2">Exemplo cURL</h3>
+        <div className="relative">
+          <pre className="rounded-lg bg-zinc-900 px-4 py-3 font-mono text-sm text-green-400 overflow-x-auto whitespace-pre-wrap">
+            {exampleCurl}
+          </pre>
+          {apiKey && (
+            <button 
+              onClick={() => handleCopy("curl", exampleCurl)}
+              className="absolute top-2 right-2 p-1.5 rounded bg-zinc-800 hover:bg-zinc-700"
+              title="Copiar"
+            >
+              {copied === "curl" ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3 text-zinc-400" />}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Tags Management */}

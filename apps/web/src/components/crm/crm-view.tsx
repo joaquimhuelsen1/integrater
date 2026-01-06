@@ -497,6 +497,7 @@ export function CRMView() {
           pipelines={pipelines}
           selectedPipelineId={selectedPipelineId}
           workspaceId={currentWorkspace.id}
+          workspaceName={currentWorkspace.name}
           onClose={() => setShowSettings(false)}
           onPipelineCreated={handlePipelineCreated}
           onPipelineUpdated={loadPipelines}
