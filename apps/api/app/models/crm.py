@@ -124,6 +124,7 @@ class DealBase(BaseModel):
     probability: int = Field(default=50, ge=0, le=100)
     expected_close_date: date | None = None
     custom_fields: dict[str, Any] = {}
+    info: str | None = None
 
 
 class DealCreate(DealBase):
