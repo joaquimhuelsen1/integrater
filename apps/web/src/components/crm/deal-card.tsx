@@ -2,7 +2,7 @@
 
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { Calendar, User, Trophy, XCircle, MessageSquare, Clock } from "lucide-react"
+import { Trophy, XCircle, MessageSquare } from "lucide-react"
 
 interface Deal {
   id: string
@@ -48,38 +48,15 @@ export function DealCard({ deal, onClick, isDragging }: DealCardProps) {
     }).format(value)
   }
 
-  const formatDate = (dateStr: string) => {
+  const formatDateTime = (dateStr: string) => {
     const date = new Date(dateStr)
     return date.toLocaleDateString("pt-BR", {
-      day: "2-digit",
-      month: "2-digit",
-    })
-  }
-
-  // Calcula dias até o vencimento
-  const getDaysUntilClose = (dateStr: string) => {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const closeDate = new Date(dateStr)
-    closeDate.setHours(0, 0, 0, 0)
-    const diffTime = closeDate.getTime() - today.getTime()
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-    return diffDays
-  }
-
-  const getDateStatus = (dateStr: string) => {
-    const days = getDaysUntilClose(dateStr)
-    if (days < 0) {
-      return { text: `${Math.abs(days)}d atrás`, color: "text-red-500" }
-    } else if (days === 0) {
-      return { text: "Hoje", color: "text-orange-500" }
-    } else if (days === 1) {
-      return { text: "Amanhã", color: "text-orange-500" }
-    } else if (days <= 7) {
-      return { text: `${days}d`, color: "text-yellow-600" }
-    } else {
-      return { text: formatDate(dateStr), color: "text-zinc-500" }
-    }
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).replace(".", "").replace(" de ", " de ")
   }
 
   // Avatar com iniciais
@@ -113,10 +90,6 @@ export function DealCard({ deal, onClick, isDragging }: DealCardProps) {
   const isClosed = isWon || isLost
   const hasConversation = !!deal.conversation_id
 
-  const dateStatus = deal.expected_close_date
-    ? getDateStatus(deal.expected_close_date)
-    : null
-
   return (
     <div
       ref={setNodeRef}
@@ -137,34 +110,31 @@ export function DealCard({ deal, onClick, isDragging }: DealCardProps) {
       }`}
     >
       {/* Header: Status + Conversation indicator */}
-      <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-1">
-          {isClosed ? (
-            isWon ? (
-              <span className="flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/50 dark:text-green-400">
-                <Trophy className="h-3 w-3" />
-                Ganho
-              </span>
-            ) : (
-              <span className="flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/50 dark:text-red-400">
-                <XCircle className="h-3 w-3" />
-                Perdido
-              </span>
-            )
-          ) : dateStatus && dateStatus.color === "text-red-500" ? (
-            <span className="flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-600 dark:bg-red-900/50">
-              <Clock className="h-3 w-3" />
-              Atrasado
-            </span>
-          ) : null}
-        </div>
-
-        {hasConversation && (
-          <div className="flex items-center" title="Tem conversa vinculada">
-            <MessageSquare className="h-3.5 w-3.5 text-blue-500" />
+      {(isClosed || hasConversation) && (
+        <div className="mb-2 flex items-center justify-between">
+          <div className="flex items-center gap-1">
+            {isClosed && (
+              isWon ? (
+                <span className="flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/50 dark:text-green-400">
+                  <Trophy className="h-3 w-3" />
+                  Ganho
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/50 dark:text-red-400">
+                  <XCircle className="h-3 w-3" />
+                  Perdido
+                </span>
+              )
+            )}
           </div>
-        )}
-      </div>
+
+          {hasConversation && (
+            <div className="flex items-center" title="Tem conversa vinculada">
+              <MessageSquare className="h-3.5 w-3.5 text-blue-500" />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Title */}
       <h4 className="mb-2 font-medium text-sm text-zinc-900 dark:text-white line-clamp-2 leading-tight">
@@ -192,38 +162,9 @@ export function DealCard({ deal, onClick, isDragging }: DealCardProps) {
         {formatCurrency(deal.value)}
       </div>
 
-      {/* Footer: Date + Probability */}
-      <div className="flex items-center justify-between border-t border-zinc-100 pt-2 dark:border-zinc-700/50">
-        {/* Date */}
-        <div className="flex items-center gap-1 text-xs">
-          {dateStatus ? (
-            <>
-              <Calendar className={`h-3 w-3 ${dateStatus.color}`} />
-              <span className={dateStatus.color}>{dateStatus.text}</span>
-            </>
-          ) : (
-            <span className="text-zinc-400">Sem data</span>
-          )}
-        </div>
-
-        {/* Probability bar */}
-        <div className="flex items-center gap-1.5">
-          <div className="h-1.5 w-10 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700">
-            <div
-              className={`h-full rounded-full transition-all ${
-                deal.probability >= 70
-                  ? "bg-green-500"
-                  : deal.probability >= 40
-                  ? "bg-yellow-500"
-                  : "bg-red-500"
-              }`}
-              style={{ width: `${deal.probability}%` }}
-            />
-          </div>
-          <span className="text-xs text-zinc-500 tabular-nums">
-            {deal.probability}%
-          </span>
-        </div>
+      {/* Footer: Created date */}
+      <div className="text-xs text-zinc-500 dark:text-zinc-400">
+        {formatDateTime(deal.created_at)}
       </div>
     </div>
   )
