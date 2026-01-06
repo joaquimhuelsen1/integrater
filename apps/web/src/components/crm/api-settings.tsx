@@ -23,12 +23,46 @@ interface ApiSettingsProps {
   pipelineName: string
 }
 
-const TAG_COLORS = [
-  "#ef4444", "#f97316", "#f59e0b", "#eab308", "#84cc16",
-  "#22c55e", "#10b981", "#14b8a6", "#06b6d4", "#0ea5e9",
-  "#3b82f6", "#6366f1", "#8b5cf6", "#a855f7", "#d946ef",
-  "#ec4899", "#f43f5e"
-]
+// Cores principais (tom forte) com seus tons mais claros
+const COLOR_PALETTE: Record<string, string[]> = {
+  // Vermelho
+  "#ef4444": ["#ef4444", "#f87171", "#fca5a5", "#fecaca", "#fee2e2"],
+  // Laranja
+  "#f97316": ["#f97316", "#fb923c", "#fdba74", "#fed7aa", "#ffedd5"],
+  // Âmbar
+  "#f59e0b": ["#f59e0b", "#fbbf24", "#fcd34d", "#fde68a", "#fef3c7"],
+  // Amarelo
+  "#eab308": ["#eab308", "#facc15", "#fde047", "#fef08a", "#fef9c3"],
+  // Lima
+  "#84cc16": ["#84cc16", "#a3e635", "#bef264", "#d9f99d", "#ecfccb"],
+  // Verde
+  "#22c55e": ["#22c55e", "#4ade80", "#86efac", "#bbf7d0", "#dcfce7"],
+  // Esmeralda
+  "#10b981": ["#10b981", "#34d399", "#6ee7b7", "#a7f3d0", "#d1fae5"],
+  // Teal
+  "#14b8a6": ["#14b8a6", "#2dd4bf", "#5eead4", "#99f6e4", "#ccfbf1"],
+  // Ciano
+  "#06b6d4": ["#06b6d4", "#22d3ee", "#67e8f9", "#a5f3fc", "#cffafe"],
+  // Azul claro
+  "#0ea5e9": ["#0ea5e9", "#38bdf8", "#7dd3fc", "#bae6fd", "#e0f2fe"],
+  // Azul
+  "#3b82f6": ["#3b82f6", "#60a5fa", "#93c5fd", "#bfdbfe", "#dbeafe"],
+  // Índigo
+  "#6366f1": ["#6366f1", "#818cf8", "#a5b4fc", "#c7d2fe", "#e0e7ff"],
+  // Violeta
+  "#8b5cf6": ["#8b5cf6", "#a78bfa", "#c4b5fd", "#ddd6fe", "#ede9fe"],
+  // Roxo
+  "#a855f7": ["#a855f7", "#c084fc", "#d8b4fe", "#e9d5ff", "#f3e8ff"],
+  // Fúcsia
+  "#d946ef": ["#d946ef", "#e879f9", "#f0abfc", "#f5d0fe", "#fae8ff"],
+  // Rosa
+  "#ec4899": ["#ec4899", "#f472b6", "#f9a8d4", "#fbcfe8", "#fce7f3"],
+  // Rose
+  "#f43f5e": ["#f43f5e", "#fb7185", "#fda4af", "#fecdd3", "#ffe4e6"],
+}
+
+// Cores principais (tons fortes) para mostrar inicialmente
+const MAIN_COLORS = Object.keys(COLOR_PALETTE) as (keyof typeof COLOR_PALETTE)[]
 
 export function ApiSettings({ pipelineId, pipelineName }: ApiSettingsProps) {
   const [apiKey, setApiKey] = useState<ApiKey | null>(null)
@@ -40,8 +74,9 @@ export function ApiSettings({ pipelineId, pipelineName }: ApiSettingsProps) {
   const [tags, setTags] = useState<Tag[]>([])
   const [isLoadingTags, setIsLoadingTags] = useState(true)
   const [newTagName, setNewTagName] = useState("")
-  const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0])
+  const [newTagColor, setNewTagColor] = useState<string>(MAIN_COLORS[0] ?? "#ef4444")
   const [isCreatingTag, setIsCreatingTag] = useState(false)
+  const [expandedColor, setExpandedColor] = useState<string | null>(null)
   const [editingTagId, setEditingTagId] = useState<string | null>(null)
   const [editingTagName, setEditingTagName] = useState("")
 
@@ -122,7 +157,8 @@ export function ApiSettings({ pipelineId, pipelineName }: ApiSettingsProps) {
         const data = await res.json()
         setTags([...tags, data])
         setNewTagName("")
-        setNewTagColor(TAG_COLORS[Math.floor(Math.random() * TAG_COLORS.length)])
+        setNewTagColor(MAIN_COLORS[Math.floor(Math.random() * MAIN_COLORS.length)] ?? "#ef4444")
+        setExpandedColor(null)
       }
     } catch (error) {
       console.error("Erro ao criar tag:", error)
@@ -287,33 +323,83 @@ export function ApiSettings({ pipelineId, pipelineName }: ApiSettingsProps) {
         </p>
 
         {/* Create new tag */}
-        <div className="flex items-center gap-2 mb-4">
-          <div className="flex gap-1">
-            {TAG_COLORS.slice(0, 8).map((color) => (
-              <button
-                key={color}
-                onClick={() => setNewTagColor(color)}
-                className={`h-6 w-6 rounded-full ${newTagColor === color ? "ring-2 ring-offset-2 ring-blue-500" : ""}`}
-                style={{ backgroundColor: color }}
-              />
-            ))}
+        <div className="space-y-3 mb-4">
+          {/* Color picker */}
+          <div className="flex flex-wrap gap-1.5">
+            {MAIN_COLORS.map((mainColor) => {
+              const isExpanded = expandedColor === mainColor
+              const shades = COLOR_PALETTE[mainColor] ?? [mainColor]
+              const isSelected = shades.includes(newTagColor)
+              
+              return (
+                <div key={mainColor} className="relative">
+                  <button
+                    onClick={() => {
+                      if (isExpanded) {
+                        setExpandedColor(null)
+                      } else {
+                        setExpandedColor(mainColor)
+                        setNewTagColor(mainColor)
+                      }
+                    }}
+                    className={`h-7 w-7 rounded-full transition-all ${
+                      isSelected 
+                        ? "ring-2 ring-offset-2 ring-zinc-900 dark:ring-white" 
+                        : "hover:scale-110"
+                    }`}
+                    style={{ backgroundColor: mainColor }}
+                    title="Clique para ver tons"
+                  />
+                  
+                  {/* Expanded shades dropdown */}
+                  {isExpanded && shades.length > 0 && (
+                    <div className="absolute top-9 left-0 z-10 flex gap-1 rounded-lg bg-white p-2 shadow-lg border border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700">
+                      {shades.map((shade, idx) => (
+                        <button
+                          key={shade}
+                          onClick={() => {
+                            setNewTagColor(shade)
+                            setExpandedColor(null)
+                          }}
+                          className={`h-6 w-6 rounded-full transition-all hover:scale-110 ${
+                            newTagColor === shade 
+                              ? "ring-2 ring-offset-1 ring-zinc-900 dark:ring-white" 
+                              : ""
+                          }`}
+                          style={{ backgroundColor: shade }}
+                          title={idx === 0 ? "Forte" : idx === shades.length - 1 ? "Claro" : ""}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
-          <input
-            type="text"
-            value={newTagName}
-            onChange={(e) => setNewTagName(e.target.value)}
-            placeholder="Nome da tag..."
-            className="flex-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800"
-            onKeyDown={(e) => e.key === "Enter" && handleCreateTag()}
-          />
-          <button
-            onClick={handleCreateTag}
-            disabled={!newTagName.trim() || isCreatingTag}
-            className="flex items-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-50"
-          >
-            <Plus className="h-4 w-4" />
-            Criar
-          </button>
+          
+          {/* Tag name input + button */}
+          <div className="flex items-center gap-2">
+            <div
+              className="h-8 w-8 rounded-full flex-shrink-0 border-2 border-zinc-300 dark:border-zinc-600"
+              style={{ backgroundColor: newTagColor }}
+            />
+            <input
+              type="text"
+              value={newTagName}
+              onChange={(e) => setNewTagName(e.target.value)}
+              placeholder="Nome da tag..."
+              className="flex-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800"
+              onKeyDown={(e) => e.key === "Enter" && handleCreateTag()}
+            />
+            <button
+              onClick={handleCreateTag}
+              disabled={!newTagName.trim() || isCreatingTag}
+              className="flex items-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4" />
+              Criar
+            </button>
+          </div>
         </div>
 
         {/* Tags list */}
