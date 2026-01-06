@@ -34,6 +34,7 @@ from app.routers import (
     workspaces_router,
     analytics_router,
     loss_reasons_router,
+    webhooks_router,
 )
 
 settings = get_settings()
@@ -113,3 +114,4 @@ app.include_router(deal_tags_router)
 app.include_router(workspaces_router)
 app.include_router(analytics_router)
 app.include_router(loss_reasons_router)
+app.include_router(webhooks_router)

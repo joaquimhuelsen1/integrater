@@ -5,10 +5,22 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from supabase import Client
 from pydantic import BaseModel
 from typing import Any
+import random
 
 from app.deps import get_supabase
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+
+
+def generate_tag_color() -> str:
+    """Gera uma cor aleatória para tag."""
+    colors = [
+        "#ef4444", "#f97316", "#f59e0b", "#eab308", "#84cc16",
+        "#22c55e", "#10b981", "#14b8a6", "#06b6d4", "#0ea5e9",
+        "#3b82f6", "#6366f1", "#8b5cf6", "#a855f7", "#d946ef",
+        "#ec4899", "#f43f5e"
+    ]
+    return random.choice(colors)
 
 
 class WebhookDealCreate(BaseModel):
@@ -19,6 +31,7 @@ class WebhookDealCreate(BaseModel):
     contact_id: str | None = None
     info: str | None = None  # Informações formatadas
     custom_fields: dict[str, Any] = {}
+    tags: list[str] = []  # Lista de nomes de tags (cria se não existir)
 
 
 @router.post("/deals", status_code=201)
@@ -116,8 +129,42 @@ async def create_deal_via_webhook(
         "content": f"Deal criado via API: {data.title}",
     }).execute()
 
+    # Processa tags (cria se não existir e associa ao deal)
+    tags_added = []
+    for tag_name in data.tags:
+        tag_name = tag_name.strip()
+        if not tag_name:
+            continue
+
+        # Busca tag existente
+        existing_tag = db.table("deal_tags").select("id").eq(
+            "owner_id", owner_id
+        ).eq("name", tag_name).execute()
+
+        if existing_tag.data:
+            tag_id = existing_tag.data[0]["id"]
+        else:
+            # Cria nova tag
+            new_tag = db.table("deal_tags").insert({
+                "owner_id": owner_id,
+                "name": tag_name,
+                "color": generate_tag_color()
+            }).execute()
+            tag_id = new_tag.data[0]["id"]
+
+        # Associa tag ao deal (ignora se já existe)
+        try:
+            db.table("deal_tag_assignments").insert({
+                "deal_id": deal["id"],
+                "tag_id": tag_id
+            }).execute()
+            tags_added.append(tag_name)
+        except Exception:
+            pass  # Já existe
+
     return {
         "success": True,
         "deal_id": deal["id"],
+        "tags_added": tags_added,
         "message": "Deal criado com sucesso"
     }

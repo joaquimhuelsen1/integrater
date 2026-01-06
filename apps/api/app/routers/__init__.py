@@ -23,6 +23,7 @@ from .deal_tags import router as deal_tags_router
 from .workspaces import router as workspaces_router
 from .analytics import router as analytics_router
 from .loss_reasons import router as loss_reasons_router
+from .webhooks import router as webhooks_router
 
 __all__ = [
     "health_router",
@@ -50,4 +51,5 @@ __all__ = [
     "workspaces_router",
     "analytics_router",
     "loss_reasons_router",
+    "webhooks_router",
 ]

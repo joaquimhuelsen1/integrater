@@ -1,7 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { X, Plus, Trash2, GripVertical, Check, Trophy, XCircle } from "lucide-react"
+import { X, Plus, Trash2, GripVertical, Check, Trophy, XCircle, Key } from "lucide-react"
+import { ApiSettings } from "./api-settings"
 import {
   DndContext,
   closestCenter,
@@ -164,7 +165,7 @@ export function PipelineSettings({
   onPipelineUpdated,
   onStagesUpdated,
 }: PipelineSettingsProps) {
-  const [activeTab, setActiveTab] = useState<"pipelines" | "stages">("pipelines")
+  const [activeTab, setActiveTab] = useState<"pipelines" | "stages" | "api">("pipelines")
   const [newPipelineName, setNewPipelineName] = useState("")
   const [isCreating, setIsCreating] = useState(false)
 
@@ -343,7 +344,7 @@ export function PipelineSettings({
   }
 
   // Load stages when switching to stages tab
-  const handleTabChange = (tab: "pipelines" | "stages") => {
+  const handleTabChange = (tab: "pipelines" | "stages" | "api") => {
     setActiveTab(tab)
     if (tab === "stages" && selectedPipelineId) {
       loadStages(selectedPipelineId)
@@ -398,11 +399,30 @@ export function PipelineSettings({
           >
             Etapas
           </button>
+          <button
+            onClick={() => handleTabChange("api")}
+            disabled={!selectedPipelineId}
+            className={`flex-1 px-4 py-2 text-sm font-medium ${
+              activeTab === "api"
+                ? "border-b-2 border-blue-500 text-blue-500"
+                : "text-zinc-500 hover:text-zinc-700"
+            } disabled:opacity-50`}
+          >
+            <span className="flex items-center justify-center gap-1">
+              <Key className="h-3.5 w-3.5" />
+              API
+            </span>
+          </button>
         </div>
 
         {/* Content */}
         <div className="max-h-[60vh] overflow-y-auto p-4">
-          {activeTab === "pipelines" ? (
+          {activeTab === "api" && selectedPipelineId ? (
+            <ApiSettings 
+              pipelineId={selectedPipelineId} 
+              pipelineName={pipelines.find(p => p.id === selectedPipelineId)?.name || "Pipeline"} 
+            />
+          ) : activeTab === "pipelines" ? (
             <div className="space-y-4">
               {/* Create Pipeline */}
               <div className="flex gap-2">
