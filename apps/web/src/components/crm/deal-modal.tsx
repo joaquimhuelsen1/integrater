@@ -641,7 +641,7 @@ export function DealModal({
           ) : (
             <>
               {/* Left Sidebar - Summary (Pipedrive style) */}
-              <div className="w-72 flex-shrink-0 overflow-y-auto border-r border-zinc-200 p-4 dark:border-zinc-800">
+              <div className="w-[500px] flex-shrink-0 overflow-y-auto border-r border-zinc-200 p-4 dark:border-zinc-800">
                 {/* Summary Header */}
                 <div className="mb-4 flex items-center justify-between">
                   <h3 className="font-semibold">Summary</h3>

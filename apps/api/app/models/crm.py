@@ -48,6 +48,14 @@ class PipelineWithStages(Pipeline):
     stages: list["Stage"] = []
 
 
+class PipelineApiKey(BaseModel):
+    id: UUID
+    pipeline_id: UUID
+    api_key: str
+    created_at: datetime
+    updated_at: datetime
+
+
 # ============================================
 # Stage
 # ============================================

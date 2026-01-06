@@ -4,6 +4,7 @@ Router Pipelines - CRUD de pipelines e stages (CRM).
 from fastapi import APIRouter, Depends, HTTPException, Query
 from supabase import Client
 from uuid import UUID
+import secrets
 
 from app.deps import get_supabase, get_current_user_id
 from app.models.crm import (
@@ -15,6 +16,7 @@ from app.models.crm import (
     StageCreate,
     StageUpdate,
     StageReorderRequest,
+    PipelineApiKey,
 )
 
 router = APIRouter(prefix="/pipelines", tags=["pipelines"])
@@ -256,3 +258,93 @@ async def reorder_stages(
         db.table("stages").update({"position": position}).eq(
             "id", str(stage_id)
         ).eq("pipeline_id", str(pipeline_id)).eq("owner_id", str(owner_id)).execute()
+
+
+# ============================================
+# API Keys
+# ============================================
+def generate_api_key() -> str:
+    """Gera uma API key segura de 32 bytes (64 caracteres hex)."""
+    return f"pk_{secrets.token_hex(32)}"
+
+
+@router.get("/{pipeline_id}/api-key", response_model=PipelineApiKey | None)
+async def get_api_key(
+    pipeline_id: UUID,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Retorna a API key do pipeline (se existir)."""
+    # Verifica se pipeline pertence ao usuário
+    pipeline = db.table("pipelines").select("id").eq(
+        "id", str(pipeline_id)
+    ).eq("owner_id", str(owner_id)).single().execute()
+
+    if not pipeline.data:
+        raise HTTPException(status_code=404, detail="Pipeline não encontrado")
+
+    # Busca API key
+    result = db.table("pipeline_api_keys").select("*").eq(
+        "pipeline_id", str(pipeline_id)
+    ).execute()
+
+    if result.data:
+        return result.data[0]
+    return None
+
+
+@router.post("/{pipeline_id}/api-key", response_model=PipelineApiKey, status_code=201)
+async def create_or_regenerate_api_key(
+    pipeline_id: UUID,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Cria ou regenera a API key do pipeline."""
+    # Verifica se pipeline pertence ao usuário
+    pipeline = db.table("pipelines").select("id").eq(
+        "id", str(pipeline_id)
+    ).eq("owner_id", str(owner_id)).single().execute()
+
+    if not pipeline.data:
+        raise HTTPException(status_code=404, detail="Pipeline não encontrado")
+
+    new_api_key = generate_api_key()
+
+    # Verifica se já existe
+    existing = db.table("pipeline_api_keys").select("id").eq(
+        "pipeline_id", str(pipeline_id)
+    ).execute()
+
+    if existing.data:
+        # Atualiza
+        result = db.table("pipeline_api_keys").update({
+            "api_key": new_api_key
+        }).eq("pipeline_id", str(pipeline_id)).execute()
+    else:
+        # Cria nova
+        result = db.table("pipeline_api_keys").insert({
+            "pipeline_id": str(pipeline_id),
+            "api_key": new_api_key
+        }).execute()
+
+    return result.data[0]
+
+
+@router.delete("/{pipeline_id}/api-key", status_code=204)
+async def delete_api_key(
+    pipeline_id: UUID,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Remove a API key do pipeline."""
+    # Verifica se pipeline pertence ao usuário
+    pipeline = db.table("pipelines").select("id").eq(
+        "id", str(pipeline_id)
+    ).eq("owner_id", str(owner_id)).single().execute()
+
+    if not pipeline.data:
+        raise HTTPException(status_code=404, detail="Pipeline não encontrado")
+
+    db.table("pipeline_api_keys").delete().eq(
+        "pipeline_id", str(pipeline_id)
+    ).execute()
