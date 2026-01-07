@@ -19,6 +19,8 @@ import {
   RotateCcw,
   Upload,
   File,
+  MoreVertical,
+  Archive,
 } from "lucide-react"
 import { ContactSelector } from "./contact-selector"
 import { DealTimeline } from "./deal-timeline"
@@ -136,6 +138,9 @@ export function DealModal({
   // Editing states
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [isEditingValue, setIsEditingValue] = useState(false)
+  
+  // Menu dropdown
+  const [showMoreMenu, setShowMoreMenu] = useState(false)
 
   const isNew = !dealId
   const isWon = !!deal?.won_at
@@ -285,8 +290,23 @@ export function DealModal({
     }
   }
 
+  const handleArchive = async () => {
+    if (!dealId) return
+    setShowMoreMenu(false)
+
+    try {
+      const res = await apiFetch(`/deals/${dealId}/archive`, { method: "POST" })
+      if (res.ok) {
+        onSave()
+      }
+    } catch (error) {
+      console.error("Erro ao arquivar deal:", error)
+    }
+  }
+
   const handleDelete = async () => {
-    if (!dealId || !confirm("Tem certeza que deseja arquivar este deal?")) return
+    if (!dealId || !confirm("Tem certeza que deseja excluir este deal permanentemente? Esta ação não pode ser desfeita.")) return
+    setShowMoreMenu(false)
 
     try {
       const res = await apiFetch(`/deals/${dealId}`, { method: "DELETE" })
@@ -294,7 +314,7 @@ export function DealModal({
         onSave()
       }
     } catch (error) {
-      console.error("Erro ao arquivar deal:", error)
+      console.error("Erro ao excluir deal:", error)
     }
   }
 
@@ -573,10 +593,42 @@ export function DealModal({
               )}
             </button>
 
-            {/* More options */}
-            <button className="rounded p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800">
-              <span className="text-xl">⋯</span>
-            </button>
+            {/* More options menu */}
+            {!isNew && (
+              <div className="relative">
+                <button 
+                  onClick={() => setShowMoreMenu(!showMoreMenu)}
+                  className="rounded p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                >
+                  <MoreVertical className="h-5 w-5" />
+                </button>
+                
+                {showMoreMenu && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-10" 
+                      onClick={() => setShowMoreMenu(false)}
+                    />
+                    <div className="absolute right-0 top-9 z-20 w-40 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+                      <button
+                        onClick={handleArchive}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                      >
+                        <Archive className="h-4 w-4" />
+                        Arquivar
+                      </button>
+                      <button
+                        onClick={handleDelete}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Excluir
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -845,18 +897,7 @@ export function DealModal({
                   </div>
                 )}
 
-                {/* Delete button */}
-                {!isNew && (
-                  <div className="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-700">
-                    <button
-                      onClick={handleDelete}
-                      className="flex w-full items-center justify-center gap-1 rounded-lg px-3 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      Arquivar Deal
-                    </button>
-                  </div>
-                )}
+
               </div>
 
               {/* Right Content Area - Tabs */}
