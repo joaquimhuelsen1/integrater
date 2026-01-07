@@ -82,6 +82,20 @@ async def db_async(query_fn):
     return await asyncio.to_thread(query_fn)
 
 
+def normalize_group_id(chat_id: int) -> int:
+    """
+    Normaliza ID de grupo/canal do Telegram.
+    Remove o prefixo -100 de megagroups/supergroups para consistência.
+    Ex: -1003062756952 -> 3062756952
+    """
+    chat_id_str = str(chat_id)
+    if chat_id_str.startswith("-100"):
+        return int(chat_id_str[4:])
+    elif chat_id_str.startswith("-"):
+        return int(chat_id_str[1:])
+    return chat_id
+
+
 class TelegramWorker:
     def __init__(self):
         self.api_id = int(os.environ["TELEGRAM_API_ID"])
@@ -607,9 +621,12 @@ class TelegramWorker:
 
     async def _get_group_data(self, client: TelegramClient, chat) -> dict:
         """Busca dados do grupo/canal incluindo foto."""
+        # Normaliza ID do grupo (remove prefixo -100)
+        normalized_id = normalize_group_id(chat.id)
+        
         group_data = {
-            "telegram_id": chat.id,
-            "title": getattr(chat, 'title', None) or f"Grupo {chat.id}",
+            "telegram_id": normalized_id,
+            "title": getattr(chat, 'title', None) or f"Grupo {normalized_id}",
             "username": getattr(chat, 'username', None),
             "participant_count": None,
             "photo_url": None,
@@ -628,7 +645,7 @@ class TelegramWorker:
         try:
             photo_bytes = await client.download_profile_photo(chat, file=bytes)
             if photo_bytes:
-                storage_path = f"avatars/telegram/group_{chat.id}.jpg"
+                storage_path = f"avatars/telegram/group_{normalized_id}.jpg"
                 
                 supabase_url = os.environ["SUPABASE_URL"]
                 supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
@@ -807,7 +824,7 @@ class TelegramWorker:
                         account_id=acc_id,
                         owner_id=owner_id,
                         workspace_id=workspace_id,
-                        telegram_user_id=chat.id,
+                        telegram_user_id=normalize_group_id(chat.id),
                         telegram_msg_id=msg.id,
                         sender=sender_data,
                         content=content,
@@ -851,12 +868,15 @@ class TelegramWorker:
                 "media_name": media_info.get("name") if media_info else None,
             }
             
+            # Usa ID normalizado do grupo
+            normalized_chat_id = normalize_group_id(chat.id)
+            
             if is_outgoing:
                 await notify_outbound_message(
                     account_id=acc_id,
                     owner_id=owner_id,
                     workspace_id=workspace_id,
-                    telegram_user_id=chat.id,
+                    telegram_user_id=normalized_chat_id,
                     telegram_msg_id=msg.id,
                     content=content,
                     timestamp=msg.date,
@@ -868,7 +888,7 @@ class TelegramWorker:
                     account_id=acc_id,
                     owner_id=owner_id,
                     workspace_id=workspace_id,
-                    telegram_user_id=chat.id,
+                    telegram_user_id=normalized_chat_id,
                     telegram_msg_id=msg.id,
                     sender=sender_data,
                     content=content,
@@ -955,12 +975,13 @@ class TelegramWorker:
                 "service_event": service_data,
             }
             
-            # Envia para n8n
+            # Envia para n8n (usa ID normalizado)
+            normalized_chat_id = normalize_group_id(chat.id)
             await notify_inbound_message(
                 account_id=acc_id,
                 owner_id=owner_id,
                 workspace_id=workspace_id,
-                telegram_user_id=chat.id,
+                telegram_user_id=normalized_chat_id,
                 telegram_msg_id=event.action_message.id if event.action_message else 0,
                 sender=sender_data,
                 content=content,
@@ -970,7 +991,7 @@ class TelegramWorker:
                 message_type="service",
             )
             
-            print(f"[CHAT-ACTION] Enviado para n8n: {action_type} user={action_user_id} group={chat.id}")
+            print(f"[CHAT-ACTION] Enviado para n8n: {action_type} user={action_user_id} group={normalized_chat_id}")
             
         except Exception as e:
             import traceback
