@@ -98,7 +98,7 @@ async def list_deals_by_pipeline(
     deal_ids = [d["id"] for d in (deals_result.data or [])]
     deal_tags_map = {}
     if deal_ids:
-        tags_result = db.table("deal_tag_links").select(
+        tags_result = db.table("deal_tag_assignments").select(
             "deal_id, deal_tags(id, name, color)"
         ).in_("deal_id", deal_ids).execute()
         
