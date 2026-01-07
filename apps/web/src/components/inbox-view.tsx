@@ -1400,7 +1400,9 @@ I'll be waiting.`
     const meta = conv.primary_identity?.metadata
     // Email: display_name
     if (meta?.display_name) return meta.display_name
-    // Telegram: first_name + last_name
+    // Telegram group: title
+    if (meta?.title) return meta.title
+    // Telegram user: first_name + last_name
     if (meta?.first_name) {
       return meta.last_name ? `${meta.first_name} ${meta.last_name}` : meta.first_name
     }
