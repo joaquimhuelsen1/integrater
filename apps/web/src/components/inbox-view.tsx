@@ -16,7 +16,7 @@ import { WorkspaceSelector } from "@/components/workspace-selector"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { SidebarMenu } from "@/components/sidebar-menu"
 import { CRMPanel } from "@/components/crm/crm-panel"
-import { Menu, Search, X } from "lucide-react"
+import { ArrowLeft, Search } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useWorkspace } from "@/contexts/workspace-context"
 
@@ -103,7 +103,9 @@ export function InboxView({ userEmail, workspaceId }: InboxViewProps) {
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null)
   const [cachedSelectedConversation, setCachedSelectedConversation] = useState<Conversation | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  // Mobile: controla qual view está ativa (list ou chat)
+  // Em mobile, mostra apenas uma view por vez (estilo WhatsApp)
+  const [mobileView, setMobileView] = useState<"list" | "chat">("list")
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedChannel, setSelectedChannel] = useState<ChannelId>(null)
   const [filterTags, setFilterTags] = useState<string[]>([])
@@ -860,13 +862,18 @@ I'll be waiting.`
       loadMessages(id)
     }
 
-    // Marca como lida ao selecionar
+// Marca como lida ao selecionar
     markAsRead(id)
-    // Fecha sidebar em mobile
+    // Mobile: muda para view de chat
     if (window.innerWidth < 768) {
-      setIsSidebarOpen(false)
+      setMobileView("chat")
     }
   }, [conversations, loadMessages, loadContactMessages, markAsRead])
+
+  // Voltar para lista no mobile
+  const handleBackToList = useCallback(() => {
+    setMobileView("list")
+  }, [])
 
   // Enviar mensagem com attachments (com optimistic update)
   const handleSendMessage = useCallback(async (text: string, attachmentFiles?: File[]) => {
@@ -1414,16 +1421,18 @@ I'll be waiting.`
     return "Desconhecido"
   }
 
-  return (
+return (
     <div className="flex h-screen overflow-hidden bg-zinc-50 dark:bg-zinc-950">
-      {/* Sidebar */}
+      {/* Sidebar / Lista de Conversas */}
+      {/* Mobile: fullscreen quando mobileView === "list" */}
+      {/* Desktop: sempre visível com largura fixa */}
       <div
-        className={`flex w-[460px] flex-shrink-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 ${
-          isSidebarOpen ? "" : "hidden md:flex"
-        }`}
+        className={`flex flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900
+          ${mobileView === "list" ? "w-full" : "hidden"} 
+          md:flex md:w-80 lg:w-96 xl:w-[420px] md:flex-shrink-0`}
       >
         {/* Header */}
-        <div className="flex h-16 flex-shrink-0 items-center justify-between border-b border-zinc-200 px-4 dark:border-zinc-800">
+        <div className="flex h-14 md:h-16 flex-shrink-0 items-center justify-between border-b border-zinc-200 px-3 md:px-4 dark:border-zinc-800">
           <div className="flex items-center gap-2">
             <SidebarMenu
               userEmail={userEmail}
@@ -1431,39 +1440,35 @@ I'll be waiting.`
               onFilterTagsChange={setFilterTags}
               onLogout={handleLogout}
             />
-            <h1 className="text-lg font-semibold">Inbox</h1>
+            <h1 className="text-xl md:text-lg font-bold md:font-semibold">Inbox</h1>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 md:gap-2">
             <WorkspaceSelector compact />
             <ThemeToggle />
-            <button
-              className="rounded p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 md:hidden"
-              onClick={() => setIsSidebarOpen(false)}
-            >
-              <X className="h-5 w-5 text-zinc-500" />
-            </button>
           </div>
         </div>
 
         {/* Search */}
-        <div className="flex-shrink-0 p-4">
+        <div className="flex-shrink-0 px-3 py-2 md:p-4">
           <div className="relative">
-            <Search className="absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-zinc-400" />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 md:h-5 md:w-5 -translate-y-1/2 text-zinc-400" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Buscar conversas..."
-              className="w-full rounded-lg border border-zinc-300 py-2.5 pl-11 pr-4 text-base focus:border-blue-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-800"
+              className="w-full rounded-xl md:rounded-lg border-0 md:border md:border-zinc-300 bg-zinc-100 md:bg-white py-2.5 md:py-2.5 pl-10 md:pl-11 pr-4 text-base focus:bg-zinc-200 md:focus:bg-white md:focus:border-blue-500 focus:outline-none dark:bg-zinc-800 dark:md:border-zinc-700"
             />
           </div>
         </div>
 
-        {/* Channel Tabs */}
-        <ChannelTabs
-          selected={selectedChannel}
-          onSelect={setSelectedChannel}
-        />
+        {/* Channel Tabs - scroll horizontal no mobile */}
+        <div className="overflow-x-auto scrollbar-hide">
+          <ChannelTabs
+            selected={selectedChannel}
+            onSelect={setSelectedChannel}
+          />
+        </div>
 
         {/* Conversation List */}
         <div className="flex-1 overflow-y-auto">
@@ -1492,20 +1497,17 @@ I'll be waiting.`
 
       </div>
 
-      {/* Chat */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Mobile header */}
-        <div className="flex h-14 flex-shrink-0 items-center border-b border-zinc-200 px-4 dark:border-zinc-800 md:hidden">
-          <button
-            onClick={() => setIsSidebarOpen(true)}
-            className="rounded p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-          >
-            <Menu className="h-5 w-5" />
-          </button>
-        </div>
-
+      {/* Chat View */}
+      {/* Mobile: fullscreen quando mobileView === "chat" */}
+      {/* Desktop: sempre visível, ocupa espaço restante */}
+      <div 
+        className={`flex flex-1 flex-col overflow-hidden
+          ${mobileView === "chat" ? "w-full" : "hidden"}
+          md:flex`}
+      >
         <div className="flex-1 overflow-hidden">
           <ChatView
+            onBackToList={handleBackToList}
             conversationId={selectedId}
             messages={messages}
             displayName={getDisplayName(selectedConversation)}

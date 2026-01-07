@@ -391,8 +391,8 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
 
   const hasContent = text.trim() || attachments.length > 0
 
-  return (
-    <div className="flex-shrink-0 px-4 pb-4 pt-2 md:px-12 lg:px-20">
+return (
+    <div className="flex-shrink-0 px-2 pb-3 pt-2 md:px-12 md:pb-4 lg:px-20">
       <div className="mx-auto max-w-3xl">
 
       {/* Attachment previews */}
@@ -477,8 +477,8 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
           </button>
         </div>
       ) : (
-        /* Main composer - Telegram style */
-        <div className="flex items-end gap-3">
+/* Main composer - Telegram style */
+        <div className="flex items-end gap-1.5 md:gap-3">
           {/* Input container with emoji and attach inside */}
           <div className={`relative flex min-w-0 flex-1 flex-col border border-zinc-200 bg-zinc-100 dark:border-zinc-700 dark:bg-[#212121] ${replyTo ? "rounded-2xl" : "rounded-3xl"}`}>
             {/* Reply preview - dentro do input, estilo Telegram */}
@@ -518,8 +518,8 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
             })()}
             {/* Input row */}
             <div className="flex items-end">
-            {/* Emoji picker */}
-            <div className="relative" data-emoji-picker>
+{/* Emoji picker - esconde no mobile para economizar espaço */}
+            <div className="relative hidden md:block" data-emoji-picker>
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setShowEmojis(!showEmojis) }}
@@ -553,7 +553,7 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
               )}
             </div>
 
-            {/* Textarea */}
+{/* Textarea */}
             <textarea
               ref={textareaRef}
               value={text}
@@ -562,7 +562,7 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
               placeholder="Message"
               rows={1}
               disabled={disabled}
-              className="flex-1 resize-none bg-transparent py-2.5 pr-2 text-sm focus:outline-none disabled:opacity-50"
+              className="flex-1 resize-none bg-transparent py-2.5 pl-3 md:pl-0 pr-2 text-base md:text-sm focus:outline-none disabled:opacity-50"
             />
 
             {/* Templates dropdown - comandos rápidos (só aparece quando digita /) */}
@@ -588,21 +588,21 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
               </div>
             )}
 
-            {/* Attach button */}
+{/* Attach button */}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-300"
+              className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-zinc-500 hover:text-zinc-700 active:bg-zinc-200 dark:text-zinc-400 dark:hover:text-zinc-300 dark:active:bg-zinc-700"
               title="Anexar arquivo"
             >
-              <Paperclip className="h-6 w-6" />
+              <Paperclip className="h-5 w-5 md:h-6 md:w-6" />
             </button>
             </div>
           </div>
 
-          {/* Templates button - visible */}
+{/* Templates button - esconde em mobile */}
           {templates.length > 0 && (
-            <div className="relative" data-templates-dropdown>
+            <div className="relative hidden md:block" data-templates-dropdown>
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setShowTemplates(!showTemplates) }}
@@ -632,13 +632,13 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
             </div>
           )}
 
-          {/* Translate button - only show when there's text */}
+{/* Translate button - esconde em mobile */}
           {text.trim() && (
             <button
               type="button"
               onClick={translateDraft}
               disabled={isTranslating || disabled}
-              className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-purple-500 hover:bg-purple-100 disabled:opacity-50 dark:hover:bg-purple-900/30"
+              className="hidden md:flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-purple-500 hover:bg-purple-100 disabled:opacity-50 dark:hover:bg-purple-900/30"
               title="Traduzir para inglês"
             >
               {isTranslating ? (
@@ -656,13 +656,13 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
             </span>
           )}
 
-          {/* Mic / Send button */}
+{/* Mic / Send button */}
           {hasContent ? (
             <button
               type="button"
               onClick={handleSubmit}
               disabled={disabled || isOverLimit}
-              className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-white disabled:opacity-50 ${
+              className={`flex h-10 w-10 md:h-11 md:w-11 flex-shrink-0 items-center justify-center rounded-full text-white disabled:opacity-50 active:scale-95 transition-transform ${
                 isOverLimit ? "bg-red-500 cursor-not-allowed" : "bg-violet-500 hover:bg-violet-600"
               }`}
               title={isOverLimit ? `Texto excede limite de ${charLimit} caracteres` : "Enviar"}
@@ -674,7 +674,7 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
               type="button"
               onClick={startRecording}
               disabled={disabled}
-              className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-violet-500 text-white hover:bg-violet-600 disabled:opacity-50"
+              className="flex h-10 w-10 md:h-11 md:w-11 flex-shrink-0 items-center justify-center rounded-full bg-violet-500 text-white hover:bg-violet-600 active:scale-95 transition-transform disabled:opacity-50"
               title="Gravar áudio"
             >
               <Mic className="h-5 w-5" />

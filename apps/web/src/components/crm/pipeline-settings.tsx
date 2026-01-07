@@ -84,23 +84,23 @@ function SortableStageItem({
     <div
       ref={setNodeRef}
       style={style}
-      className="flex items-center gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900"
+      className="flex items-center gap-2 md:gap-3 rounded-lg border border-zinc-200 bg-white p-2 md:p-3 dark:border-zinc-800 dark:bg-zinc-900"
     >
       <button
         {...attributes}
         {...listeners}
-        className="cursor-grab touch-none text-zinc-400 hover:text-zinc-600 active:cursor-grabbing"
+        className="cursor-grab touch-none text-zinc-400 hover:text-zinc-600 active:cursor-grabbing p-1"
       >
-        <GripVertical className="h-4 w-4" />
+        <GripVertical className="h-5 w-5 md:h-4 md:w-4" />
       </button>
 
-      {/* Color Picker */}
-      <div className="flex gap-1">
+      {/* Color Picker - horizontal scroll on mobile */}
+      <div className="flex gap-1 overflow-x-auto flex-shrink-0">
         {stageColors.map((color) => (
           <button
             key={color}
             onClick={() => onUpdateStage(stage.id, { color })}
-            className={`h-5 w-5 rounded-full border-2 ${
+            className={`h-6 w-6 md:h-5 md:w-5 rounded-full border-2 flex-shrink-0 ${
               stage.color === color
                 ? "border-zinc-900 dark:border-white"
                 : "border-transparent"
@@ -116,7 +116,7 @@ function SortableStageItem({
         value={stage.name}
         onChange={(e) => onNameChange(stage.id, e.target.value)}
         onBlur={(e) => onUpdateStage(stage.id, { name: e.target.value })}
-        className="flex-1 bg-transparent text-sm font-medium outline-none"
+        className="flex-1 min-w-0 bg-transparent text-sm font-medium outline-none"
       />
 
       {/* Win/Loss toggles */}
@@ -124,34 +124,34 @@ function SortableStageItem({
         onClick={() =>
           onUpdateStage(stage.id, { is_win: !stage.is_win, is_loss: false })
         }
-        className={`rounded p-1 ${
+        className={`rounded p-1.5 md:p-1 ${
           stage.is_win
             ? "bg-green-100 text-green-600 dark:bg-green-900/50"
-            : "text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            : "text-zinc-400 hover:bg-zinc-100 active:bg-zinc-200 dark:hover:bg-zinc-800"
         }`}
         title="Etapa de ganho"
       >
-        <Trophy className="h-4 w-4" />
+        <Trophy className="h-5 w-5 md:h-4 md:w-4" />
       </button>
       <button
         onClick={() =>
           onUpdateStage(stage.id, { is_loss: !stage.is_loss, is_win: false })
         }
-        className={`rounded p-1 ${
+        className={`rounded p-1.5 md:p-1 ${
           stage.is_loss
             ? "bg-red-100 text-red-600 dark:bg-red-900/50"
-            : "text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            : "text-zinc-400 hover:bg-zinc-100 active:bg-zinc-200 dark:hover:bg-zinc-800"
         }`}
         title="Etapa de perda"
       >
-        <XCircle className="h-4 w-4" />
+        <XCircle className="h-5 w-5 md:h-4 md:w-4" />
       </button>
 
       <button
         onClick={() => onDeleteStage(stage.id)}
-        className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-red-500 dark:hover:bg-zinc-800"
+        className="rounded p-1.5 md:p-1 text-zinc-400 hover:bg-zinc-100 hover:text-red-500 active:bg-zinc-200 dark:hover:bg-zinc-800"
       >
-        <Trash2 className="h-4 w-4" />
+        <Trash2 className="h-5 w-5 md:h-4 md:w-4" />
       </button>
     </div>
   )
@@ -365,24 +365,24 @@ export function PipelineSettings({
   ]
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-xl rounded-lg bg-white shadow-xl dark:bg-zinc-900">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 md:p-0">
+      <div className="w-full h-full md:h-auto md:max-h-[90vh] max-w-xl rounded-lg bg-white shadow-xl dark:bg-zinc-900 flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <div className="flex items-center justify-between border-b border-zinc-200 px-3 md:px-4 py-3 dark:border-zinc-800 flex-shrink-0">
           <h2 className="text-lg font-semibold">Configurações</h2>
           <button
             onClick={onClose}
-            className="rounded p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            className="rounded p-1.5 hover:bg-zinc-100 active:bg-zinc-200 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-zinc-200 dark:border-zinc-800">
+        <div className="flex border-b border-zinc-200 dark:border-zinc-800 flex-shrink-0">
           <button
             onClick={() => handleTabChange("pipelines")}
-            className={`flex-1 px-4 py-2 text-sm font-medium ${
+            className={`flex-1 px-3 md:px-4 py-2.5 md:py-2 text-sm font-medium active:bg-zinc-50 dark:active:bg-zinc-800 ${
               activeTab === "pipelines"
                 ? "border-b-2 border-blue-500 text-blue-500"
                 : "text-zinc-500 hover:text-zinc-700"
@@ -393,7 +393,7 @@ export function PipelineSettings({
           <button
             onClick={() => handleTabChange("stages")}
             disabled={!selectedPipelineId}
-            className={`flex-1 px-4 py-2 text-sm font-medium ${
+            className={`flex-1 px-3 md:px-4 py-2.5 md:py-2 text-sm font-medium active:bg-zinc-50 dark:active:bg-zinc-800 ${
               activeTab === "stages"
                 ? "border-b-2 border-blue-500 text-blue-500"
                 : "text-zinc-500 hover:text-zinc-700"
@@ -404,7 +404,7 @@ export function PipelineSettings({
           <button
             onClick={() => handleTabChange("api")}
             disabled={!selectedPipelineId}
-            className={`flex-1 px-4 py-2 text-sm font-medium ${
+            className={`flex-1 px-3 md:px-4 py-2.5 md:py-2 text-sm font-medium active:bg-zinc-50 dark:active:bg-zinc-800 ${
               activeTab === "api"
                 ? "border-b-2 border-blue-500 text-blue-500"
                 : "text-zinc-500 hover:text-zinc-700"
@@ -418,7 +418,7 @@ export function PipelineSettings({
         </div>
 
         {/* Content */}
-        <div className="max-h-[60vh] overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-3 md:p-4">
           {activeTab === "api" && selectedPipelineId ? (
             <ApiSettings 
               workspaceId={workspaceId}
@@ -546,10 +546,10 @@ export function PipelineSettings({
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <div className="flex justify-end border-t border-zinc-200 px-3 md:px-4 py-3 dark:border-zinc-800 flex-shrink-0 bg-white dark:bg-zinc-900">
           <button
             onClick={onClose}
-            className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+            className="rounded-lg bg-zinc-100 px-4 py-2.5 md:py-2 text-sm font-medium hover:bg-zinc-200 active:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:active:bg-zinc-600"
           >
             Fechar
           </button>

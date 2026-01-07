@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react"
 import { ArrowLeft, Plus, Settings, BarChart3, RefreshCw } from "lucide-react"
 import Link from "next/link"
 import { PipelineBoard } from "./pipeline-board"
+import { DealCard } from "./deal-card"
 import { DealModal } from "./deal-modal"
 import { PipelineSettings } from "./pipeline-settings"
 import { CRMDashboard } from "./crm-dashboard"
@@ -62,6 +63,9 @@ export function CRMView() {
   const [isLoading, setIsLoading] = useState(true)
   const [tags, setTags] = useState<DealTag[]>([])
   const [filters, setFilters] = useState<DealFiltersState>(defaultFilters)
+  
+  // Mobile: stage selecionada (tabs)
+  const [selectedMobileStageId, setSelectedMobileStageId] = useState<string | null>(null)
 
   // Modals
   const [showSettings, setShowSettings] = useState(false)
@@ -144,6 +148,13 @@ export function CRMView() {
       loadStages()
     }
   }, [selectedPipelineId, loadStages])
+
+  // Seleciona primeira stage quando stages carregam
+  useEffect(() => {
+    if (stages.length > 0 && !selectedMobileStageId) {
+      setSelectedMobileStageId(stages[0].id)
+    }
+  }, [stages, selectedMobileStageId])
 
   const handleDealMove = async (dealId: string, newStageId: string) => {
     // Encontra stage atual e o deal
@@ -385,25 +396,26 @@ export function CRMView() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-950">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="flex items-center gap-4">
-          <Link
-            href="/"
-            className="rounded-lg p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Link>
+      {/* Header - responsivo com 2 linhas no mobile */}
+      <div className="flex flex-col border-b border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+        {/* Linha 1: Navegação + Título */}
+        <div className="flex items-center justify-between px-3 py-2 md:px-4 md:py-3">
+          <div className="flex items-center gap-2 md:gap-4">
+            <Link
+              href="/"
+              className="rounded-lg p-2 hover:bg-zinc-100 active:bg-zinc-200 dark:hover:bg-zinc-800"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Link>
 
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl font-semibold">CRM</h1>
-            <WorkspaceSelector compact />
-
+            <h1 className="text-lg md:text-xl font-semibold">CRM</h1>
+            
+            {/* Pipeline selector - sempre visível */}
             {pipelines.length > 0 && (
               <select
                 value={selectedPipelineId || ""}
                 onChange={(e) => setSelectedPipelineId(e.target.value)}
-                className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-800"
+                className="rounded-lg border border-zinc-300 bg-white px-2 md:px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-800 max-w-[120px] md:max-w-none truncate"
               >
                 {pipelines.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -413,59 +425,117 @@ export function CRMView() {
               </select>
             )}
           </div>
-        </div>
 
-        <div className="flex items-center gap-2">
-          <div className="mr-4 text-sm text-zinc-500">
-            <span className="font-medium text-zinc-900 dark:text-white">{totalDeals}</span> deals
-            {" · "}
-            <span className="font-medium text-zinc-900 dark:text-white">{formatCurrency(totalValue)}</span>
+          <div className="flex items-center gap-1 md:gap-2">
+            {/* Stats - esconde em mobile pequeno */}
+            <div className="hidden sm:flex mr-2 md:mr-4 text-xs md:text-sm text-zinc-500">
+              <span className="font-medium text-zinc-900 dark:text-white">{totalDeals}</span>
+              <span className="hidden md:inline"> deals</span>
+              <span className="mx-1">·</span>
+              <span className="font-medium text-zinc-900 dark:text-white">{formatCurrency(totalValue)}</span>
+            </div>
+
+            {/* Workspace - esconde em mobile */}
+            <div className="hidden md:block">
+              <WorkspaceSelector compact />
+            </div>
+
+            <ThemeToggle />
+
+            {/* Refresh - sempre visível */}
+            <button
+              onClick={() => loadStages()}
+              className="flex items-center justify-center rounded-lg p-2 text-sm hover:bg-zinc-100 active:bg-zinc-200 dark:hover:bg-zinc-800"
+              title="Atualizar"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </button>
+
+            {/* Dashboard - esconde texto em mobile */}
+            <button
+              onClick={() => setShowDashboard(true)}
+              className="flex items-center gap-1 md:gap-2 rounded-lg border border-blue-200 bg-blue-50 p-2 md:px-3 md:py-2 text-sm text-blue-600 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-400"
+              title="Dashboard"
+            >
+              <BarChart3 className="h-4 w-4" />
+              <span className="hidden md:inline">Dashboard</span>
+            </button>
+
+            {/* Settings - sempre visível */}
+            <button
+              onClick={() => setShowSettings(true)}
+              className="flex items-center justify-center rounded-lg p-2 text-sm hover:bg-zinc-100 active:bg-zinc-200 dark:hover:bg-zinc-800"
+              title="Configurações"
+            >
+              <Settings className="h-4 w-4" />
+            </button>
+
+            {/* Novo Deal - sempre visível mas compacto em mobile */}
+            <button
+              onClick={() => handleCreateDeal(stages[0]?.id || "")}
+              disabled={stages.length === 0}
+              className="flex items-center gap-1 md:gap-2 rounded-lg bg-blue-500 p-2 md:px-4 md:py-2 text-sm font-medium text-white hover:bg-blue-600 active:bg-blue-700 disabled:opacity-50"
+              title="Novo Deal"
+            >
+              <Plus className="h-4 w-4" />
+              <span className="hidden md:inline">Novo Deal</span>
+            </button>
           </div>
-
-          <ThemeToggle />
-
-          <button
-            onClick={() => loadStages()}
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </button>
-
-          <button
-            onClick={() => setShowDashboard(true)}
-            className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-600 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-400"
-          >
-            <BarChart3 className="h-4 w-4" />
-            Dashboard
-          </button>
-
-          <button
-            onClick={() => setShowSettings(true)}
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
-          >
-            <Settings className="h-4 w-4" />
-          </button>
-
-          <button
-            onClick={() => handleCreateDeal(stages[0]?.id || "")}
-            disabled={stages.length === 0}
-            className="flex items-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-50"
-          >
-            <Plus className="h-4 w-4" />
-            Novo Deal
-          </button>
+        </div>
+        
+        {/* Stats mobile - só aparece em telas pequenas */}
+        <div className="flex sm:hidden items-center justify-center gap-3 px-3 pb-2 text-xs text-zinc-500">
+          <span>
+            <span className="font-medium text-zinc-900 dark:text-white">{totalDeals}</span> deals
+          </span>
+          <span>·</span>
+          <span className="font-medium text-zinc-900 dark:text-white">{formatCurrency(totalValue)}</span>
         </div>
       </div>
 
-      {/* Filters */}
+      {/* Filters - esconde em mobile */}
+      <div className="hidden md:block">
+        {pipelines.length > 0 && stages.length > 0 && (
+          <DealFilters
+            filters={filters}
+            onFiltersChange={setFilters}
+            stages={stages}
+            tags={tags}
+            onClear={() => setFilters(defaultFilters)}
+          />
+        )}
+      </div>
+
+      {/* Mobile: Stage Tabs */}
       {pipelines.length > 0 && stages.length > 0 && (
-        <DealFilters
-          filters={filters}
-          onFiltersChange={setFilters}
-          stages={stages}
-          tags={tags}
-          onClear={() => setFilters(defaultFilters)}
-        />
+        <div className="flex md:hidden overflow-x-auto scrollbar-hide border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+          {filteredStages.map((stage) => {
+            const isSelected = selectedMobileStageId === stage.id
+            const dealCount = stage.deals.length
+            return (
+              <button
+                key={stage.id}
+                onClick={() => setSelectedMobileStageId(stage.id)}
+                className={`flex-shrink-0 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                  isSelected
+                    ? "border-blue-500 text-blue-600 dark:text-blue-400"
+                    : "border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                }`}
+              >
+                <span>{stage.name}</span>
+                {dealCount > 0 && (
+                  <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs ${
+                    isSelected 
+                      ? "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" 
+                      : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800"
+                  }`}>
+                    {dealCount}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
       )}
 
       {/* Content */}
@@ -485,14 +555,45 @@ export function CRMView() {
             </button>
           </div>
         ) : (
-          <PipelineBoard
-            stages={filteredStages}
-            onDealMove={handleDealMove}
-            onDealClick={handleDealClick}
-            onCreateDeal={handleCreateDeal}
-            onArchiveDeal={handleArchiveDeal}
-            onDeleteDeal={handleDeleteDeal}
-          />
+          <>
+            {/* Desktop: Pipeline Board tradicional */}
+            <div className="hidden md:block h-full">
+              <PipelineBoard
+                stages={filteredStages}
+                onDealMove={handleDealMove}
+                onDealClick={handleDealClick}
+                onCreateDeal={handleCreateDeal}
+                onArchiveDeal={handleArchiveDeal}
+                onDeleteDeal={handleDeleteDeal}
+              />
+            </div>
+
+            {/* Mobile: Lista de deals da stage selecionada */}
+            <div className="flex md:hidden flex-col h-full overflow-y-auto p-3 space-y-3">
+              {filteredStages
+                .find((s) => s.id === selectedMobileStageId)
+                ?.deals.map((deal) => (
+                  <DealCard
+                    key={deal.id}
+                    deal={deal}
+                    onClick={() => handleDealClick(deal.id)}
+                    onArchive={handleArchiveDeal}
+                    onDelete={handleDeleteDeal}
+                  />
+                )) || (
+                <div className="flex flex-col items-center justify-center h-40 text-zinc-500 text-sm">
+                  <p>Nenhum deal nesta etapa</p>
+                  <button
+                    onClick={() => handleCreateDeal(selectedMobileStageId || "")}
+                    className="mt-3 flex items-center gap-1 text-blue-500 hover:text-blue-600"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Adicionar deal
+                  </button>
+                </div>
+              )}
+            </div>
+          </>
         )}
       </div>
 

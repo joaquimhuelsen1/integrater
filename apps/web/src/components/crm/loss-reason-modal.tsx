@@ -101,24 +101,24 @@ export function LossReasonModal({
   const displayReasons = reasons.length > 0 ? reasons : defaultReasons
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-md rounded-lg bg-white shadow-xl dark:bg-zinc-900">
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50">
+      <div className="w-full h-[85vh] md:h-auto md:max-h-[90vh] max-w-md rounded-t-xl md:rounded-lg bg-white shadow-xl dark:bg-zinc-900 flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <div className="flex items-center justify-between border-b border-zinc-200 px-3 md:px-4 py-3 dark:border-zinc-800 flex-shrink-0">
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-5 w-5 text-red-500" />
             <h2 className="text-lg font-semibold">Marcar como Perdido</h2>
           </div>
           <button
             onClick={onClose}
-            className="rounded p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            className="rounded p-1.5 hover:bg-zinc-100 active:bg-zinc-200 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-4">
           <p className="text-sm text-zinc-500">
             Deal: <span className="font-medium text-zinc-900 dark:text-white">{dealTitle}</span>
           </p>
@@ -136,14 +136,14 @@ export function LossReasonModal({
                   <button
                     key={reason.id}
                     onClick={() => setSelectedReasonId(reason.id)}
-                    className={`w-full flex items-center gap-3 rounded-lg border p-3 text-left transition ${
+                    className={`w-full flex items-center gap-3 rounded-lg border p-3 md:p-3 text-left transition active:scale-[0.98] ${
                       selectedReasonId === reason.id
                         ? "border-red-500 bg-red-50 dark:bg-red-900/20"
-                        : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-700"
+                        : "border-zinc-200 hover:border-zinc-300 active:bg-zinc-50 dark:border-zinc-700 dark:active:bg-zinc-800"
                     }`}
                   >
                     <div
-                      className="h-3 w-3 rounded-full"
+                      className="h-4 w-4 md:h-3 md:w-3 rounded-full flex-shrink-0"
                       style={{ backgroundColor: reason.color }}
                     />
                     <span className="text-sm font-medium">{reason.name}</span>
@@ -208,17 +208,17 @@ export function LossReasonModal({
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-2 border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <div className="flex justify-end gap-2 border-t border-zinc-200 px-3 md:px-4 py-3 dark:border-zinc-800 flex-shrink-0 bg-white dark:bg-zinc-900">
           <button
             onClick={onClose}
-            className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+            className="rounded-lg bg-zinc-100 px-4 py-2.5 md:py-2 text-sm font-medium hover:bg-zinc-200 active:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:active:bg-zinc-600"
           >
             Cancelar
           </button>
           <button
             onClick={handleConfirm}
             disabled={isSaving}
-            className="rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white hover:bg-red-600 disabled:opacity-50"
+            className="rounded-lg bg-red-500 px-4 py-2.5 md:py-2 text-sm font-medium text-white hover:bg-red-600 active:bg-red-700 disabled:opacity-50"
           >
             {isSaving ? "Salvando..." : "Confirmar Perda"}
           </button>

@@ -488,10 +488,10 @@ export function DealModal({
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
 
-  // Modal classes based on fullscreen state
+  // Modal classes based on fullscreen state (mobile always fullscreen)
   const modalClasses = isFullscreen
     ? "fixed inset-0 z-50 flex flex-col bg-white dark:bg-zinc-900"
-    : "fixed right-0 top-0 z-50 h-full w-full max-w-4xl flex flex-col bg-white shadow-2xl dark:bg-zinc-900 animate-slide-in-right"
+    : "fixed inset-0 md:inset-auto md:right-0 md:top-0 z-50 h-full md:h-full w-full md:max-w-4xl flex flex-col bg-white shadow-2xl dark:bg-zinc-900 md:animate-slide-in-right"
 
   return (
     <>
@@ -503,13 +503,13 @@ export function DealModal({
 
       {/* Modal */}
       <div className={modalClasses}>
-        {/* Header - Pipedrive style */}
-        <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-          <div className="flex items-center gap-3">
+        {/* Header - Pipedrive style (responsive) */}
+        <div className="flex items-center justify-between border-b border-zinc-200 px-3 md:px-4 py-2 md:py-3 dark:border-zinc-800">
+          <div className="flex items-center gap-2 md:gap-3 min-w-0 flex-1">
             {/* Back/Close button */}
             <button
               onClick={onClose}
-              className="rounded p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              className="rounded p-1.5 hover:bg-zinc-100 active:bg-zinc-200 dark:hover:bg-zinc-800 dark:active:bg-zinc-700 flex-shrink-0"
             >
               <X className="h-5 w-5" />
             </button>
@@ -531,11 +531,11 @@ export function DealModal({
                   }
                 }}
                 autoFocus
-                className="border-b-2 border-blue-500 bg-transparent text-xl font-semibold outline-none"
+                className="border-b-2 border-blue-500 bg-transparent text-lg md:text-xl font-semibold outline-none min-w-0 flex-1"
               />
             ) : (
               <h1
-                className="cursor-pointer text-xl font-semibold hover:text-blue-600"
+                className="cursor-pointer text-lg md:text-xl font-semibold hover:text-blue-600 truncate min-w-0"
                 onClick={() => !isClosed && setIsEditingTitle(true)}
               >
                 {isNew ? "Novo Deal" : title || "Sem título"}
@@ -543,9 +543,9 @@ export function DealModal({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Owner (placeholder) */}
-            <div className="flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm dark:border-zinc-700">
+          <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
+            {/* Owner (placeholder) - hidden on mobile */}
+            <div className="hidden lg:flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm dark:border-zinc-700">
               <User className="h-4 w-4 text-zinc-400" />
               <span>Proprietário</span>
               <ChevronDown className="h-4 w-4 text-zinc-400" />
@@ -556,15 +556,17 @@ export function DealModal({
               <>
                 <button
                   onClick={handleWin}
-                  className="rounded-lg bg-green-500 px-4 py-1.5 text-sm font-medium text-white hover:bg-green-600"
+                  className="rounded-lg bg-green-500 px-2 md:px-4 py-1.5 text-xs md:text-sm font-medium text-white hover:bg-green-600 active:bg-green-700"
                 >
-                  Won
+                  <span className="hidden md:inline">Won</span>
+                  <Trophy className="h-4 w-4 md:hidden" />
                 </button>
                 <button
                   onClick={handleLose}
-                  className="rounded-lg bg-red-500 px-4 py-1.5 text-sm font-medium text-white hover:bg-red-600"
+                  className="rounded-lg bg-red-500 px-2 md:px-4 py-1.5 text-xs md:text-sm font-medium text-white hover:bg-red-600 active:bg-red-700"
                 >
-                  Lost
+                  <span className="hidden md:inline">Lost</span>
+                  <XCircle className="h-4 w-4 md:hidden" />
                 </button>
               </>
             )}
@@ -573,17 +575,17 @@ export function DealModal({
             {isClosed && (
               <button
                 onClick={handleReopen}
-                className="flex items-center gap-1 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                className="flex items-center gap-1 rounded-lg border border-zinc-300 px-2 md:px-3 py-1.5 text-sm hover:bg-zinc-50 active:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
               >
                 <RotateCcw className="h-4 w-4" />
-                Reabrir
+                <span className="hidden md:inline">Reabrir</span>
               </button>
             )}
 
-            {/* Fullscreen toggle */}
+            {/* Fullscreen toggle - hidden on mobile (always fullscreen) */}
             <button
               onClick={() => setIsFullscreen(!isFullscreen)}
-              className="rounded p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              className="hidden md:block rounded p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800"
               title={isFullscreen ? "Sair da tela cheia" : "Tela cheia"}
             >
               {isFullscreen ? (
@@ -598,7 +600,7 @@ export function DealModal({
               <div className="relative">
                 <button 
                   onClick={() => setShowMoreMenu(!showMoreMenu)}
-                  className="rounded p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  className="rounded p-1.5 hover:bg-zinc-100 active:bg-zinc-200 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
                 >
                   <MoreVertical className="h-5 w-5" />
                 </button>
@@ -609,19 +611,19 @@ export function DealModal({
                       className="fixed inset-0 z-10" 
                       onClick={() => setShowMoreMenu(false)}
                     />
-                    <div className="absolute right-0 top-9 z-20 w-40 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+                    <div className="absolute right-0 top-9 z-20 w-44 md:w-40 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
                       <button
                         onClick={handleArchive}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                        className="flex w-full items-center gap-2 px-3 py-3 md:py-2 text-sm text-zinc-700 hover:bg-zinc-100 active:bg-zinc-200 dark:text-zinc-300 dark:hover:bg-zinc-700"
                       >
-                        <Archive className="h-4 w-4" />
+                        <Archive className="h-5 w-5 md:h-4 md:w-4" />
                         Arquivar
                       </button>
                       <button
                         onClick={handleDelete}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                        className="flex w-full items-center gap-2 px-3 py-3 md:py-2 text-sm text-red-600 hover:bg-red-50 active:bg-red-100 dark:text-red-400 dark:hover:bg-red-950/30"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-5 w-5 md:h-4 md:w-4" />
                         Excluir
                       </button>
                     </div>
@@ -632,9 +634,9 @@ export function DealModal({
           </div>
         </div>
 
-        {/* Pipeline Progress Bar - Pipedrive style */}
+        {/* Pipeline Progress Bar - Pipedrive style (hidden on mobile for space) */}
         {!isNew && (
-          <div className="flex border-b border-zinc-200 dark:border-zinc-800">
+          <div className="hidden md:flex border-b border-zinc-200 dark:border-zinc-800">
             {sortedStages.map((stage, index) => {
               const isCurrentStage = stage.id === stageId
               const isPastStage = sortedStages.findIndex((s) => s.id === stageId) > index
@@ -683,9 +685,33 @@ export function DealModal({
             })}
           </div>
         )}
+        
+        {/* Mobile: Simple stage indicator */}
+        {!isNew && (
+          <div className="flex md:hidden items-center gap-2 px-3 py-2 border-b border-zinc-200 dark:border-zinc-800 overflow-x-auto">
+            <span className="text-xs text-zinc-500 flex-shrink-0">Estágio:</span>
+            <select
+              value={stageId}
+              onChange={(e) => {
+                if (!isClosed) {
+                  setStageId(e.target.value)
+                  if (dealId) handleSave()
+                }
+              }}
+              disabled={isClosed}
+              className="flex-1 text-sm font-medium bg-transparent border-none outline-none disabled:opacity-50"
+            >
+              {sortedStages.map((stage) => (
+                <option key={stage.id} value={stage.id}>
+                  {stage.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
-        {/* Main Content - Two columns */}
-        <div className="flex flex-1 overflow-hidden">
+        {/* Main Content - Two columns on desktop, single on mobile */}
+        <div className="flex flex-1 flex-col md:flex-row overflow-hidden">
           {isLoading ? (
             <div className="flex flex-1 items-center justify-center">
               <div className="text-zinc-500">Carregando...</div>
@@ -693,7 +719,7 @@ export function DealModal({
           ) : (
             <>
               {/* Left Sidebar - Summary (Pipedrive style) */}
-              <div className="w-[500px] flex-shrink-0 overflow-y-auto border-r border-zinc-200 p-4 dark:border-zinc-800">
+              <div className="w-full md:w-[400px] lg:w-[500px] flex-shrink-0 overflow-y-auto border-b md:border-b-0 md:border-r border-zinc-200 p-3 md:p-4 dark:border-zinc-800">
                 {/* Summary Header */}
                 <div className="mb-4 flex items-center justify-between">
                   <h3 className="font-semibold">Summary</h3>
@@ -902,8 +928,8 @@ export function DealModal({
 
               {/* Right Content Area - Tabs */}
               <div className="flex flex-1 flex-col overflow-hidden">
-                {/* Tabs Header - Pipedrive style */}
-                <div className="flex border-b border-zinc-200 dark:border-zinc-800">
+                {/* Tabs Header - Pipedrive style (scrollable on mobile) */}
+                <div className="flex border-b border-zinc-200 dark:border-zinc-800 overflow-x-auto">
                   {[
                     { id: "activity" as const, label: "Activity", icon: History },
                     { id: "notes" as const, label: "Notes", icon: FileText },
@@ -913,20 +939,20 @@ export function DealModal({
                     <button
                       key={tab.id}
                       onClick={() => setActiveTab(tab.id)}
-                      className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
+                      className={`flex items-center gap-1.5 md:gap-2 border-b-2 px-3 md:px-4 py-2.5 md:py-3 text-xs md:text-sm font-medium transition-colors whitespace-nowrap flex-shrink-0 ${
                         activeTab === tab.id
                           ? "border-blue-500 text-blue-600"
-                          : "border-transparent text-zinc-500 hover:text-zinc-700"
+                          : "border-transparent text-zinc-500 hover:text-zinc-700 active:text-zinc-900"
                       }`}
                     >
                       <tab.icon className="h-4 w-4" />
-                      {tab.label}
+                      <span className="hidden sm:inline">{tab.label}</span>
                     </button>
                   ))}
                 </div>
 
                 {/* Tab Content */}
-                <div className="flex-1 overflow-y-auto p-4">
+                <div className="flex-1 overflow-y-auto p-3 md:p-4">
                   {/* Activity Tab */}
                   {activeTab === "activity" && (
                     <div>
@@ -1176,19 +1202,19 @@ export function DealModal({
           )}
         </div>
 
-        {/* Footer for new deal */}
+        {/* Footer for new deal (sticky on mobile) */}
         {isNew && (
-          <div className="flex items-center justify-end gap-2 border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <div className="flex items-center justify-end gap-2 border-t border-zinc-200 px-3 md:px-4 py-3 dark:border-zinc-800 bg-white dark:bg-zinc-900">
             <button
               onClick={onClose}
-              className="rounded-lg px-4 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              className="rounded-lg px-4 py-2.5 md:py-2 text-sm hover:bg-zinc-100 active:bg-zinc-200 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
             >
               Cancelar
             </button>
             <button
               onClick={handleSave}
               disabled={isSaving || !title.trim()}
-              className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-50"
+              className="rounded-lg bg-blue-500 px-4 py-2.5 md:py-2 text-sm font-medium text-white hover:bg-blue-600 active:bg-blue-700 disabled:opacity-50"
             >
               {isSaving ? "Criando..." : "Criar Deal"}
             </button>

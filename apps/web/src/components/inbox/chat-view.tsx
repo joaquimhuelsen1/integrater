@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useEffect, useState, useCallback, useMemo } from "react"
-import { Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical, Unlink, MessageSquare, Phone, Briefcase, Users } from "lucide-react"
+import { ArrowLeft, Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical, Unlink, MessageSquare, Phone, Briefcase, Users } from "lucide-react"
 import { createClient } from "@/lib/supabase"
 import { apiFetch } from "@/lib/api"
 import { MessageItem } from "./message-item"
@@ -156,6 +156,8 @@ interface ChatViewProps {
   onTyping?: () => void
   // Callback para sync de contatos OpenPhone (SMS)
   onSyncContacts?: () => Promise<void>
+  // Mobile: callback para voltar à lista de conversas
+  onBackToList?: () => void
 }
 
 export function ChatView({
@@ -199,6 +201,7 @@ export function ChatView({
 onMessageDelete,
   onTyping,
   onSyncContacts,
+  onBackToList,
 }: ChatViewProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -859,14 +862,24 @@ const [isSuggesting, setIsSuggesting] = useState(false)
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex flex-shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-[#18181B]">
-        <div className="flex items-center gap-3">
-          {/* Avatar - clicável para ver em tela cheia */}
+{/* Header */}
+      <div className="flex flex-shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-2 md:px-4 py-2 md:py-3 dark:border-zinc-800 dark:bg-[#18181B]">
+        <div className="flex items-center gap-2 md:gap-3">
+          {/* Botão voltar - apenas mobile */}
+          {onBackToList && (
+            <button
+              onClick={onBackToList}
+              className="flex md:hidden items-center justify-center rounded-full p-2 -ml-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 active:bg-zinc-200 dark:active:bg-zinc-700"
+              aria-label="Voltar para lista"
+            >
+              <ArrowLeft className="h-5 w-5 text-zinc-600 dark:text-zinc-400" />
+            </button>
+          )}
+{/* Avatar - clicável para ver em tela cheia */}
           {avatarUrl ? (
             <button
               onClick={() => setShowAvatarModal(true)}
-              className="relative h-10 w-10 overflow-hidden rounded-full ring-2 ring-transparent transition-all hover:ring-violet-500 cursor-pointer"
+              className="relative h-9 w-9 md:h-10 md:w-10 flex-shrink-0 overflow-hidden rounded-full ring-2 ring-transparent transition-all hover:ring-violet-500 cursor-pointer"
               title="Ver foto de perfil"
             >
               <img
@@ -876,7 +889,7 @@ const [isSuggesting, setIsSuggesting] = useState(false)
               />
             </button>
           ) : (
-            <div className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-medium text-white ${getAvatarColor(conversationId)}`}>
+            <div className={`flex h-9 w-9 md:h-10 md:w-10 flex-shrink-0 items-center justify-center rounded-full text-xs md:text-sm font-medium text-white ${getAvatarColor(conversationId)}`}>
               {displayName
                 ? displayName
                     .split(" ")
@@ -887,9 +900,9 @@ const [isSuggesting, setIsSuggesting] = useState(false)
                 : "?"}
             </div>
           )}
-          <div className="flex flex-col">
-            <div className="flex items-center gap-2">
-              <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
+          <div className="flex flex-col min-w-0">
+            <div className="flex items-center gap-1.5 md:gap-2">
+              <h2 className="font-semibold text-sm md:text-base text-zinc-900 dark:text-zinc-100 truncate max-w-[150px] md:max-w-none">
                 {displayName || "Conversa"}
               </h2>
               {/* Indicador online */}
@@ -927,10 +940,10 @@ const [isSuggesting, setIsSuggesting] = useState(false)
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          {/* Toggle tradução */}
+<div className="flex items-center gap-1 md:gap-2">
+          {/* Toggle tradução - esconde em mobile, mostra no menu */}
           {Object.keys(translations).length > 0 && (
-            <div className="flex items-center rounded-md border border-zinc-200 dark:border-zinc-700">
+            <div className="hidden md:flex items-center rounded-md border border-zinc-200 dark:border-zinc-700">
               <button
                 onClick={() => setShowTranslation(false)}
                 className={`px-2 py-1 text-xs transition-colors ${
@@ -953,29 +966,29 @@ const [isSuggesting, setIsSuggesting] = useState(false)
               </button>
             </div>
           )}
-          {/* Botão traduzir */}
+          {/* Botão traduzir - só ícone em mobile */}
           <button
             onClick={translateConversation}
             disabled={isTranslating}
-            className="flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            className="flex items-center gap-1 rounded-md md:border md:border-zinc-200 p-2 md:px-2 md:py-1 text-xs text-zinc-600 hover:bg-zinc-100 disabled:opacity-50 dark:md:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
             title="Traduzir conversa"
           >
             {isTranslating ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Loader2 className="h-4 w-4 md:h-3.5 md:w-3.5 animate-spin" />
             ) : (
-              <Languages className="h-3.5 w-3.5" />
+              <Languages className="h-4 w-4 md:h-3.5 md:w-3.5" />
             )}
-            <span>{isTranslating ? "Traduzindo..." : "Traduzir"}</span>
+            <span className="hidden md:inline">{isTranslating ? "Traduzindo..." : "Traduzir"}</span>
           </button>
-          {/* Botão CRM */}
+          {/* Botão CRM - só ícone em mobile */}
           {onOpenCRMPanel && (
             <button
               onClick={onOpenCRMPanel}
-              className="flex items-center gap-1 rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              className="flex items-center gap-1 rounded-md md:border md:border-zinc-200 p-2 md:px-2 md:py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:md:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
               title="Abrir painel CRM"
             >
-              <Briefcase className="h-3.5 w-3.5" />
-              <span>CRM</span>
+              <Briefcase className="h-4 w-4 md:h-3.5 md:w-3.5" />
+              <span className="hidden md:inline">CRM</span>
             </button>
           )}
           {/* Menu de opções */}

@@ -127,7 +127,7 @@ export function DealCard({ deal, onClick, isDragging, onArchive, onDelete }: Dea
       {...attributes}
       {...listeners}
       onClick={onClick}
-      className={`group relative cursor-pointer rounded-lg border bg-white p-3 shadow-sm transition-all hover:shadow-md dark:bg-zinc-800 ${
+      className={`group relative cursor-pointer rounded-lg border bg-white p-3 md:p-3 shadow-sm transition-all hover:shadow-md active:bg-zinc-50 dark:bg-zinc-800 dark:active:bg-zinc-700/50 ${
         isDragging || isSortableDragging
           ? "opacity-50 shadow-lg ring-2 ring-blue-500"
           : ""
@@ -143,9 +143,9 @@ export function DealCard({ deal, onClick, isDragging, onArchive, onDelete }: Dea
       <div className="absolute top-2 right-2">
         <button
           onClick={handleMenuClick}
-          className="rounded p-1 opacity-0 group-hover:opacity-100 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-opacity"
+          className="rounded p-1.5 md:p-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 hover:bg-zinc-200 active:bg-zinc-300 dark:hover:bg-zinc-700 dark:active:bg-zinc-600 transition-opacity"
         >
-          <MoreVertical className="h-4 w-4 text-zinc-500" />
+          <MoreVertical className="h-5 w-5 md:h-4 md:w-4 text-zinc-500" />
         </button>
         
         {showMenu && (
@@ -154,19 +154,19 @@ export function DealCard({ deal, onClick, isDragging, onArchive, onDelete }: Dea
               className="fixed inset-0 z-10" 
               onClick={(e) => { e.stopPropagation(); setShowMenu(false) }}
             />
-            <div className="absolute right-0 top-7 z-20 w-36 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+            <div className="absolute right-0 top-8 md:top-7 z-20 w-40 md:w-36 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
               <button
                 onClick={handleArchive}
-                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                className="flex w-full items-center gap-2 px-3 py-3 md:py-2 text-sm text-zinc-700 hover:bg-zinc-100 active:bg-zinc-200 dark:text-zinc-300 dark:hover:bg-zinc-700 dark:active:bg-zinc-600"
               >
-                <Archive className="h-4 w-4" />
+                <Archive className="h-5 w-5 md:h-4 md:w-4" />
                 Arquivar
               </button>
               <button
                 onClick={handleDelete}
-                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                className="flex w-full items-center gap-2 px-3 py-3 md:py-2 text-sm text-red-600 hover:bg-red-50 active:bg-red-100 dark:text-red-400 dark:hover:bg-red-950/30 dark:active:bg-red-950/50"
               >
-                <Trash2 className="h-4 w-4" />
+                <Trash2 className="h-5 w-5 md:h-4 md:w-4" />
                 Excluir
               </button>
             </div>
@@ -192,7 +192,7 @@ export function DealCard({ deal, onClick, isDragging, onArchive, onDelete }: Dea
       )}
 
       {/* Title */}
-      <h4 className="mb-2 font-medium text-sm text-zinc-900 dark:text-white line-clamp-2 leading-tight pr-6">
+      <h4 className="mb-2 font-medium text-sm md:text-sm text-zinc-900 dark:text-white line-clamp-2 leading-tight pr-8 md:pr-6">
         {deal.title}
       </h4>
 
@@ -233,7 +233,7 @@ export function DealCard({ deal, onClick, isDragging, onArchive, onDelete }: Dea
       )}
 
       {/* Value */}
-      <div className="mb-3 text-base font-semibold text-zinc-900 dark:text-white">
+      <div className="mb-2 md:mb-3 text-base font-semibold text-zinc-900 dark:text-white">
         {formatCurrency(deal.value)}
       </div>
 
