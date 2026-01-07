@@ -1160,7 +1160,7 @@ const [isSuggesting, setIsSuggesting] = useState(false)
       <div className="chat-background flex min-h-0 flex-1 flex-col">
         {/* Messages (scroll area) */}
         <div
-          className="min-h-0 flex-1 overflow-y-auto p-4 md:px-12 lg:px-20"
+          className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4 md:px-12 lg:px-20"
           onScroll={(e) => {
             const { scrollTop, scrollHeight, clientHeight } = e.currentTarget
             isNearBottomRef.current = scrollHeight - scrollTop - clientHeight < 100

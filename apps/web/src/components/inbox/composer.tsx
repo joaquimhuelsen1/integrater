@@ -632,13 +632,13 @@ return (
             </div>
           )}
 
-{/* Translate button - esconde em mobile */}
+{/* Translate button - visível em todos os tamanhos quando há texto */}
           {text.trim() && (
             <button
               type="button"
               onClick={translateDraft}
               disabled={isTranslating || disabled}
-              className="hidden md:flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-purple-500 hover:bg-purple-100 disabled:opacity-50 dark:hover:bg-purple-900/30"
+              className="flex h-10 w-10 md:h-11 md:w-11 flex-shrink-0 items-center justify-center rounded-full text-purple-500 hover:bg-purple-100 active:bg-purple-200 disabled:opacity-50 dark:hover:bg-purple-900/30 dark:active:bg-purple-900/50"
               title="Traduzir para inglês"
             >
               {isTranslating ? (

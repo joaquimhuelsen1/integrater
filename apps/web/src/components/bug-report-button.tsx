@@ -42,10 +42,10 @@ export function BugReportButton() {
 
   return (
     <>
-      {/* Botao flutuante */}
+      {/* Botao flutuante - posição mais alta no mobile para não conflitar com composer */}
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-4 right-4 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-red-500 text-white shadow-lg transition-all hover:bg-red-600 hover:scale-105 active:scale-95"
+        className="fixed bottom-20 md:bottom-4 right-4 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-red-500 text-white shadow-lg transition-all hover:bg-red-600 hover:scale-105 active:scale-95"
         title="Reportar Bug"
       >
         <Bug className="h-5 w-5" />
