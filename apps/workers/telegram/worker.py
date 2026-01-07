@@ -1014,6 +1014,7 @@ class TelegramWorker:
 
             db = get_supabase()
 
+            # Busca TODAS as identities para esse telegram_user_id (pode haver múltiplas em workspaces diferentes)
             identity_result = await db_async(lambda: db.table("contact_identities").select(
                 "id"
             ).eq("owner_id", owner_id).eq(
@@ -1023,24 +1024,26 @@ class TelegramWorker:
             if not identity_result.data:
                 return
 
-            identity_id = identity_result.data[0]["id"]
+            # Atualiza presence para TODAS as identities encontradas
+            for identity_row in identity_result.data:
+                identity_id = identity_row["id"]
 
-            conv_result = await db_async(lambda: db.table("conversations").select("id").eq(
-                "primary_identity_id", identity_id
-            ).execute())
+                conv_result = await db_async(lambda: db.table("conversations").select("id").eq(
+                    "primary_identity_id", identity_id
+                ).execute())
 
-            conversation_id = conv_result.data[0]["id"] if conv_result.data else None
+                conversation_id = conv_result.data[0]["id"] if conv_result.data else None
 
-            await db_async(lambda: db.table("presence_status").upsert({
-                "owner_id": owner_id,
-                "contact_identity_id": identity_id,
-                "conversation_id": conversation_id,
-                "is_typing": is_typing,
-                "is_online": is_online if is_online is not None else False,
-                "last_seen_at": last_seen,
-                "typing_expires_at": typing_expires,
-                "updated_at": now.isoformat(),
-            }, on_conflict="owner_id,contact_identity_id").execute())
+                await db_async(lambda: db.table("presence_status").upsert({
+                    "owner_id": owner_id,
+                    "contact_identity_id": identity_id,
+                    "conversation_id": conversation_id,
+                    "is_typing": is_typing,
+                    "is_online": is_online if is_online is not None else False,
+                    "last_seen_at": last_seen,
+                    "typing_expires_at": typing_expires,
+                    "updated_at": now.isoformat(),
+                }, on_conflict="owner_id,contact_identity_id").execute())
 
             if is_typing:
                 print(f"[PRESENCE] Usuário {user_id} digitando")
