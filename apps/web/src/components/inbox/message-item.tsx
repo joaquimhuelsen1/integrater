@@ -576,13 +576,13 @@ export function MessageItem({
           {isOutbound && (
             // Status da mensagem: sending (spinner) → sent (✓) → read (✓✓) | failed (X vermelho)
             message.sending_status === "sending" ? (
-              <Loader2 className="h-4 w-4 animate-spin text-white/70" />
+              <Loader2 className="h-5 w-5 animate-spin text-white/70" />
             ) : message.sending_status === "failed" ? (
-              <AlertCircle className="h-4 w-4 text-red-400" />
+              <AlertCircle className="h-5 w-5 text-red-400" />
             ) : isRead ? (
-              <CheckCheck className="h-4 w-4 text-white/70" />
+              <CheckCheck className="h-5 w-5 text-white/70" />
             ) : (
-              <Check className="h-4 w-4 text-white/70" />
+              <Check className="h-5 w-5 text-white/70" />
             )
           )}
         </div>
