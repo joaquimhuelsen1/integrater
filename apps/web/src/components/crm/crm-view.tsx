@@ -151,7 +151,7 @@ export function CRMView() {
 
   // Seleciona primeira stage quando stages carregam
   useEffect(() => {
-    if (stages.length > 0 && !selectedMobileStageId) {
+    if (stages.length > 0 && !selectedMobileStageId && stages[0]) {
       setSelectedMobileStageId(stages[0].id)
     }
   }, [stages, selectedMobileStageId])
