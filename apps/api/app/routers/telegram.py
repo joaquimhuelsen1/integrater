@@ -599,10 +599,10 @@ async def start_chat(
 
     integration_account_id = acc_result.data[0]["id"]
 
-    # Busca identity existente
+    # Busca identity existente (no workspace correto)
     identity_result = db.table("contact_identities").select(
         "id"
-    ).eq("owner_id", str(owner_id)).eq(
+    ).eq("workspace_id", workspace_id).eq(
         "type", "telegram_user"
     ).eq("value", telegram_id).execute()
 
@@ -611,11 +611,12 @@ async def start_chat(
     if identity_result.data:
         identity_id = identity_result.data[0]["id"]
     else:
-        # Cria nova identity
+        # Cria nova identity com workspace_id
         identity_id = str(uuid4())
         db.table("contact_identities").insert({
             "id": identity_id,
             "owner_id": str(owner_id),
+            "workspace_id": workspace_id,
             "contact_id": None,
             "type": "telegram_user",
             "value": telegram_id,
