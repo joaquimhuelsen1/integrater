@@ -257,7 +257,7 @@ const [isSuggesting, setIsSuggesting] = useState(false)
   const [isOnline, setIsOnline] = useState(false)
   const [lastSeen, setLastSeen] = useState<string | null>(null)
 
-  // Polling de eventos de leitura para mensagens outbound - 1 segundo
+  // Polling de eventos de leitura para mensagens outbound - 30 segundos (otimizado)
   useEffect(() => {
     const outboundMsgIds = messages
       .filter(m => m.direction === "outbound")
@@ -290,13 +290,13 @@ const [isSuggesting, setIsSuggesting] = useState(false)
     // Busca inicial
     fetchReadEvents()
 
-    // Polling a cada 1 segundo
-    const interval = setInterval(fetchReadEvents, 1000)
+    // Polling a cada 30 segundos (reduzido de 1s para economizar requests)
+    const interval = setInterval(fetchReadEvents, 30000)
 
     return () => clearInterval(interval)
   }, [messages])
 
-  // Polling para presence status (typing/online) - 1 segundo
+  // Polling para presence status (typing/online) - 5 segundos (otimizado)
   useEffect(() => {
     if (!conversationId && !identityId) {
       setIsTyping(false)
@@ -344,8 +344,8 @@ const [isSuggesting, setIsSuggesting] = useState(false)
     // Busca inicial
     fetchPresence()
 
-    // Polling a cada 1 segundo
-    const interval = setInterval(fetchPresence, 1000)
+    // Polling a cada 5 segundos (reduzido de 1s para economizar requests)
+    const interval = setInterval(fetchPresence, 5000)
 
     return () => {
       clearInterval(interval)
