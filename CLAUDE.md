@@ -107,6 +107,13 @@ Se porta ocupada: **MATAR O PROCESSO** antes de iniciar. Nunca usar porta altern
 9. Informar usuário
 ```
 
+### Deploy Frontend (Vercel)
+**OBRIGATÓRIO** após push para `main`:
+1. Aguardar ~1 minuto para build iniciar
+2. Verificar status em https://vercel.com/joaquimhuelsens-projects/integrater/deployments
+3. Se build falhar (geralmente erro TypeScript), corrigir e fazer novo push
+4. Só considerar deploy concluído quando status for "Ready"
+
 ## 1. Princípios Gerais
 
 - **Linguagem:** Toda a comunicação, código, comentários e documentação devem ser em **Português do Brasil**.
