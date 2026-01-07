@@ -257,12 +257,12 @@ const [isSuggesting, setIsSuggesting] = useState(false)
   const [isOnline, setIsOnline] = useState(false)
   const [lastSeen, setLastSeen] = useState<string | null>(null)
 
-  // Polling de eventos de leitura para mensagens outbound - 30 segundos (otimizado)
+  // Polling de eventos de leitura - 10 segundos
   useEffect(() => {
     const outboundMsgIds = messages
       .filter(m => m.direction === "outbound")
       .map(m => m.id)
-      .filter(id => !id.startsWith("temp-"))  // Ignora IDs temporários
+      .filter(id => !id.startsWith("temp-"))
 
     if (outboundMsgIds.length === 0) {
       setReadMessageIds(new Set())
@@ -283,15 +283,14 @@ const [isSuggesting, setIsSuggesting] = useState(false)
           setReadMessageIds(new Set(data.map(e => e.message_id)))
         }
       } catch (err) {
-        // Ignora erros silenciosamente
+        // Ignora erros
       }
     }
 
-    // Busca inicial
     fetchReadEvents()
 
-    // Polling a cada 30 segundos (reduzido de 1s para economizar requests)
-    const interval = setInterval(fetchReadEvents, 30000)
+    // Polling a cada 10 segundos
+    const interval = setInterval(fetchReadEvents, 10000)
 
     return () => clearInterval(interval)
   }, [messages])
@@ -344,8 +343,8 @@ const [isSuggesting, setIsSuggesting] = useState(false)
     // Busca inicial
     fetchPresence()
 
-    // Polling a cada 5 segundos (reduzido de 1s para economizar requests)
-    const interval = setInterval(fetchPresence, 5000)
+    // Polling a cada 10 segundos
+    const interval = setInterval(fetchPresence, 10000)
 
     return () => {
       clearInterval(interval)
