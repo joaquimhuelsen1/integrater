@@ -1153,28 +1153,38 @@ I'll be waiting.`
     onDelete: handleRealtimeDelete,
   })
 
-  // Polling de fallback para conversas (não mensagens) - 30 segundos
-  // Mensagens são atualizadas via Realtime
+  // Realtime para conversas (substitui polling de 30s)
   useEffect(() => {
     if (!currentWorkspace?.id) return
 
-    const pollConversations = () => {
-      loadConversations(searchQuery)
+    const channel = supabase
+      .channel(`conversations-${currentWorkspace.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "conversations",
+          filter: `workspace_id=eq.${currentWorkspace.id}`,
+        },
+        () => {
+          // Recarrega lista quando qualquer conversa muda
+          loadConversations(searchQuery)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
     }
+  }, [currentWorkspace?.id, searchQuery, loadConversations, supabase])
 
-    // Polling a cada 30 segundos (fallback, não principal)
-    const interval = setInterval(pollConversations, 30000)
-
-    return () => clearInterval(interval)
-  }, [currentWorkspace?.id, searchQuery, loadConversations])
-
-  // Polling de read status para lista de conversas - 3 segundos
+  // Realtime para read status (substitui polling de 3s)
   useEffect(() => {
     if (!currentWorkspace?.id || conversations.length === 0) return
 
     const fetchReadStatus = async () => {
       try {
-        // Buscar última mensagem de cada conversa (últimos 30 dias)
         const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
         const convIds = conversations
           .filter(c => c.last_message_at && c.last_message_at > thirtyDaysAgo)
@@ -1182,7 +1192,6 @@ I'll be waiting.`
 
         if (convIds.length === 0) return
 
-        // Buscar última mensagem de cada conversa
         const { data: lastMessages } = await supabase
           .from("messages")
           .select("id, conversation_id, direction")
@@ -1192,7 +1201,6 @@ I'll be waiting.`
 
         if (!lastMessages) return
 
-        // Agrupar por conversa (pegar só a última)
         const lastMsgByConv: Record<string, { id: string; direction: string }> = {}
         for (const msg of lastMessages) {
           if (!lastMsgByConv[msg.conversation_id]) {
@@ -1200,14 +1208,12 @@ I'll be waiting.`
           }
         }
 
-        // Atualizar direções
         const directions: Record<string, "inbound" | "outbound"> = {}
         for (const [convId, msg] of Object.entries(lastMsgByConv)) {
           directions[convId] = msg.direction as "inbound" | "outbound"
         }
         setLastMessageDirections(directions)
 
-        // Buscar quais mensagens outbound foram lidas
         const outboundMsgIds = Object.values(lastMsgByConv)
           .filter(m => m.direction === "outbound")
           .map(m => m.id)
@@ -1234,33 +1240,49 @@ I'll be waiting.`
           setReadConversationIds(readConvIds)
         }
       } catch (err) {
-        // Ignora erros silenciosamente
+        // Ignora erros
       }
     }
 
-    // Busca inicial
+    // Busca inicial única
     fetchReadStatus()
 
-    // Polling a cada 3 segundos
-    const interval = setInterval(fetchReadStatus, 3000)
+    // Realtime: escuta novos eventos de leitura
+    const channel = supabase
+      .channel(`read-status-${currentWorkspace.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "message_events",
+        },
+        (payload) => {
+          const newEvent = payload.new as { type: string }
+          if (newEvent.type === "read") {
+            fetchReadStatus()
+          }
+        }
+      )
+      .subscribe()
 
-    return () => clearInterval(interval)
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [currentWorkspace?.id, conversations, supabase])
 
-  // Polling de presence status (online/offline) - 3 segundos
+  // Realtime para presence status (online/offline) - substitui polling de 3s
   useEffect(() => {
     if (!currentWorkspace?.id || conversations.length === 0) return
 
     const fetchPresenceStatus = async () => {
       try {
-        // Buscar primary_identity_ids das conversas
         const identityIds = conversations
           .map(c => c.primary_identity_id)
           .filter((id): id is string => !!id)
 
         if (identityIds.length === 0) return
 
-        // Buscar presence_status de todas as identities
         const { data: presenceData } = await supabase
           .from("presence_status")
           .select("contact_identity_id, is_online")
@@ -1274,17 +1296,32 @@ I'll be waiting.`
           setOnlineIdentityIds(new Set())
         }
       } catch (err) {
-        // Ignora erros silenciosamente
+        // Ignora erros
       }
     }
 
-    // Busca inicial
+    // Busca inicial única
     fetchPresenceStatus()
 
-    // Polling a cada 3 segundos
-    const presenceInterval = setInterval(fetchPresenceStatus, 3000)
+    // Realtime: escuta mudanças de presence
+    const channel = supabase
+      .channel(`presence-list-${currentWorkspace.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "presence_status",
+        },
+        () => {
+          fetchPresenceStatus()
+        }
+      )
+      .subscribe()
 
-    return () => clearInterval(presenceInterval)
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [currentWorkspace?.id, conversations, supabase])
 
   // Refs para callbacks do realtime (evita re-subscriptions)

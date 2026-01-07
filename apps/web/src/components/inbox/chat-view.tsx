@@ -257,7 +257,7 @@ const [isSuggesting, setIsSuggesting] = useState(false)
   const [isOnline, setIsOnline] = useState(false)
   const [lastSeen, setLastSeen] = useState<string | null>(null)
 
-  // Polling de eventos de leitura - 10 segundos
+  // Realtime para eventos de leitura (sem polling)
   useEffect(() => {
     const outboundMsgIds = messages
       .filter(m => m.direction === "outbound")
@@ -271,6 +271,7 @@ const [isSuggesting, setIsSuggesting] = useState(false)
 
     const supabase = createClient()
 
+    // Busca inicial única
     const fetchReadEvents = async () => {
       try {
         const { data } = await supabase
@@ -289,13 +290,31 @@ const [isSuggesting, setIsSuggesting] = useState(false)
 
     fetchReadEvents()
 
-    // Polling a cada 10 segundos
-    const interval = setInterval(fetchReadEvents, 10000)
+    // Realtime: escuta novos eventos de leitura
+    const channel = supabase
+      .channel(`read-events-${conversationId || "none"}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "message_events",
+        },
+        (payload) => {
+          const newEvent = payload.new as { message_id: string; type: string }
+          if (newEvent.type === "read" && outboundMsgIds.includes(newEvent.message_id)) {
+            setReadMessageIds(prev => new Set([...prev, newEvent.message_id]))
+          }
+        }
+      )
+      .subscribe()
 
-    return () => clearInterval(interval)
-  }, [messages])
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [messages, conversationId])
 
-  // Polling para presence status (typing/online) - 5 segundos (otimizado)
+  // Realtime para presence status (typing/online) - sem polling
   useEffect(() => {
     if (!conversationId && !identityId) {
       setIsTyping(false)
@@ -306,9 +325,25 @@ const [isSuggesting, setIsSuggesting] = useState(false)
 
     const supabase = createClient()
 
+    const processPresenceData = (data: { is_typing: boolean; is_online: boolean; last_seen_at: string | null; typing_expires_at: string | null } | null) => {
+      if (data) {
+        const typingExpired = data.typing_expires_at
+          ? new Date(data.typing_expires_at) < new Date()
+          : true
+
+        setIsTyping(data.is_typing && !typingExpired)
+        setIsOnline(data.is_online || false)
+        setLastSeen(data.last_seen_at)
+      } else {
+        setIsTyping(false)
+        setIsOnline(false)
+        setLastSeen(null)
+      }
+    }
+
+    // Busca inicial única
     const fetchPresence = async () => {
       try {
-        // Busca por conversation_id OU contact_identity_id
         let query = supabase
           .from("presence_status")
           .select("is_typing, is_online, last_seen_at, typing_expires_at")
@@ -320,34 +355,40 @@ const [isSuggesting, setIsSuggesting] = useState(false)
         }
 
         const { data } = await query.maybeSingle()
-
-        if (data) {
-          // Verifica se typing expirou (5 segundos)
-          const typingExpired = data.typing_expires_at
-            ? new Date(data.typing_expires_at) < new Date()
-            : true
-
-          setIsTyping(data.is_typing && !typingExpired)
-          setIsOnline(data.is_online || false)
-          setLastSeen(data.last_seen_at)
-        } else {
-          setIsTyping(false)
-          setIsOnline(false)
-          setLastSeen(null)
-        }
+        processPresenceData(data)
       } catch (err) {
-        // Ignora erros silenciosamente
+        // Ignora erros
       }
     }
 
-    // Busca inicial
     fetchPresence()
 
-    // Polling a cada 10 segundos
-    const interval = setInterval(fetchPresence, 10000)
+    // Realtime: escuta mudanças de presence
+    const filterColumn = conversationId ? "conversation_id" : "contact_identity_id"
+    const filterValue = conversationId || identityId
+
+    const channel = supabase
+      .channel(`presence-${filterValue}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*", // INSERT, UPDATE, DELETE
+          schema: "public",
+          table: "presence_status",
+          filter: `${filterColumn}=eq.${filterValue}`,
+        },
+        (payload) => {
+          if (payload.eventType === "DELETE") {
+            processPresenceData(null)
+          } else {
+            processPresenceData(payload.new as { is_typing: boolean; is_online: boolean; last_seen_at: string | null; typing_expires_at: string | null })
+          }
+        }
+      )
+      .subscribe()
 
     return () => {
-      clearInterval(interval)
+      supabase.removeChannel(channel)
     }
   }, [conversationId, identityId])
 

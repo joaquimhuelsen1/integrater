@@ -598,11 +598,33 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
     loadAiModels()
   }, [currentWorkspace, loadAccounts, loadPrompts, loadOpenPhoneAccounts, loadEmailAccounts, loadAiModels])
 
+  // Realtime para worker status (substitui polling de 30s)
   useEffect(() => {
-    if (accounts.length > 0) {
-      loadWorkerStatus()
-      const interval = setInterval(loadWorkerStatus, 30000) // Update every 30s
-      return () => clearInterval(interval)
+    if (accounts.length === 0) return
+
+    const supabase = createClient()
+
+    // Busca inicial
+    loadWorkerStatus()
+
+    // Realtime: escuta mudanças em worker_heartbeats
+    const channel = supabase
+      .channel("worker-status")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "worker_heartbeats",
+        },
+        () => {
+          loadWorkerStatus()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
     }
   }, [accounts.length])
 
