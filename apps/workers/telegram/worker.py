@@ -34,6 +34,7 @@ from telethon.tl.types import (
     MessageActionChatDeleteUser, MessageActionChatJoinedByRequest,
     UserStatusOnline, UserStatusOffline, UserStatusRecently,
     UpdateShortMessage, UpdateNewMessage, UpdateEditMessage,
+    UpdateReadHistoryOutbox, UpdateReadHistoryInbox,
 )
 from telethon.tl.functions.messages import ReadHistoryRequest
 
@@ -431,6 +432,16 @@ class TelegramWorker:
                             text=msg.message if hasattr(msg, 'message') else None,
                             date=msg.date, media=getattr(msg, 'media', None)
                         )
+
+            # Handler para quando o LEAD lê nossas mensagens (checkmarks azuis)
+            elif isinstance(update, UpdateReadHistoryOutbox):
+                # peer = quem leu (o lead/contato)
+                # max_id = última mensagem lida
+                if isinstance(update.peer, PeerUser):
+                    user_id = update.peer.user_id
+                    max_id = update.max_id
+                    print(f"[READ] Lead {user_id} leu mensagens até id={max_id}")
+                    await self._handle_read_receipt(acc_id, owner_id, user_id, max_id)
 
         except Exception as e:
             import traceback
@@ -1038,6 +1049,112 @@ class TelegramWorker:
 
         except Exception as e:
             print(f"[PRESENCE] Erro: {e}")
+
+    # =============================================
+    # READ RECEIPTS - CHECKMARKS AZUIS
+    # =============================================
+
+    async def _handle_read_receipt(self, acc_id: str, owner_id: str, telegram_user_id: int, max_id: int):
+        """
+        Processa evento de leitura - quando o lead lê nossas mensagens.
+        
+        O Telegram envia UpdateReadHistoryOutbox com max_id = última msg lida.
+        Isso significa que TODAS as mensagens até max_id foram lidas.
+        
+        Args:
+            acc_id: ID da conta de integração
+            owner_id: ID do owner
+            telegram_user_id: ID do usuário Telegram que leu
+            max_id: ID da última mensagem lida no Telegram
+        """
+        try:
+            db = get_supabase()
+            now = datetime.now(timezone.utc)
+            
+            # 1. Buscar identity do lead
+            identity_result = await db_async(lambda: db.table("contact_identities").select(
+                "id"
+            ).eq("type", "telegram_user").eq("value", str(telegram_user_id)).limit(1).execute())
+            
+            if not identity_result.data:
+                print(f"[READ] Identity não encontrada para telegram_user_id={telegram_user_id}")
+                return
+            
+            identity_id = identity_result.data[0]["id"]
+            
+            # 2. Buscar conversa
+            conv_result = await db_async(lambda: db.table("conversations").select(
+                "id"
+            ).eq("primary_identity_id", identity_id).limit(1).execute())
+            
+            if not conv_result.data:
+                print(f"[READ] Conversa não encontrada para identity_id={identity_id}")
+                return
+            
+            conversation_id = conv_result.data[0]["id"]
+            
+            # 3. Buscar mensagens outbound desta conversa com external_id <= max_id
+            # external_id = ID da mensagem no Telegram
+            messages_result = await db_async(lambda: db.table("messages").select(
+                "id, external_id"
+            ).eq("conversation_id", conversation_id).eq(
+                "direction", "outbound"
+            ).not_.is_("external_id", "null").execute())
+            
+            if not messages_result.data:
+                print(f"[READ] Nenhuma mensagem outbound encontrada para conversa {conversation_id}")
+                return
+            
+            # 4. Filtrar mensagens com external_id <= max_id (foram lidas)
+            messages_to_mark = []
+            for msg in messages_result.data:
+                ext_id = msg.get("external_id")
+                if ext_id:
+                    try:
+                        # external_id pode ser string ou int
+                        ext_id_int = int(ext_id)
+                        if ext_id_int <= max_id:
+                            messages_to_mark.append(msg["id"])
+                    except (ValueError, TypeError):
+                        continue
+            
+            if not messages_to_mark:
+                print(f"[READ] Nenhuma mensagem nova para marcar como lida (max_id={max_id})")
+                return
+            
+            # 5. Verificar quais já têm evento de leitura
+            existing_events = await db_async(lambda: db.table("message_events").select(
+                "message_id"
+            ).in_("message_id", messages_to_mark).eq("type", "read").execute())
+            
+            already_read = set(e["message_id"] for e in existing_events.data) if existing_events.data else set()
+            new_to_mark = [m for m in messages_to_mark if m not in already_read]
+            
+            if not new_to_mark:
+                print(f"[READ] Todas as {len(messages_to_mark)} msgs já estavam marcadas como lidas")
+                return
+            
+            # 6. Inserir eventos de leitura para mensagens não marcadas
+            # Estrutura da tabela: id, owner_id, message_id, type (enum), occurred_at, payload, metadata
+            events_to_insert = [
+                {
+                    "owner_id": owner_id,
+                    "message_id": msg_id,
+                    "type": "read",
+                    "occurred_at": now.isoformat(),
+                    "payload": {"read_by_chat_id": telegram_user_id, "max_id": max_id},
+                }
+                for msg_id in new_to_mark
+            ]
+            
+            await db_async(lambda: db.table("message_events").insert(events_to_insert).execute())
+            
+            print(f"[READ] Marcadas {len(new_to_mark)} mensagens como lidas (conversa={conversation_id}, max_id={max_id})")
+            
+        except Exception as e:
+            import traceback
+            print(f"[READ] Erro ao processar read receipt: {e}")
+            traceback.print_exc()
 
     # =============================================
     # SYNC HISTÓRICO - MANTÉM NO WORKER
