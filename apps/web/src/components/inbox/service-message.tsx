@@ -14,18 +14,20 @@ export function ServiceMessage({ message, onOpenChat, onSendWelcome }: ServiceMe
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
 
+  // Extrai userId e userName do payload
+  // O worker envia em service_event.user_ids[0] e service_event.action_user_name
+  const serviceEvent = message.raw_payload?.service_event
+  const userId = serviceEvent?.user_ids?.[0] || message.raw_payload?.action_user_id
+  const userName = serviceEvent?.action_user_name || message.raw_payload?.action_user_name || "Usuário"
+
   // Verifica se já foi enviado (localStorage)
   useEffect(() => {
-    const userId = message.raw_payload?.action_user_id
     if (userId) {
       const sentKey = `welcome_sent_${userId}`
       const wasSent = localStorage.getItem(sentKey)
       if (wasSent) setSent(true)
     }
-  }, [message.raw_payload?.action_user_id])
-
-  const userId = message.raw_payload?.action_user_id
-  const userName = message.raw_payload?.action_user_name || "Usuário"
+  }, [userId])
 
   // Parse o texto para separar nome da ação
   const text = message.text || ""

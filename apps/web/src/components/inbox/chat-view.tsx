@@ -68,6 +68,13 @@ export interface Message {
     action_user_id?: number
     action_user_name?: string
     action_user_ids?: number[]
+    // Novo formato do worker - service_event contém dados do evento
+    service_event?: {
+      service_type?: string
+      user_ids?: number[]
+      action_user_name?: string
+      text?: string
+    }
   }
   // Status para optimistic update: enviando → enviado → falhou
   sending_status?: "sending" | "sent" | "failed"
