@@ -356,6 +356,9 @@ export function InboxView({ userEmail, workspaceId }: InboxViewProps) {
   // Conversas filtradas por tags e ordenadas (fixadas no topo)
   const filteredConversations = useMemo(() => {
     const filtered = conversations.filter(c => {
+      // Esconder conversas sem mensagens (sem last_message_at)
+      if (!c.last_message_at) return false
+
       // Aba "Arquivadas" - mostrar apenas arquivadas
       if (selectedChannel === "archived") {
         return !!c.archived_at
