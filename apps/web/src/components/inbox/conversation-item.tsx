@@ -20,6 +20,8 @@ interface ConversationItemProps {
   // Read status da última mensagem outbound
   isLastOutboundRead?: boolean
   lastMessageDirection?: "inbound" | "outbound"
+  // Presence status - contato está online
+  isOnline?: boolean
 }
 
 const channelIcons = {
@@ -65,6 +67,7 @@ export function ConversationItem({
   onDelete,
   isLastOutboundRead = false,
   lastMessageDirection,
+  isOnline = false,
 }: ConversationItemProps) {
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 })
@@ -177,6 +180,13 @@ export function ConversationItem({
         <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-zinc-100 dark:border-zinc-900 dark:bg-zinc-700">
           <Icon className={`h-3 w-3 ${iconColor}`} />
         </span>
+        {/* Online indicator */}
+        {isOnline && (
+          <span 
+            className="absolute -top-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-white bg-green-500 dark:border-zinc-900" 
+            title="Online"
+          />
+        )}
       </div>
 
       <div className="min-w-0 flex-1">

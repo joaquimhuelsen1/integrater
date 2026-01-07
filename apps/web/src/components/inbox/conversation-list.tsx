@@ -50,6 +50,8 @@ interface ConversationListProps {
   readConversationIds?: Set<string>
   // Direção da última mensagem por conversa
   lastMessageDirections?: Record<string, "inbound" | "outbound">
+  // Presence status: Set de identity_ids que estão online
+  onlineIdentityIds?: Set<string>
 }
 
 export function ConversationList({
@@ -65,6 +67,7 @@ export function ConversationList({
   onDelete,
   readConversationIds = new Set(),
   lastMessageDirections = {},
+  onlineIdentityIds = new Set(),
 }: ConversationListProps) {
   if (conversations.length === 0) {
     return (
@@ -92,6 +95,7 @@ export function ConversationList({
           onDelete={onDelete}
           isLastOutboundRead={readConversationIds.has(conv.id)}
           lastMessageDirection={lastMessageDirections[conv.id]}
+          isOnline={conv.primary_identity_id ? onlineIdentityIds.has(conv.primary_identity_id) : false}
         />
       ))}
     </div>

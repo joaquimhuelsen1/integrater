@@ -118,6 +118,8 @@ export function InboxView({ userEmail, workspaceId }: InboxViewProps) {
   // Read status para lista de conversas
   const [readConversationIds, setReadConversationIds] = useState<Set<string>>(new Set())
   const [lastMessageDirections, setLastMessageDirections] = useState<Record<string, "inbound" | "outbound">>({})
+  // Presence status - identities que estão online
+  const [onlineIdentityIds, setOnlineIdentityIds] = useState<Set<string>>(new Set())
 
   const supabase = useMemo(() => createClient(), [])
   const router = useRouter()
@@ -1235,6 +1237,46 @@ I'll be waiting.`
     return () => clearInterval(interval)
   }, [currentWorkspace?.id, conversations, supabase])
 
+  // Polling de presence status (online/offline) - 3 segundos
+  useEffect(() => {
+    if (!currentWorkspace?.id || conversations.length === 0) return
+
+    const fetchPresenceStatus = async () => {
+      try {
+        // Buscar primary_identity_ids das conversas
+        const identityIds = conversations
+          .map(c => c.primary_identity_id)
+          .filter((id): id is string => !!id)
+
+        if (identityIds.length === 0) return
+
+        // Buscar presence_status de todas as identities
+        const { data: presenceData } = await supabase
+          .from("presence_status")
+          .select("contact_identity_id, is_online")
+          .in("contact_identity_id", identityIds)
+          .eq("is_online", true)
+
+        if (presenceData) {
+          const onlineIds = new Set(presenceData.map(p => p.contact_identity_id))
+          setOnlineIdentityIds(onlineIds)
+        } else {
+          setOnlineIdentityIds(new Set())
+        }
+      } catch (err) {
+        // Ignora erros silenciosamente
+      }
+    }
+
+    // Busca inicial
+    fetchPresenceStatus()
+
+    // Polling a cada 3 segundos
+    const presenceInterval = setInterval(fetchPresenceStatus, 3000)
+
+    return () => clearInterval(presenceInterval)
+  }, [currentWorkspace?.id, conversations, supabase])
+
   // Refs para callbacks do realtime (evita re-subscriptions)
   const loadConversationsRef = useRef(loadConversations)
   const loadMessagesRef = useRef(loadMessages)
@@ -1441,6 +1483,7 @@ I'll be waiting.`
               onDelete={handleDeleteConversation}
               readConversationIds={readConversationIds}
               lastMessageDirections={lastMessageDirections}
+              onlineIdentityIds={onlineIdentityIds}
             />
           )}
         </div>
