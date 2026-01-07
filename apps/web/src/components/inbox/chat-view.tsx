@@ -491,11 +491,26 @@ const [isSuggesting, setIsSuggesting] = useState(false)
 
     // Scroll se: primeira carga, ou nova msg e (perto do final ou msg própria)
     if (isFirstLoad || (hasNewMessage && (isNearBottomRef.current || isOwnMessage))) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
+      // Usa setTimeout para garantir que o DOM foi renderizado
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
+      }, 50)
     }
 
     prevMessagesLengthRef.current = messages.length
   }, [messages])
+
+  // Scroll para o final quando muda de conversa
+  useEffect(() => {
+    // Reset do ref ao mudar de conversa
+    prevMessagesLengthRef.current = 0
+    isNearBottomRef.current = true
+    
+    // Scroll para o final após carregar
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
+    }, 100)
+  }, [conversationId])
 
   // Drag and drop handlers
   const handleDragEnter = useCallback((e: React.DragEvent) => {
