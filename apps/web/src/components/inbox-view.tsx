@@ -1162,10 +1162,10 @@ I'll be waiting.`
 
     const fetchReadStatus = async () => {
       try {
-        // Buscar última mensagem de cada conversa (últimas 24h)
-        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+        // Buscar última mensagem de cada conversa (últimos 30 dias)
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
         const convIds = conversations
-          .filter(c => c.last_message_at && c.last_message_at > twentyFourHoursAgo)
+          .filter(c => c.last_message_at && c.last_message_at > thirtyDaysAgo)
           .map(c => c.id)
 
         if (convIds.length === 0) return
