@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import { X, Bug, Check, Clock, ExternalLink, ImagePlus, Trash2, Loader2 } from "lucide-react"
+import { X, Bug, Check, Clock, ExternalLink, ImagePlus, Trash2, Loader2, Upload } from "lucide-react"
 import { createClient } from "@/lib/supabase"
 
 interface BugReportImage {
@@ -49,6 +49,10 @@ export function BugReportModal({ isOpen, onClose, currentUrl, workspaceId }: Bug
   const [imagePreviews, setImagePreviews] = useState<ImagePreview[]>([])
   const [expandedImage, setExpandedImage] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  
+  // Estado para drag & drop
+  const [isDragging, setIsDragging] = useState(false)
+  const dragCounterRef = useRef(0)
 
   const supabase = createClient()
 
@@ -88,24 +92,64 @@ export function BugReportModal({ isOpen, onClose, currentUrl, workspaceId }: Bug
     }
   }, [isOpen])
 
-  // Handler para adicionar imagens
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || [])
-    if (files.length === 0) return
+  // Handler para adicionar imagens (file input ou drop)
+  const addImageFiles = useCallback((files: File[]) => {
+    // Filtra apenas imagens
+    const imageFiles = files.filter(f => f.type.startsWith("image/"))
+    if (imageFiles.length === 0) return
 
-    const newPreviews: ImagePreview[] = files.map(file => ({
+    const newPreviews: ImagePreview[] = imageFiles.map(file => ({
       id: crypto.randomUUID(),
       file,
       previewUrl: URL.createObjectURL(file)
     }))
 
     setImagePreviews(prev => [...prev, ...newPreviews])
+  }, [])
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    addImageFiles(files)
     
     // Reset input para permitir selecionar mesmos arquivos
     if (fileInputRef.current) {
       fileInputRef.current.value = ""
     }
   }
+
+  // Drag & drop handlers
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current++
+    if (e.dataTransfer.types.includes("Files")) {
+      setIsDragging(true)
+    }
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current--
+    if (dragCounterRef.current === 0) {
+      setIsDragging(false)
+    }
+  }, [])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+    dragCounterRef.current = 0
+
+    const files = Array.from(e.dataTransfer.files)
+    addImageFiles(files)
+  }, [addImageFiles])
 
   // Remove preview de imagem
   const removeImage = (id: string) => {
@@ -356,7 +400,7 @@ export function BugReportModal({ isOpen, onClose, currentUrl, workspaceId }: Bug
                   />
                 </div>
 
-                {/* Upload de Imagens */}
+                {/* Upload de Imagens com Drag & Drop */}
                 <div>
                   <label className="mb-1.5 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
                     Screenshots
@@ -387,15 +431,34 @@ export function BugReportModal({ isOpen, onClose, currentUrl, workspaceId }: Bug
                     </div>
                   )}
 
-                  {/* Botão de adicionar */}
-                  <button
-                    type="button"
+                  {/* Área de drag & drop / botão de adicionar */}
+                  <div
+                    onDragEnter={handleDragEnter}
+                    onDragLeave={handleDragLeave}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
                     onClick={() => fileInputRef.current?.click()}
-                    className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-zinc-300 bg-zinc-50 px-4 py-3 text-sm text-zinc-600 transition-colors hover:border-red-400 hover:bg-red-50 hover:text-red-600 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:border-red-500 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                    className={`relative flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-6 text-sm transition-all ${
+                      isDragging
+                        ? "border-red-500 bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400"
+                        : "border-zinc-300 bg-zinc-50 text-zinc-600 hover:border-red-400 hover:bg-red-50 hover:text-red-600 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:border-red-500 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                    }`}
                   >
-                    <ImagePlus className="h-5 w-5" />
-                    <span>Adicionar imagens</span>
-                  </button>
+                    {isDragging ? (
+                      <>
+                        <Upload className="h-8 w-8" />
+                        <span className="font-medium">Solte as imagens aqui</span>
+                      </>
+                    ) : (
+                      <>
+                        <ImagePlus className="h-6 w-6" />
+                        <span>Arraste imagens ou clique para selecionar</span>
+                        <span className="text-xs text-zinc-400 dark:text-zinc-500">
+                          PNG, JPG, GIF - quantas quiser
+                        </span>
+                      </>
+                    )}
+                  </div>
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -404,9 +467,6 @@ export function BugReportModal({ isOpen, onClose, currentUrl, workspaceId }: Bug
                     onChange={handleFileSelect}
                     className="hidden"
                   />
-                  <p className="mt-1 text-xs text-zinc-400">
-                    PNG, JPG, GIF - quantas quiser
-                  </p>
                 </div>
 
                 {/* URL (automatico) */}
