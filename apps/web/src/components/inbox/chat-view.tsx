@@ -204,6 +204,7 @@ onMessageDelete,
   onBackToList,
 }: ChatViewProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const isNearBottomRef = useRef(true)
   const prevMessagesLengthRef = useRef(0)
@@ -480,6 +481,13 @@ const [isSuggesting, setIsSuggesting] = useState(false)
     }
   }, [apiUrl, isDeleting, onMessageDelete])
 
+  // Função para scroll instantâneo ao final (sem animação)
+  const scrollToBottom = useCallback(() => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight
+    }
+  }, [])
+
   // Scroll condicional - só quando apropriado (não interrompe leitura)
   useEffect(() => {
     if (messages.length === 0) return
@@ -491,14 +499,12 @@ const [isSuggesting, setIsSuggesting] = useState(false)
 
     // Scroll se: primeira carga, ou nova msg e (perto do final ou msg própria)
     if (isFirstLoad || (hasNewMessage && (isNearBottomRef.current || isOwnMessage))) {
-      // Usa setTimeout para garantir que o DOM foi renderizado
-      setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
-      }, 50)
+      // Scroll instantâneo sem animação
+      scrollToBottom()
     }
 
     prevMessagesLengthRef.current = messages.length
-  }, [messages])
+  }, [messages, scrollToBottom])
 
   // Scroll para o final quando muda de conversa
   useEffect(() => {
@@ -506,11 +512,9 @@ const [isSuggesting, setIsSuggesting] = useState(false)
     prevMessagesLengthRef.current = 0
     isNearBottomRef.current = true
     
-    // Scroll para o final após carregar
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "instant" })
-    }, 100)
-  }, [conversationId])
+    // Scroll instantâneo ao final
+    scrollToBottom()
+  }, [conversationId, scrollToBottom])
 
   // Drag and drop handlers
   const handleDragEnter = useCallback((e: React.DragEvent) => {
@@ -1175,6 +1179,7 @@ const [isSuggesting, setIsSuggesting] = useState(false)
       <div className="chat-background flex min-h-0 flex-1 flex-col">
         {/* Messages (scroll area) */}
         <div
+          ref={scrollContainerRef}
           className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4 md:px-12 lg:px-20"
           onScroll={(e) => {
             const { scrollTop, scrollHeight, clientHeight } = e.currentTarget
