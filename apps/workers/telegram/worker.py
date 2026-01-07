@@ -1093,22 +1093,22 @@ class TelegramWorker:
             
             conversation_id = conv_result.data[0]["id"]
             
-            # 3. Buscar mensagens outbound desta conversa com external_id <= max_id
-            # external_id = ID da mensagem no Telegram
+            # 3. Buscar mensagens outbound desta conversa com external_message_id <= max_id
+            # external_message_id = ID da mensagem no Telegram
             messages_result = await db_async(lambda: db.table("messages").select(
-                "id, external_id"
+                "id, external_message_id"
             ).eq("conversation_id", conversation_id).eq(
                 "direction", "outbound"
-            ).not_.is_("external_id", "null").execute())
+            ).not_.is_("external_message_id", "null").execute())
             
             if not messages_result.data:
                 print(f"[READ] Nenhuma mensagem outbound encontrada para conversa {conversation_id}")
                 return
             
-            # 4. Filtrar mensagens com external_id <= max_id (foram lidas)
+            # 4. Filtrar mensagens com external_message_id <= max_id (foram lidas)
             messages_to_mark = []
             for msg in messages_result.data:
-                ext_id = msg.get("external_id")
+                ext_id = msg.get("external_message_id")
                 if ext_id:
                     try:
                         # external_id pode ser string ou int
