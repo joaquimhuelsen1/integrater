@@ -246,9 +246,6 @@ const [isSuggesting, setIsSuggesting] = useState(false)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const dragCounterRef = useRef(0)
 
-  // Track messages being translated to avoid duplicates
-  const translatingRef = useRef<Set<string>>(new Set())
-
   // Read receipts - IDs de mensagens que foram lidas
   const [readMessageIds, setReadMessageIds] = useState<Set<string>>(new Set())
 
@@ -599,6 +596,7 @@ const [isSuggesting, setIsSuggesting] = useState(false)
   }, [conversationId])
 
   // Load cached translations when conversation changes (1 request batch)
+  // Apenas carrega o cache, NÃO ativa tradução automaticamente
   useEffect(() => {
     if (!conversationId || messages.length === 0) return
 
@@ -619,8 +617,7 @@ const [isSuggesting, setIsSuggesting] = useState(false)
           }
           if (Object.keys(cached).length > 0) {
             setTranslations(cached)
-            // Auto-ativar tradução se há traduções em cache
-            setShowTranslation(true)
+            // NÃO ativa tradução automaticamente - usuário precisa clicar
           }
         }
       } catch {
@@ -631,57 +628,8 @@ const [isSuggesting, setIsSuggesting] = useState(false)
     loadCachedTranslations()
   }, [conversationId, messages.length, apiUrl])
 
-  // Auto-translate new messages when in Portuguese mode (only inbound)
-  useEffect(() => {
-    if (!conversationId || !showTranslation || messages.length === 0) return
-
-    const translateNewMessages = async () => {
-      // Find inbound messages without translations and not being translated
-      const untranslated = messages.filter(
-        (m) =>
-          m.direction === "inbound" &&
-          m.text &&
-          m.text.length >= 2 &&
-          !translations[m.id] &&
-          !translatingRef.current.has(m.id)
-      )
-
-      if (untranslated.length === 0) return
-
-      // Mark as being translated
-      for (const msg of untranslated) {
-        translatingRef.current.add(msg.id)
-      }
-
-      // Translate each new message
-      for (const msg of untranslated) {
-        try {
-          const resp = await apiFetch(`/translate/message/${msg.id}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ target_lang: "pt-BR" }),
-          })
-          if (resp.ok) {
-            const data = await resp.json()
-            setTranslations((prev) => ({
-              ...prev,
-              [msg.id]: {
-                message_id: msg.id,
-                translated_text: data.translated_text,
-                source_lang: data.source_lang,
-              },
-            }))
-          }
-        } catch {
-          // Ignora erros de tradução individual
-        } finally {
-          translatingRef.current.delete(msg.id)
-        }
-      }
-    }
-
-    translateNewMessages()
-  }, [conversationId, showTranslation, messages, translations, apiUrl])
+  // NÃO traduz automaticamente - usuário precisa clicar no botão "Traduzir"
+  // Removido: auto-translate de novas mensagens
 
   const translateConversation = useCallback(async () => {
     if (!conversationId || isTranslating) return
