@@ -213,8 +213,8 @@ export function ConversationItem({
             {/* Checkmarks para mensagens outbound */}
             {lastMessageDirection === "outbound" && (
               isLastOutboundRead
-                ? <CheckCheck className="h-6 w-6 text-blue-400 flex-shrink-0" />
-                : <Check className="h-6 w-6 text-zinc-400 flex-shrink-0" />
+                ? <CheckCheck className="h-4 w-4 text-blue-400 flex-shrink-0" />
+                : <Check className="h-4 w-4 text-zinc-400 flex-shrink-0" />
             )}
             <span className="truncate">{conversation.last_message_preview || ""}</span>
           </span>
