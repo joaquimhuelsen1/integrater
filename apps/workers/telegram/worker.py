@@ -1071,33 +1071,33 @@ class TelegramWorker:
             db = get_supabase()
             now = datetime.now(timezone.utc)
             
-            # 1. Buscar identity do lead
+            # 1. Buscar TODAS identities do lead (pode haver duplicatas)
             identity_result = await db_async(lambda: db.table("contact_identities").select(
                 "id"
-            ).eq("type", "telegram_user").eq("value", str(telegram_user_id)).limit(1).execute())
+            ).eq("type", "telegram_user").eq("value", str(telegram_user_id)).execute())
             
             if not identity_result.data:
                 print(f"[READ] Identity não encontrada para telegram_user_id={telegram_user_id}")
                 return
             
-            identity_id = identity_result.data[0]["id"]
+            identity_ids = [i["id"] for i in identity_result.data]
             
-            # 2. Buscar conversa
+            # 2. Buscar TODAS conversas dessas identities
             conv_result = await db_async(lambda: db.table("conversations").select(
                 "id"
-            ).eq("primary_identity_id", identity_id).limit(1).execute())
+            ).in_("primary_identity_id", identity_ids).execute())
             
             if not conv_result.data:
-                print(f"[READ] Conversa não encontrada para identity_id={identity_id}")
+                print(f"[READ] Nenhuma conversa encontrada para identities={identity_ids}")
                 return
             
-            conversation_id = conv_result.data[0]["id"]
+            conversation_ids = [c["id"] for c in conv_result.data]
             
-            # 3. Buscar mensagens outbound desta conversa com external_message_id <= max_id
+            # 3. Buscar mensagens outbound de TODAS conversas com external_message_id <= max_id
             # external_message_id = ID da mensagem no Telegram
             messages_result = await db_async(lambda: db.table("messages").select(
-                "id, external_message_id"
-            ).eq("conversation_id", conversation_id).eq(
+                "id, external_message_id, conversation_id"
+            ).in_("conversation_id", conversation_ids).eq(
                 "direction", "outbound"
             ).not_.is_("external_message_id", "null").execute())
             
@@ -1149,7 +1149,7 @@ class TelegramWorker:
             
             await db_async(lambda: db.table("message_events").insert(events_to_insert).execute())
             
-            print(f"[READ] Marcadas {len(new_to_mark)} mensagens como lidas (conversa={conversation_id}, max_id={max_id})")
+            print(f"[READ] Marcadas {len(new_to_mark)} mensagens como lidas ({len(conversation_ids)} conversas, max_id={max_id})")
             
         except Exception as e:
             import traceback
