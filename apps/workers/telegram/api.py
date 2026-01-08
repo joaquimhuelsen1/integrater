@@ -65,6 +65,34 @@ class SendResponse(BaseModel):
     recipient: RecipientData | None = None
 
 
+class EditRequest(BaseModel):
+    """Request para editar mensagem."""
+    account_id: str
+    telegram_user_id: int
+    telegram_msg_id: int
+    new_text: str
+
+
+class EditResponse(BaseModel):
+    """Response da edição."""
+    success: bool
+    error: str | None = None
+
+
+class DeleteRequest(BaseModel):
+    """Request para deletar mensagem."""
+    account_id: str
+    telegram_user_id: int
+    telegram_msg_id: int
+    revoke: bool = True  # True = apagar para todos
+
+
+class DeleteResponse(BaseModel):
+    """Response da deleção."""
+    success: bool
+    error: str | None = None
+
+
 class HealthResponse(BaseModel):
     """Response do health check."""
     status: str
@@ -258,6 +286,80 @@ async def _resolve_entity(worker: "TelegramWorker", client, telegram_user_id: in
     
     print(f"[API] Não conseguiu resolver entity: {telegram_user_id}")
     return None
+
+
+@app.post("/edit", response_model=EditResponse, dependencies=[Depends(verify_api_key)])
+async def edit_message(req: EditRequest):
+    """
+    Edita uma mensagem no Telegram.
+    
+    Chamado pelo n8n quando o frontend edita uma mensagem.
+    
+    Args:
+        req: Dados (account_id, telegram_user_id, telegram_msg_id, new_text)
+        
+    Returns:
+        Success status
+    """
+    worker = get_worker()
+    
+    if req.account_id not in worker.clients:
+        return EditResponse(
+            success=False,
+            error=f"Conta {req.account_id} não conectada"
+        )
+    
+    client = worker.clients[req.account_id]
+    
+    try:
+        # Edita mensagem no Telegram
+        await client.edit_message(req.telegram_user_id, req.telegram_msg_id, req.new_text)
+        print(f"[API] Mensagem {req.telegram_msg_id} editada para user {req.telegram_user_id}")
+        
+        return EditResponse(success=True)
+        
+    except Exception as e:
+        print(f"[API] Erro ao editar mensagem: {e}")
+        import traceback
+        traceback.print_exc()
+        return EditResponse(success=False, error=str(e))
+
+
+@app.post("/delete", response_model=DeleteResponse, dependencies=[Depends(verify_api_key)])
+async def delete_message(req: DeleteRequest):
+    """
+    Deleta uma mensagem no Telegram.
+    
+    Chamado pelo n8n quando o frontend deleta uma mensagem.
+    
+    Args:
+        req: Dados (account_id, telegram_user_id, telegram_msg_id, revoke)
+        
+    Returns:
+        Success status
+    """
+    worker = get_worker()
+    
+    if req.account_id not in worker.clients:
+        return DeleteResponse(
+            success=False,
+            error=f"Conta {req.account_id} não conectada"
+        )
+    
+    client = worker.clients[req.account_id]
+    
+    try:
+        # Deleta mensagem no Telegram (revoke=True apaga para todos)
+        await client.delete_messages(req.telegram_user_id, [req.telegram_msg_id], revoke=req.revoke)
+        print(f"[API] Mensagem {req.telegram_msg_id} deletada para user {req.telegram_user_id} (revoke={req.revoke})")
+        
+        return DeleteResponse(success=True)
+        
+    except Exception as e:
+        print(f"[API] Erro ao deletar mensagem: {e}")
+        import traceback
+        traceback.print_exc()
+        return DeleteResponse(success=False, error=str(e))
 
 
 async def _send_with_attachments(client, entity, text: str | None, attachments: list[str], reply_to: int | None):
