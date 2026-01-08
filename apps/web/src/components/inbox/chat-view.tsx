@@ -61,7 +61,7 @@ export interface Message {
   edited_at?: string | null  // Quando foi editada
   deleted_at?: string | null // Quando foi deletada (soft delete)
   message_type?: string // text, service_join, service_leave, service_kick, service_add
-  attachments?: { id: string; file_name: string; mime_type: string; storage_path: string; storage_bucket?: string }[]
+  attachments?: { id: string; file_name: string; mime_type: string; storage_path: string; storage_bucket?: string; file_size?: number }[]
   reply_to_message_id?: string | null
   is_pinned?: boolean
   raw_payload?: {

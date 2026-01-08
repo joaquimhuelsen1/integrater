@@ -571,7 +571,7 @@ export function MessageItem({
             {message.attachments.filter(att => !isImage(att.mime_type) && !isAudio(att.mime_type)).map((att) => {
               // PDF tem estilo especial (WhatsApp style)
               if (isPdf(att.mime_type, att.file_name)) {
-                const fileSize = formatFileSize(att.file_size)
+                const fileSize = formatFileSize((att as { file_size?: number }).file_size)
                 return (
                   <button
                     key={att.id}
