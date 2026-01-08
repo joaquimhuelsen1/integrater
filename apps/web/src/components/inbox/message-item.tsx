@@ -17,13 +17,6 @@ const channelLabels = {
   openphone_sms: "SMS",
 }
 
-// Tipos para reações
-export interface MessageReaction {
-  emoji: string
-  count: number
-  userReacted: boolean // se o usuário atual reagiu com esse emoji
-}
-
 interface MessageItemProps {
   message: Message
   onDownload?: (attachmentId: string, filename: string) => void
@@ -39,14 +32,7 @@ interface MessageItemProps {
   isRead?: boolean  // Se a mensagem foi lida pelo destinatário
   onEdit?: (message: Message) => void
   onDelete?: (messageId: string) => void
-  // Reações
-  reactions?: MessageReaction[]
-  onReact?: (messageId: string, emoji: string) => void
-  onRemoveReaction?: (messageId: string, emoji: string) => void
 }
-
-// Emojis disponíveis para reações
-const REACTION_EMOJIS = ["👍", "❤️", "🔥", "😂", "😮", "😢", "👎"]
 
 export function MessageItem({
   message,
@@ -63,9 +49,6 @@ export function MessageItem({
   isRead = false,
   onEdit,
   onDelete,
-  reactions = [],
-  onReact,
-  onRemoveReaction,
 }: MessageItemProps) {
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({})
   const [audioUrls, setAudioUrls] = useState<Record<string, string>>({})
@@ -81,8 +64,6 @@ export function MessageItem({
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 })
   const [menuDirection, setMenuDirection] = useState<"down" | "up">("down")
-  const [showCelebration, setShowCelebration] = useState(false)
-  const [celebrationEmoji, setCelebrationEmoji] = useState("")
   const menuRef = useRef<HTMLDivElement>(null)
   const supabase = createClient()
 
@@ -173,13 +154,6 @@ export function MessageItem({
     
     setMenuPosition({ x: e.clientX, y: e.clientY })
     setShowContextMenu(true)
-  }
-
-  // Trigger efeito de celebração
-  const triggerCelebration = (emoji: string) => {
-    setCelebrationEmoji(emoji)
-    setShowCelebration(true)
-    setTimeout(() => setShowCelebration(false), 1500)
   }
 
   const openImage = (url: string) => {
@@ -371,7 +345,7 @@ export function MessageItem({
         className={`flex ${isOutbound ? "justify-end" : "justify-start"}`}
       >
         <div
-          className={`relative max-w-[70%] cursor-pointer overflow-visible ${reactions.length > 0 ? "mb-5" : ""}`}
+          className="relative max-w-[70%] cursor-pointer"
           onContextMenu={handleContextMenu}
         >
           {/* Indicador de mensagem fixada */}
@@ -628,59 +602,9 @@ export function MessageItem({
         </div>
 
           </div>
-
-          {/* Reações existentes - Estilo Telegram (bolha roxa) */}
-          {reactions.length > 0 && (
-            <div className="absolute -bottom-2.5 left-2 z-10 flex items-center">
-              <div className="flex items-center gap-0.5 rounded-full bg-violet-600 px-2 py-1 shadow-lg">
-                {reactions.map((r) => (
-                  <button
-                    key={r.emoji}
-                    onClick={() => {
-                      if (r.userReacted) {
-                        onRemoveReaction?.(message.id, r.emoji)
-                      } else {
-                        onReact?.(message.id, r.emoji)
-                        triggerCelebration(r.emoji)
-                      }
-                    }}
-                    className="text-xl transition-transform hover:scale-110"
-                    title={r.userReacted ? "Clique para remover" : "Clique para reagir"}
-                  >
-                    {r.emoji}
-                  </button>
-                ))}
-                {reactions.reduce((sum, r) => sum + r.count, 0) > 1 && (
-                  <span className="ml-0.5 text-xs font-medium text-white">
-                    {reactions.reduce((sum, r) => sum + r.count, 0)}
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
         </div>
 
       </div>
-
-      {/* Efeito de celebração (corações/balões) */}
-      {showCelebration && (
-        <div className="pointer-events-none fixed inset-0 z-[100] overflow-hidden">
-          {Array.from({ length: 12 }).map((_, i) => (
-            <div
-              key={i}
-              className="absolute animate-float-up text-2xl"
-              style={{
-                left: `${menuPosition.x - 50 + Math.random() * 100}px`,
-                top: `${menuPosition.y}px`,
-                animationDelay: `${i * 0.1}s`,
-                animationDuration: `${1 + Math.random() * 0.5}s`,
-              }}
-            >
-              {["❤️", "💜", "💙", "💚", "💛", "🧡", "🎉", "✨", "🎊"][Math.floor(Math.random() * 9)]}
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* Menu de contexto (right-click) - Estilo Telegram */}
       {showContextMenu && (
@@ -695,37 +619,6 @@ export function MessageItem({
             )
           }}
         >
-          {/* Barra de reações - aparece no topo ou embaixo dependendo da direção */}
-          {onReact && menuDirection === "down" && (
-            <div className="flex items-center justify-center gap-1 border-b border-zinc-700 bg-zinc-800 px-3 py-2.5">
-              {REACTION_EMOJIS.map((emoji) => {
-                const hasReacted = reactions.some(r => r.emoji === emoji && r.userReacted)
-                return (
-                  <button
-                    key={emoji}
-                    onClick={() => {
-                      if (hasReacted) {
-                        onRemoveReaction?.(message.id, emoji)
-                      } else {
-                        onReact(message.id, emoji)
-                        triggerCelebration(emoji)
-                      }
-                      setShowContextMenu(false)
-                    }}
-                    className={`rounded-full p-2 text-2xl transition-all hover:scale-125 ${
-                      hasReacted 
-                        ? "bg-violet-600" 
-                        : "hover:bg-zinc-700"
-                    }`}
-                    title={hasReacted ? "Remover reação" : "Reagir"}
-                  >
-                    {emoji}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-
           {/* Opções do menu */}
           <div className="py-1">
             {/* Responder (só Telegram) */}
@@ -794,37 +687,6 @@ export function MessageItem({
               </button>
             )}
           </div>
-
-          {/* Barra de reações no final (quando menu abre para cima) */}
-          {onReact && menuDirection === "up" && (
-            <div className="flex items-center justify-center gap-1 border-t border-zinc-700 bg-zinc-800 px-3 py-2.5">
-              {REACTION_EMOJIS.map((emoji) => {
-                const hasReacted = reactions.some(r => r.emoji === emoji && r.userReacted)
-                return (
-                  <button
-                    key={emoji}
-                    onClick={() => {
-                      if (hasReacted) {
-                        onRemoveReaction?.(message.id, emoji)
-                      } else {
-                        onReact(message.id, emoji)
-                        triggerCelebration(emoji)
-                      }
-                      setShowContextMenu(false)
-                    }}
-                    className={`rounded-full p-2 text-2xl transition-all hover:scale-125 ${
-                      hasReacted 
-                        ? "bg-violet-600" 
-                        : "hover:bg-zinc-700"
-                    }`}
-                    title={hasReacted ? "Remover reação" : "Reagir"}
-                  >
-                    {emoji}
-                  </button>
-                )
-              })}
-            </div>
-          )}
         </div>
       )}
     </>

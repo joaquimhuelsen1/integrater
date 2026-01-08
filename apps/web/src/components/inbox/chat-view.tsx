@@ -4,7 +4,7 @@ import { useRef, useEffect, useState, useCallback, useMemo } from "react"
 import { ArrowLeft, Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical, Unlink, MessageSquare, Phone, Briefcase, Users, Copy } from "lucide-react"
 import { createClient } from "@/lib/supabase"
 import { apiFetch } from "@/lib/api"
-import { MessageItem, MessageReaction } from "./message-item"
+import { MessageItem } from "./message-item"
 import { DateDivider } from "./date-divider"
 import { ServiceMessage } from "./service-message"
 import { Composer } from "./composer"
@@ -254,9 +254,7 @@ const [isSuggesting, setIsSuggesting] = useState(false)
   const [isOnline, setIsOnline] = useState(false)
   const [lastSeen, setLastSeen] = useState<string | null>(null)
 
-  // Reactions - mapa de message_id -> reações agregadas
-  const [reactionsByMessage, setReactionsByMessage] = useState<Record<string, MessageReaction[]>>({})
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+
 
   // Realtime para eventos de leitura (sem polling)
   useEffect(() => {
@@ -399,90 +397,6 @@ const [isSuggesting, setIsSuggesting] = useState(false)
     [messages]
   )
 
-  // Busca ID do usuário atual
-  useEffect(() => {
-    const supabase = createClient()
-    supabase.auth.getUser().then(({ data }) => {
-      console.log("[Reactions] Got user:", data.user?.id)
-      if (data.user) {
-        setCurrentUserId(data.user.id)
-      }
-    })
-  }, [])
-
-  // Busca reações das mensagens e escuta realtime
-  useEffect(() => {
-    if (messages.length === 0) {
-      setReactionsByMessage({})
-      return
-    }
-
-    const messageIds = messages.map(m => m.id).filter(id => !id.startsWith("temp-"))
-    if (messageIds.length === 0) return
-
-    const supabase = createClient()
-
-    // Busca inicial
-    const fetchReactions = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("message_reactions")
-          .select("message_id, emoji, user_id")
-          .in("message_id", messageIds)
-
-        console.log("[Reactions] fetchReactions:", { data, error, messageIds: messageIds.length })
-
-        if (data) {
-          // Agrupa por mensagem e emoji
-          const grouped: Record<string, MessageReaction[]> = {}
-          for (const r of data) {
-            const messageReactions = grouped[r.message_id] ?? (grouped[r.message_id] = [])
-            const existing = messageReactions.find(x => x.emoji === r.emoji)
-            if (existing) {
-              existing.count++
-              if (r.user_id === currentUserId) {
-                existing.userReacted = true
-              }
-            } else {
-              messageReactions.push({
-                emoji: r.emoji,
-                count: 1,
-                userReacted: r.user_id === currentUserId,
-              })
-            }
-          }
-          console.log("[Reactions] Grouped reactions:", grouped)
-          setReactionsByMessage(grouped)
-        }
-      } catch (err) {
-        console.error("[Reactions] fetchReactions error:", err)
-      }
-    }
-
-    fetchReactions()
-
-    // Realtime para novas reações
-    const channel = supabase
-      .channel(`reactions-${conversationId || "none"}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "message_reactions",
-        },
-        () => {
-          // Refetch ao receber mudança
-          fetchReactions()
-        }
-      )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [messages, conversationId, currentUserId])
-
   // Mapa de mensagens por ID para lookup de replies
   const messagesById = useMemo(() => {
     const map: Record<string, Message> = {}
@@ -542,74 +456,6 @@ const handleUnpin = useCallback(async (messageId: string) => {
       console.error("Erro ao desafixar mensagem:", err)
     }
   }, [apiUrl])
-
-  // Handlers para reações
-  const handleReact = useCallback(async (messageId: string, emoji: string) => {
-    console.log("[Reactions] handleReact called:", { messageId, emoji, currentUserId })
-    if (!currentUserId) {
-      console.warn("[Reactions] No currentUserId, cannot react")
-      return
-    }
-
-    const supabase = createClient()
-    try {
-      // Upsert: se já existe com mesmo emoji, remove (toggle)
-      const { data: existing, error: selectError } = await supabase
-        .from("message_reactions")
-        .select("id")
-        .eq("message_id", messageId)
-        .eq("user_id", currentUserId)
-        .eq("emoji", emoji)
-        .maybeSingle()
-
-      console.log("[Reactions] Existing check:", { existing, selectError })
-
-      if (existing) {
-        // Remove reação existente
-        const { error: deleteError } = await supabase
-          .from("message_reactions")
-          .delete()
-          .eq("id", existing.id)
-        console.log("[Reactions] Deleted existing:", { deleteError })
-      } else {
-        // Remove reação anterior (se houver) e adiciona nova
-        const { error: deleteOldError } = await supabase
-          .from("message_reactions")
-          .delete()
-          .eq("message_id", messageId)
-          .eq("user_id", currentUserId)
-        console.log("[Reactions] Deleted old:", { deleteOldError })
-
-        const { data: inserted, error: insertError } = await supabase
-          .from("message_reactions")
-          .insert({
-            message_id: messageId,
-            user_id: currentUserId,
-            emoji: emoji,
-          })
-          .select()
-        console.log("[Reactions] Inserted:", { inserted, insertError })
-      }
-    } catch (err) {
-      console.error("Erro ao reagir:", err)
-    }
-  }, [currentUserId])
-
-  const handleRemoveReaction = useCallback(async (messageId: string, emoji: string) => {
-    if (!currentUserId) return
-
-    const supabase = createClient()
-    try {
-      await supabase
-        .from("message_reactions")
-        .delete()
-        .eq("message_id", messageId)
-        .eq("user_id", currentUserId)
-        .eq("emoji", emoji)
-    } catch (err) {
-      console.error("Erro ao remover reação:", err)
-    }
-  }, [currentUserId])
 
   // Handlers para edit/delete
   const handleEdit = useCallback((message: Message) => {
@@ -1395,7 +1241,7 @@ const handleUnpin = useCallback(async (messageId: string) => {
                   />
                 ) : (
                   <div
-                    key={`${item.message.id}-${showTranslation}-${translations[item.message.id]?.translated_text?.length || 0}-${(reactionsByMessage[item.message.id] || []).map(r => r.emoji).join("")}`}
+                    key={`${item.message.id}-${showTranslation}-${translations[item.message.id]?.translated_text?.length || 0}`}
                     ref={(el) => {
                       if (el) messageRefs.current.set(item.message.id, el)
                       else messageRefs.current.delete(item.message.id)
@@ -1415,9 +1261,7 @@ const handleUnpin = useCallback(async (messageId: string) => {
                       isRead={readMessageIds.has(item.message.id)}
                       onEdit={handleEdit}
                       onDelete={handleDelete}
-                      reactions={reactionsByMessage[item.message.id] || []}
-                      onReact={handleReact}
-                      onRemoveReaction={handleRemoveReaction}
+
                     />
                   </div>
                 )
