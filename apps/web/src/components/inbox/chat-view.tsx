@@ -349,15 +349,35 @@ const [isSuggesting, setIsSuggesting] = useState(false)
 
     const supabase = createClient()
 
+    let typingTimeoutRef: ReturnType<typeof setTimeout> | null = null
+
     const processPresenceData = (data: { is_typing: boolean; is_online: boolean; last_seen_at: string | null; typing_expires_at: string | null } | null) => {
+      // Limpa timeout anterior
+      if (typingTimeoutRef) {
+        clearTimeout(typingTimeoutRef)
+        typingTimeoutRef = null
+      }
+
       if (data) {
+        const now = new Date()
         const typingExpired = data.typing_expires_at
-          ? new Date(data.typing_expires_at) < new Date()
+          ? new Date(data.typing_expires_at) < now
           : true
 
-        setIsTyping(data.is_typing && !typingExpired)
+        const isCurrentlyTyping = data.is_typing && !typingExpired
+        setIsTyping(isCurrentlyTyping)
         setIsOnline(data.is_online || false)
         setLastSeen(data.last_seen_at)
+
+        // Auto-clear quando typing_expires_at passar
+        if (isCurrentlyTyping && data.typing_expires_at) {
+          const delay = new Date(data.typing_expires_at).getTime() - now.getTime()
+          if (delay > 0) {
+            typingTimeoutRef = setTimeout(() => {
+              setIsTyping(false)
+            }, delay + 100) // +100ms margem
+          }
+        }
       } else {
         setIsTyping(false)
         setIsOnline(false)
@@ -412,6 +432,7 @@ const [isSuggesting, setIsSuggesting] = useState(false)
       .subscribe()
 
     return () => {
+      if (typingTimeoutRef) clearTimeout(typingTimeoutRef)
       supabase.removeChannel(channel)
     }
   }, [conversationId, identityId])

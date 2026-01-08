@@ -1432,21 +1432,39 @@ I'll be waiting.`
               return next
             })
             
-            // Typing status
-            setTypingIdentityIds(prev => {
-              const next = new Set(prev)
-              const now = new Date()
-              const typingExpired = data.typing_expires_at 
-                ? new Date(data.typing_expires_at) < now 
-                : true
-              
-              if (data.is_typing && !typingExpired) {
+            // Typing status com auto-clear
+            const now = new Date()
+            const typingExpired = data.typing_expires_at
+              ? new Date(data.typing_expires_at) < now
+              : true
+
+            if (data.is_typing && !typingExpired) {
+              setTypingIdentityIds(prev => {
+                const next = new Set(prev)
                 next.add(identityId)
-              } else {
-                next.delete(identityId)
+                return next
+              })
+
+              // Auto-clear quando typing_expires_at passar
+              if (data.typing_expires_at) {
+                const delay = new Date(data.typing_expires_at).getTime() - now.getTime()
+                if (delay > 0) {
+                  setTimeout(() => {
+                    setTypingIdentityIds(prev => {
+                      const next = new Set(prev)
+                      next.delete(identityId)
+                      return next
+                    })
+                  }, delay + 100) // +100ms margem
+                }
               }
-              return next
-            })
+            } else {
+              setTypingIdentityIds(prev => {
+                const next = new Set(prev)
+                next.delete(identityId)
+                return next
+              })
+            }
           }
         }
       )
