@@ -14,7 +14,7 @@ interface ContactChannel {
 }
 import { WorkspaceSelector } from "@/components/workspace-selector"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { SidebarMenu } from "@/components/sidebar-menu"
+import { SidebarMenu, type TagFilterMode } from "@/components/sidebar-menu"
 import { CRMPanel } from "@/components/crm/crm-panel"
 import { ArrowLeft, Search } from "lucide-react"
 import { useRouter } from "next/navigation"
@@ -110,6 +110,7 @@ export function InboxView({ userEmail, workspaceId }: InboxViewProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedChannel, setSelectedChannel] = useState<ChannelId>(null)
   const [filterTags, setFilterTags] = useState<string[]>([])
+  const [filterMode, setFilterMode] = useState<TagFilterMode>("any")
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [suggestions, setSuggestions] = useState<Record<string, AISuggestion | null>>({})
   const [summaries, setSummaries] = useState<Record<string, string | null>>({})
@@ -376,9 +377,18 @@ export function InboxView({ userEmail, workspaceId }: InboxViewProps) {
 
       // Filtro por tags
       if (filterTags.length > 0) {
-        const conversationTagIds = c.conversation_tags?.map(ct => ct.tag?.id) || []
-        const hasAllTags = filterTags.every(tagId => conversationTagIds.includes(tagId))
-        if (!hasAllTags) return false
+        const conversationTagIds = c.conversation_tags?.map(ct => ct.tag?.id).filter(Boolean) || []
+        
+        if (filterMode === "exact") {
+          // Modo "Apenas": conversa deve ter EXATAMENTE essas tags (mesma quantidade e mesmos IDs)
+          if (conversationTagIds.length !== filterTags.length) return false
+          const hasExactTags = filterTags.every(tagId => conversationTagIds.includes(tagId))
+          if (!hasExactTags) return false
+        } else {
+          // Modo "Contém": conversa deve ter TODAS as tags selecionadas (pode ter mais)
+          const hasAllTags = filterTags.every(tagId => conversationTagIds.includes(tagId))
+          if (!hasAllTags) return false
+        }
       }
 
       return true
@@ -395,7 +405,7 @@ export function InboxView({ userEmail, workspaceId }: InboxViewProps) {
       // Fixados vêm primeiro
       return aIsPinned ? -1 : 1
     })
-  }, [conversations, selectedChannel, filterTags])
+  }, [conversations, selectedChannel, filterTags, filterMode])
 
   // Marcar conversa como lida
   const markAsRead = useCallback(async (conversationId: string) => {
@@ -1602,6 +1612,8 @@ return (
               userEmail={userEmail}
               filterTags={filterTags}
               onFilterTagsChange={setFilterTags}
+              filterMode={filterMode}
+              onFilterModeChange={setFilterMode}
               onLogout={handleLogout}
             />
             <h1 className="text-xl md:text-lg font-bold md:font-semibold">Inbox</h1>

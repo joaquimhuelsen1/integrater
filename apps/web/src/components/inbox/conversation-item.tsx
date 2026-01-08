@@ -182,6 +182,11 @@ export function ConversationItem({
       .slice(0, 2)
   }
   const getAvatarColor = () => {
+    // Para Telegram, usa cores oficiais baseadas no user_id
+    if (channel === "telegram" && conversation.primary_identity?.metadata?.telegram_user_id) {
+      return getTelegramAvatarColor(conversation.primary_identity.metadata.telegram_user_id)
+    }
+    // Fallback para outros canais
     const index = conversation.id.charCodeAt(0) % defaultAvatarColors.length
     return defaultAvatarColors[index] ?? "bg-blue-500"
   }

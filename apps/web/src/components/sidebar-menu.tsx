@@ -21,14 +21,19 @@ interface Tag {
   color: string
 }
 
+// Modo de filtro: "any" = tem alguma das tags, "exact" = tem APENAS essas tags
+export type TagFilterMode = "any" | "exact"
+
 interface SidebarMenuProps {
   userEmail: string
   filterTags: string[]
   onFilterTagsChange: (tags: string[]) => void
+  filterMode: TagFilterMode
+  onFilterModeChange: (mode: TagFilterMode) => void
   onLogout: () => void
 }
 
-export function SidebarMenu({ userEmail, filterTags, onFilterTagsChange, onLogout }: SidebarMenuProps) {
+export function SidebarMenu({ userEmail, filterTags, onFilterTagsChange, filterMode, onFilterModeChange, onLogout }: SidebarMenuProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [showTagsSubmenu, setShowTagsSubmenu] = useState(false)
   const [allTags, setAllTags] = useState<Tag[]>([])
@@ -140,14 +145,37 @@ export function SidebarMenu({ userEmail, filterTags, onFilterTagsChange, onLogou
             {/* Tags Submenu */}
             {showTagsSubmenu && (
               <div className="border-b border-zinc-100 bg-zinc-50 py-1 dark:border-zinc-800 dark:bg-zinc-800/50">
-                {filterTags.length > 0 && (
+                {/* Modo de filtro */}
+                <div className="flex items-center gap-1 px-4 py-1.5 mb-1">
                   <button
-                    onClick={clearFilters}
-                    className="mb-1 ml-10 rounded bg-red-100 px-2 py-0.5 text-xs text-red-600 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400"
+                    onClick={() => onFilterModeChange("any")}
+                    className={`rounded px-2 py-0.5 text-xs transition-colors ${
+                      filterMode === "any"
+                        ? "bg-emerald-500 text-white"
+                        : "bg-zinc-200 text-zinc-600 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-300"
+                    }`}
                   >
-                    Limpar filtros
+                    Contém
                   </button>
-                )}
+                  <button
+                    onClick={() => onFilterModeChange("exact")}
+                    className={`rounded px-2 py-0.5 text-xs transition-colors ${
+                      filterMode === "exact"
+                        ? "bg-purple-500 text-white"
+                        : "bg-zinc-200 text-zinc-600 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-300"
+                    }`}
+                  >
+                    Apenas
+                  </button>
+                  {filterTags.length > 0 && (
+                    <button
+                      onClick={clearFilters}
+                      className="ml-auto rounded bg-red-100 px-2 py-0.5 text-xs text-red-600 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400"
+                    >
+                      Limpar
+                    </button>
+                  )}
+                </div>
                 {allTags.length === 0 ? (
                   <p className="px-10 py-2 text-sm text-zinc-500">Nenhuma tag</p>
                 ) : (
