@@ -82,6 +82,24 @@ async def db_async(query_fn):
     return await asyncio.to_thread(query_fn)
 
 
+async def db_async_retry(query_fn, max_retries=3, delay=1.0):
+    """Executa query do Supabase com retry em caso de erro de conexão."""
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            return await asyncio.to_thread(query_fn)
+        except Exception as e:
+            last_error = e
+            error_str = str(e).lower()
+            # Retry apenas para erros de conexão
+            if "connection" in error_str or "terminated" in error_str or "protocol" in error_str:
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(delay * (attempt + 1))
+                    continue
+            raise
+    raise last_error
+
+
 def normalize_group_id(chat_id: int) -> int:
     """
     Normaliza ID de grupo/canal do Telegram.
@@ -1113,7 +1131,7 @@ class TelegramWorker:
             now = datetime.now(timezone.utc)
             
             # 1. Buscar TODAS identities do lead (pode haver duplicatas)
-            identity_result = await db_async(lambda: db.table("contact_identities").select(
+            identity_result = await db_async_retry(lambda: db.table("contact_identities").select(
                 "id"
             ).eq("type", "telegram_user").eq("value", str(telegram_user_id)).execute())
             
@@ -1124,7 +1142,7 @@ class TelegramWorker:
             identity_ids = [i["id"] for i in identity_result.data]
             
             # 2. Buscar TODAS conversas dessas identities
-            conv_result = await db_async(lambda: db.table("conversations").select(
+            conv_result = await db_async_retry(lambda: db.table("conversations").select(
                 "id"
             ).in_("primary_identity_id", identity_ids).execute())
             
@@ -1136,7 +1154,7 @@ class TelegramWorker:
             
             # 3. Buscar mensagens outbound de TODAS conversas com external_message_id <= max_id
             # external_message_id = ID da mensagem no Telegram
-            messages_result = await db_async(lambda: db.table("messages").select(
+            messages_result = await db_async_retry(lambda: db.table("messages").select(
                 "id, external_message_id, conversation_id"
             ).in_("conversation_id", conversation_ids).eq(
                 "direction", "outbound"
@@ -1164,7 +1182,7 @@ class TelegramWorker:
                 return
             
             # 5. Verificar quais já têm evento de leitura
-            existing_events = await db_async(lambda: db.table("message_events").select(
+            existing_events = await db_async_retry(lambda: db.table("message_events").select(
                 "message_id"
             ).in_("message_id", messages_to_mark).eq("type", "read").execute())
             
@@ -1188,7 +1206,7 @@ class TelegramWorker:
                 for msg_id in new_to_mark
             ]
             
-            await db_async(lambda: db.table("message_events").insert(events_to_insert).execute())
+            await db_async_retry(lambda: db.table("message_events").insert(events_to_insert).execute())
             
             print(f"[READ] Marcadas {len(new_to_mark)} mensagens como lidas ({len(conversation_ids)} conversas, max_id={max_id})")
             
