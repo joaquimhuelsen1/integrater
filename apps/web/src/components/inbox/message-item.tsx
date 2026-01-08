@@ -52,6 +52,7 @@ export function MessageItem({
 }: MessageItemProps) {
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({})
   const [audioUrls, setAudioUrls] = useState<Record<string, string>>({})
+  const [videoThumbnails, setVideoThumbnails] = useState<Record<string, string>>({})
   const [playingAudio, setPlayingAudio] = useState<string | null>(null)
   const [audioProgress, setAudioProgress] = useState<Record<string, number>>({})
   const [expandedImage, setExpandedImage] = useState<string | null>(null)
@@ -78,8 +79,42 @@ export function MessageItem({
 
   const isImage = (mimeType: string) => mimeType?.startsWith("image/") || false
   const isAudio = (mimeType: string) => mimeType?.startsWith("audio/") || mimeType === "application/ogg" || false
+  const isVideo = (mimeType: string, fileName?: string) => 
+    mimeType?.startsWith("video/") || fileName?.toLowerCase().endsWith(".mp4") || fileName?.toLowerCase().endsWith(".webm") || fileName?.toLowerCase().endsWith(".mov") || false
   const isPdf = (mimeType: string, fileName?: string) => 
     mimeType === "application/pdf" || fileName?.toLowerCase().endsWith(".pdf") || false
+  
+  // Retorna extensão do arquivo para badge
+  const getFileExtension = (fileName?: string, mimeType?: string): string => {
+    if (fileName) {
+      const ext = fileName.split('.').pop()?.toLowerCase()
+      if (ext) return ext
+    }
+    if (mimeType) {
+      if (mimeType.includes('pdf')) return 'pdf'
+      if (mimeType.includes('mp4') || mimeType.includes('video')) return 'mp4'
+      if (mimeType.includes('mp3') || mimeType.includes('mpeg')) return 'mp3'
+      if (mimeType.includes('zip')) return 'zip'
+      if (mimeType.includes('doc')) return 'doc'
+      if (mimeType.includes('xls')) return 'xls'
+      if (mimeType.includes('ppt')) return 'ppt'
+    }
+    return 'file'
+  }
+  
+  // Cor do badge baseado no tipo de arquivo
+  const getBadgeColor = (ext: string): string => {
+    switch (ext) {
+      case 'pdf': return 'bg-red-500'
+      case 'mp4': case 'webm': case 'mov': case 'avi': return 'bg-purple-500'
+      case 'mp3': case 'wav': case 'ogg': case 'm4a': return 'bg-green-500'
+      case 'zip': case 'rar': case '7z': return 'bg-yellow-600'
+      case 'doc': case 'docx': return 'bg-blue-600'
+      case 'xls': case 'xlsx': return 'bg-green-600'
+      case 'ppt': case 'pptx': return 'bg-orange-500'
+      default: return 'bg-zinc-500'
+    }
+  }
 
   // Formata tamanho do arquivo (bytes -> KB/MB)
   const formatFileSize = (bytes?: number) => {
@@ -98,13 +133,14 @@ export function MessageItem({
     return base.slice(0, maxBase) + "..." + ext
   }
 
-  // Carrega URLs das imagens e áudios
+  // Carrega URLs das imagens, áudios e gera thumbnails de vídeo
   useEffect(() => {
     if (!message.attachments) return
 
     const loadMediaUrls = async () => {
       const imgUrls: Record<string, string> = {}
       const audUrls: Record<string, string> = {}
+      const vidThumbs: Record<string, string> = {}
 
       for (const att of message.attachments || []) {
         if (att.storage_path) {
@@ -117,12 +153,39 @@ export function MessageItem({
               imgUrls[att.id] = data.signedUrl
             } else if (isAudio(att.mime_type)) {
               audUrls[att.id] = data.signedUrl
+            } else if (isVideo(att.mime_type, att.file_name)) {
+              // Gera thumbnail do vídeo
+              try {
+                const video = document.createElement('video')
+                video.crossOrigin = 'anonymous'
+                video.src = data.signedUrl
+                video.currentTime = 1 // 1 segundo
+                
+                await new Promise<void>((resolve, reject) => {
+                  video.onloadeddata = () => {
+                    const canvas = document.createElement('canvas')
+                    canvas.width = 120
+                    canvas.height = 68 // 16:9 ratio
+                    const ctx = canvas.getContext('2d')
+                    if (ctx) {
+                      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+                      vidThumbs[att.id] = canvas.toDataURL('image/jpeg', 0.7)
+                    }
+                    resolve()
+                  }
+                  video.onerror = () => reject()
+                  setTimeout(() => resolve(), 3000) // Timeout 3s
+                })
+              } catch {
+                // Ignora erro de thumbnail
+              }
             }
           }
         }
       }
       setImageUrls(imgUrls)
       setAudioUrls(audUrls)
+      setVideoThumbnails(vidThumbs)
     }
 
     loadMediaUrls()
@@ -565,64 +628,60 @@ export function MessageItem({
           </span>
         )}
 
-        {/* Outros arquivos (não-imagens e não-áudios) */}
+        {/* Arquivos como documentos (não-imagens e não-áudios) - estilo WhatsApp */}
         {message.attachments && message.attachments.filter(att => !isImage(att.mime_type) && !isAudio(att.mime_type)).length > 0 && (
           <div className="mt-2 space-y-2">
             {message.attachments.filter(att => !isImage(att.mime_type) && !isAudio(att.mime_type)).map((att) => {
-              // PDF tem estilo especial (WhatsApp style)
-              if (isPdf(att.mime_type, att.file_name)) {
-                const fileSize = formatFileSize((att as { file_size?: number }).file_size)
-                return (
-                  <button
-                    key={att.id}
-                    onClick={() => onDownload?.(att.id, att.file_name || "documento.pdf")}
-                    className={`flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-colors ${
-                      isOutbound
-                        ? "bg-purple-600 hover:bg-purple-700"
-                        : "bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700"
-                    }`}
-                  >
-                    {/* Badge PDF vermelho - estilo WhatsApp */}
-                    <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-lg bg-red-500">
-                      <span className="text-sm font-bold lowercase text-white">pdf</span>
-                    </div>
-
-                    {/* Nome e tamanho */}
-                    <div className="min-w-0 flex-1">
-                      <div className={`text-sm font-medium truncate ${
-                        isOutbound ? "text-white" : "text-zinc-800 dark:text-zinc-100"
-                      }`}>
-                        {truncateFileName(att.file_name || "documento.pdf")}
-                      </div>
-                      <div className={`text-xs mt-0.5 ${
-                        isOutbound ? "text-purple-200" : "text-zinc-500 dark:text-zinc-400"
-                      }`}>
-                        {fileSize || "PDF"}
-                      </div>
-                    </div>
-
-                    {/* Icone download */}
-                    <Download className={`h-5 w-5 flex-shrink-0 ${
-                      isOutbound ? "text-purple-200" : "text-zinc-400 dark:text-zinc-500"
-                    }`} />
-                  </button>
-                )
-              }
-
-              // Outros arquivos (não-PDF)
+              const fileSize = formatFileSize((att as { file_size?: number }).file_size)
+              const ext = getFileExtension(att.file_name, att.mime_type)
+              const badgeColor = getBadgeColor(ext)
+              const isVideoFile = isVideo(att.mime_type, att.file_name)
+              const thumbnail = videoThumbnails[att.id]
+              
               return (
                 <button
                   key={att.id}
                   onClick={() => onDownload?.(att.id, att.file_name || "arquivo")}
-                  className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors ${
+                  className={`flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-colors ${
                     isOutbound
-                      ? "bg-purple-700 hover:bg-purple-800"
-                      : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-700 dark:hover:bg-zinc-600"
+                      ? "bg-purple-600 hover:bg-purple-700"
+                      : "bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700"
                   }`}
                 >
-                  <FileText className="h-4 w-4 flex-shrink-0" />
-                  <span className="flex-1 truncate">{att.file_name || "Anexo"}</span>
-                  <Download className="h-3 w-3 flex-shrink-0" />
+                  {/* Badge/Thumbnail - estilo WhatsApp */}
+                  {isVideoFile && thumbnail ? (
+                    // Thumbnail do vídeo com ícone play
+                    <div className="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg">
+                      <img src={thumbnail} alt="" className="h-full w-full object-cover" />
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                        <Play className="h-5 w-5 text-white" fill="white" />
+                      </div>
+                    </div>
+                  ) : (
+                    // Badge com extensão do arquivo
+                    <div className={`flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-lg ${badgeColor}`}>
+                      <span className="text-[11px] font-bold uppercase text-white">{ext}</span>
+                    </div>
+                  )}
+
+                  {/* Nome e tamanho */}
+                  <div className="min-w-0 flex-1">
+                    <div className={`text-sm font-medium truncate ${
+                      isOutbound ? "text-white" : "text-zinc-800 dark:text-zinc-100"
+                    }`}>
+                      {truncateFileName(att.file_name || "arquivo")}
+                    </div>
+                    <div className={`text-xs mt-0.5 ${
+                      isOutbound ? "text-purple-200" : "text-zinc-500 dark:text-zinc-400"
+                    }`}>
+                      {fileSize || ext.toUpperCase()}
+                    </div>
+                  </div>
+
+                  {/* Icone download */}
+                  <Download className={`h-5 w-5 flex-shrink-0 ${
+                    isOutbound ? "text-purple-200" : "text-zinc-400 dark:text-zinc-500"
+                  }`} />
                 </button>
               )
             })}
