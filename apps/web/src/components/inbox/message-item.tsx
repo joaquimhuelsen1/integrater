@@ -371,7 +371,7 @@ export function MessageItem({
         className={`flex ${isOutbound ? "justify-end" : "justify-start"}`}
       >
         <div
-          className={`relative max-w-[70%] cursor-pointer ${reactions.length > 0 ? "mb-4" : ""}`}
+          className={`relative max-w-[70%] cursor-pointer overflow-visible ${reactions.length > 0 ? "mb-5" : ""}`}
           onContextMenu={handleContextMenu}
         >
           {/* Indicador de mensagem fixada */}
@@ -627,36 +627,37 @@ export function MessageItem({
           )}
         </div>
 
-        {/* Reações existentes - Estilo Telegram (bolha roxa) */}
-        {reactions.length > 0 && (
-          <div className="absolute -bottom-3 left-2 flex items-center">
-            <div className="flex items-center gap-0.5 rounded-full bg-violet-600 px-1.5 py-0.5 shadow-lg">
-              {reactions.map((r) => (
-                <button
-                  key={r.emoji}
-                  onClick={() => {
-                    if (r.userReacted) {
-                      onRemoveReaction?.(message.id, r.emoji)
-                    } else {
-                      onReact?.(message.id, r.emoji)
-                      triggerCelebration(r.emoji)
-                    }
-                  }}
-                  className="text-lg transition-transform hover:scale-110"
-                  title={r.userReacted ? "Clique para remover" : "Clique para reagir"}
-                >
-                  {r.emoji}
-                </button>
-              ))}
-              {reactions.reduce((sum, r) => sum + r.count, 0) > 1 && (
-                <span className="ml-0.5 text-xs font-medium text-white">
-                  {reactions.reduce((sum, r) => sum + r.count, 0)}
-                </span>
-              )}
+          </div>
+
+          {/* Reações existentes - Estilo Telegram (bolha roxa) */}
+          {reactions.length > 0 && (
+            <div className="absolute -bottom-2.5 left-2 z-10 flex items-center">
+              <div className="flex items-center gap-0.5 rounded-full bg-violet-600 px-2 py-1 shadow-lg">
+                {reactions.map((r) => (
+                  <button
+                    key={r.emoji}
+                    onClick={() => {
+                      if (r.userReacted) {
+                        onRemoveReaction?.(message.id, r.emoji)
+                      } else {
+                        onReact?.(message.id, r.emoji)
+                        triggerCelebration(r.emoji)
+                      }
+                    }}
+                    className="text-xl transition-transform hover:scale-110"
+                    title={r.userReacted ? "Clique para remover" : "Clique para reagir"}
+                  >
+                    {r.emoji}
+                  </button>
+                ))}
+                {reactions.reduce((sum, r) => sum + r.count, 0) > 1 && (
+                  <span className="ml-0.5 text-xs font-medium text-white">
+                    {reactions.reduce((sum, r) => sum + r.count, 0)}
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
-        )}
-          </div>
+          )}
         </div>
 
       </div>
