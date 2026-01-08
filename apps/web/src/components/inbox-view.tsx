@@ -123,6 +123,8 @@ export function InboxView({ userEmail, workspaceId }: InboxViewProps) {
   const [lastMessageDirections, setLastMessageDirections] = useState<Record<string, "inbound" | "outbound">>({})
   // Presence status - identities que estão online
   const [onlineIdentityIds, setOnlineIdentityIds] = useState<Set<string>>(new Set())
+  // Typing status - identities que estão digitando
+  const [typingIdentityIds, setTypingIdentityIds] = useState<Set<string>>(new Set())
 
   const supabase = useMemo(() => createClient(), [])
   const router = useRouter()
@@ -1297,15 +1299,32 @@ I'll be waiting.`
 
         const { data: presenceData } = await supabase
           .from("presence_status")
-          .select("contact_identity_id, is_online")
+          .select("contact_identity_id, is_online, is_typing, typing_expires_at")
           .in("contact_identity_id", identityIds)
-          .eq("is_online", true)
 
         if (presenceData) {
-          const onlineIds = new Set(presenceData.map(p => p.contact_identity_id))
+          const now = new Date()
+          const onlineIds = new Set<string>()
+          const typingIds = new Set<string>()
+          
+          for (const p of presenceData) {
+            if (p.is_online) {
+              onlineIds.add(p.contact_identity_id)
+            }
+            // Typing só é válido se não expirou
+            if (p.is_typing && p.typing_expires_at) {
+              const expiresAt = new Date(p.typing_expires_at)
+              if (expiresAt > now) {
+                typingIds.add(p.contact_identity_id)
+              }
+            }
+          }
+          
           setOnlineIdentityIds(onlineIds)
+          setTypingIdentityIds(typingIds)
         } else {
           setOnlineIdentityIds(new Set())
+          setTypingIdentityIds(new Set())
         }
       } catch (err) {
         // Ignora erros
@@ -1543,6 +1562,7 @@ return (
               readConversationIds={readConversationIds}
               lastMessageDirections={lastMessageDirections}
               onlineIdentityIds={onlineIdentityIds}
+              typingIdentityIds={typingIdentityIds}
             />
           )}
         </div>

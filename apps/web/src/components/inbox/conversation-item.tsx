@@ -22,6 +22,8 @@ interface ConversationItemProps {
   lastMessageDirection?: "inbound" | "outbound"
   // Presence status - contato está online
   isOnline?: boolean
+  // Typing status - contato está digitando
+  isTyping?: boolean
 }
 
 const channelIcons = {
@@ -68,6 +70,7 @@ export function ConversationItem({
   isLastOutboundRead = false,
   lastMessageDirection,
   isOnline = false,
+  isTyping = false,
 }: ConversationItemProps) {
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 })
@@ -211,15 +214,21 @@ export function ConversationItem({
           </div>
         </div>
         <div className="flex items-center justify-between gap-2 mt-0.5 md:mt-1">
-          <span className="truncate text-[13px] md:text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed flex items-center gap-1">
-            {/* Checkmarks para mensagens outbound */}
-            {lastMessageDirection === "outbound" && (
-              isLastOutboundRead
-                ? <CheckCheck className="h-3.5 w-3.5 md:h-4 md:w-4 text-blue-400 flex-shrink-0" />
-                : <Check className="h-3.5 w-3.5 md:h-4 md:w-4 text-zinc-400 flex-shrink-0" />
-            )}
-            <span className="truncate">{conversation.last_message_preview || ""}</span>
-          </span>
+          {isTyping ? (
+            <span className="text-[13px] md:text-sm text-purple-500 dark:text-purple-400 leading-relaxed italic">
+              digitando...
+            </span>
+          ) : (
+            <span className="truncate text-[13px] md:text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed flex items-center gap-1">
+              {/* Checkmarks para mensagens outbound */}
+              {lastMessageDirection === "outbound" && (
+                isLastOutboundRead
+                  ? <CheckCheck className="h-3.5 w-3.5 md:h-4 md:w-4 text-blue-400 flex-shrink-0" />
+                  : <Check className="h-3.5 w-3.5 md:h-4 md:w-4 text-zinc-400 flex-shrink-0" />
+              )}
+              <span className="truncate">{conversation.last_message_preview || ""}</span>
+            </span>
+          )}
           {hasUnread && (
             <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-green-500 px-1.5 text-[11px] md:text-xs font-medium text-white flex-shrink-0">
               {unreadCount > 99 ? "99+" : unreadCount}
