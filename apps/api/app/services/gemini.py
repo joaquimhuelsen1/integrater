@@ -185,7 +185,7 @@ class GeminiService:
         custom_prompt: str | None = None,
         model_id: str | None = None
     ) -> str:
-        """Traduz rascunho PT→EN, preservando quebras de linha."""
+        """Traduz rascunho PT→EN, preservando quebras de linha. Usa Flash por padrão (mais rápido)."""
         if not text or len(text.strip()) < 2:
             return text
 
@@ -196,7 +196,7 @@ class GeminiService:
         paragraphs = text.split("\n\n")
 
         template = custom_prompt or DEFAULT_PROMPTS["draft_translation"]
-        model = model_id or self.pro_model
+        model = model_id or self.flash_model  # Flash é mais rápido (~1s vs ~3s do Pro)
 
         translated_paragraphs = []
 
