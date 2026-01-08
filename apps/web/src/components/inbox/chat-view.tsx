@@ -425,10 +425,12 @@ const [isSuggesting, setIsSuggesting] = useState(false)
     // Busca inicial
     const fetchReactions = async () => {
       try {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from("message_reactions")
           .select("message_id, emoji, user_id")
           .in("message_id", messageIds)
+
+        console.log("[Reactions] fetchReactions:", { data, error, messageIds: messageIds.length })
 
         if (data) {
           // Agrupa por mensagem e emoji
@@ -449,10 +451,11 @@ const [isSuggesting, setIsSuggesting] = useState(false)
               })
             }
           }
+          console.log("[Reactions] Grouped reactions:", grouped)
           setReactionsByMessage(grouped)
         }
-      } catch {
-        // Ignora erros
+      } catch (err) {
+        console.error("[Reactions] fetchReactions error:", err)
       }
     }
 
@@ -551,7 +554,7 @@ const handleUnpin = useCallback(async (messageId: string) => {
     const supabase = createClient()
     try {
       // Upsert: se já existe com mesmo emoji, remove (toggle)
-      const { data: existing } = await supabase
+      const { data: existing, error: selectError } = await supabase
         .from("message_reactions")
         .select("id")
         .eq("message_id", messageId)
@@ -559,27 +562,33 @@ const handleUnpin = useCallback(async (messageId: string) => {
         .eq("emoji", emoji)
         .maybeSingle()
 
+      console.log("[Reactions] Existing check:", { existing, selectError })
+
       if (existing) {
         // Remove reação existente
-        await supabase
+        const { error: deleteError } = await supabase
           .from("message_reactions")
           .delete()
           .eq("id", existing.id)
+        console.log("[Reactions] Deleted existing:", { deleteError })
       } else {
         // Remove reação anterior (se houver) e adiciona nova
-        await supabase
+        const { error: deleteOldError } = await supabase
           .from("message_reactions")
           .delete()
           .eq("message_id", messageId)
           .eq("user_id", currentUserId)
+        console.log("[Reactions] Deleted old:", { deleteOldError })
 
-        await supabase
+        const { data: inserted, error: insertError } = await supabase
           .from("message_reactions")
           .insert({
             message_id: messageId,
             user_id: currentUserId,
             emoji: emoji,
           })
+          .select()
+        console.log("[Reactions] Inserted:", { inserted, insertError })
       }
     } catch (err) {
       console.error("Erro ao reagir:", err)
