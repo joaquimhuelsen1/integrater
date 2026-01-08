@@ -1395,7 +1395,7 @@ const handleUnpin = useCallback(async (messageId: string) => {
                   />
                 ) : (
                   <div
-                    key={`${item.message.id}-${showTranslation}-${translations[item.message.id]?.translated_text?.length || 0}`}
+                    key={`${item.message.id}-${showTranslation}-${translations[item.message.id]?.translated_text?.length || 0}-${(reactionsByMessage[item.message.id] || []).map(r => r.emoji).join("")}`}
                     ref={(el) => {
                       if (el) messageRefs.current.set(item.message.id, el)
                       else messageRefs.current.delete(item.message.id)

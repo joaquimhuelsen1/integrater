@@ -67,9 +67,6 @@ export function MessageItem({
   onReact,
   onRemoveReaction,
 }: MessageItemProps) {
-  // Debug: ver se reactions está chegando
-  console.log("[MessageItem] reactions for", message.id.slice(0, 8), ":", reactions)
-  
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({})
   const [audioUrls, setAudioUrls] = useState<Record<string, string>>({})
   const [playingAudio, setPlayingAudio] = useState<string | null>(null)
