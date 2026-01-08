@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     gemini_api_key: str
     gemini_flash_model: str = "gemini-3-flash-preview"
     gemini_pro_model: str = "gemini-3-pro-preview"
+    
+    # DeepL
+    deepl_api_key: str = ""  # Opcional - se vazio, usa Google Translate
 
     # OpenPhone (secrets diferentes por webhook)
     openphone_webhook_secret_inbound: str = ""  # Secret do webhook /inbound

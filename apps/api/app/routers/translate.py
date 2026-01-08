@@ -24,6 +24,7 @@ class TranslateDraftRequest(BaseModel):
     """Request para traduzir rascunho."""
     text: str
     target_lang: str = "en"
+    provider: str = "deepl"  # "deepl" (melhor) ou "google" (fallback)
 
 
 class TranslateDraftResponse(BaseModel):
@@ -31,6 +32,7 @@ class TranslateDraftResponse(BaseModel):
     translated_text: str
     source_lang: str = "pt"
     target_lang: str = "en"
+    provider: str = "deepl"  # Qual provedor foi usado
 
 
 @router.post("/message/{message_id}", response_model=TranslateMessageResponse)
@@ -257,17 +259,48 @@ async def translate_draft(
     db=Depends(get_supabase),
     owner_id: str = Depends(get_owner_id),
 ):
-    """Traduz rascunho PT→EN usando Google Translate (instantâneo ~100ms)."""
+    """Traduz rascunho PT→EN. Suporta DeepL (melhor) ou Google Translate (fallback)."""
     if not req.text or len(req.text.strip()) < 2:
         raise HTTPException(400, "Texto muito curto")
 
-    # Usa Google Translate direto - muito mais rápido que LLM
+    provider_used = req.provider
+    target = req.target_lang.split("-")[0].upper()  # DeepL usa uppercase (EN, DE, etc)
+    
+    # Tenta DeepL primeiro (se configurado e solicitado)
+    if req.provider == "deepl":
+        try:
+            from ..config import get_settings
+            import deepl
+            import asyncio
+            
+            settings = get_settings()
+            if settings.deepl_api_key:
+                def do_deepl_translate():
+                    client = deepl.DeepLClient(settings.deepl_api_key)
+                    # DeepL usa códigos específicos para variantes
+                    tgt = "EN-US" if target == "EN" else target
+                    result = client.translate_text(req.text, target_lang=tgt)
+                    return result.text, result.detected_source_lang
+                
+                translated, source = await asyncio.to_thread(do_deepl_translate)
+                return TranslateDraftResponse(
+                    translated_text=translated,
+                    source_lang=source.lower() if source else "pt",
+                    target_lang=req.target_lang,
+                    provider="deepl",
+                )
+        except Exception as e:
+            print(f"DeepL falhou, usando Google Translate: {e}")
+            provider_used = "google"
+    
+    # Fallback para Google Translate
     try:
-        translated, _ = await translate_text(req.text, req.target_lang.split("-")[0])
+        translated, _ = await translate_text(req.text, target.lower())
         return TranslateDraftResponse(
             translated_text=translated,
             source_lang="pt",
             target_lang=req.target_lang,
+            provider=provider_used,
         )
     except Exception as e:
         raise HTTPException(500, f"Erro ao traduzir: {e}")
