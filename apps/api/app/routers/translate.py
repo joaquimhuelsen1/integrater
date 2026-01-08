@@ -16,11 +16,8 @@ from ..models.translations import (
     TranslationItem,
 )
 from ..services.translator import translate_text
-from ..services.gemini import get_gemini_service
-from ..config import get_settings
 
 router = APIRouter(prefix="/translate", tags=["translate"])
-settings = get_settings()
 
 
 class TranslateDraftRequest(BaseModel):
@@ -260,32 +257,13 @@ async def translate_draft(
     db=Depends(get_supabase),
     owner_id: str = Depends(get_owner_id),
 ):
-    """Traduz rascunho de mensagem PT→EN usando modelo configurado."""
+    """Traduz rascunho PT→EN usando Google Translate (instantâneo ~100ms)."""
     if not req.text or len(req.text.strip()) < 2:
         raise HTTPException(400, "Texto muito curto")
 
-    # Busca prompt customizado se existir
-    custom_prompt = None
-    prompt_result = db.table("prompts").select("content").eq(
-        "owner_id", owner_id
-    ).eq("prompt_type", "draft_translation").eq("is_active", True).execute()
-
-    if prompt_result.data:
-        custom_prompt = prompt_result.data[0]["content"]
-
-    # Busca modelo configurado
-    model_id = None
-    config_result = db.table("ai_function_config").select("model_id").eq(
-        "owner_id", owner_id
-    ).eq("function_key", "draft_translation").execute()
-
-    if config_result.data:
-        model_id = config_result.data[0]["model_id"]
-
-    # Traduz com modelo configurado
-    gemini = get_gemini_service()
+    # Usa Google Translate direto - muito mais rápido que LLM
     try:
-        translated = await gemini.translate_draft(req.text, custom_prompt, model_id)
+        translated, _ = await translate_text(req.text, req.target_lang.split("-")[0])
         return TranslateDraftResponse(
             translated_text=translated,
             source_lang="pt",
