@@ -1509,6 +1509,13 @@ I'll be waiting.`
           const currChannels = contactChannelsRef.current
           const currSelectedId = selectedIdRef.current
 
+          // Atualiza mapeamento para read status funcionar em novas mensagens
+          msgToConvRef.current[newMsg.id] = newMsg.conversation_id
+          setLastMessageDirections(prev => ({
+            ...prev,
+            [newMsg.conversation_id]: newMsg.direction as "inbound" | "outbound"
+          }))
+
           // Se tem contato selecionado, verificar se msg é de qualquer conversa do contato
           if (currContactId && currChannels.some(ch => ch.conversationId === newMsg.conversation_id)) {
             loadContactMessagesRef.current(currContactId)
