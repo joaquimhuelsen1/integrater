@@ -49,7 +49,7 @@ async def send_message(
     if channel == "telegram":
         print(f"[Telegram] Enviando mensagem para conversa {data.conversation_id}")
         
-        # Buscar attachments URLs se houver
+        # Buscar attachments URLs se houver (signed URLs pois bucket é privado)
         attachment_urls = []
         if data.attachments:
             for att_id in data.attachments:
@@ -60,10 +60,11 @@ async def send_message(
                     bucket = att_result.data.get("storage_bucket", "attachments")
                     path = att_result.data.get("storage_path")
                     if path:
-                        from ..config import get_settings
-                        settings = get_settings()
-                        url = f"{settings.supabase_url}/storage/v1/object/public/{bucket}/{path}"
-                        attachment_urls.append(url)
+                        # Gerar signed URL (válida por 1 hora)
+                        signed = db.storage.from_(bucket).create_signed_url(path, 3600)
+                        if signed and signed.get("signedURL"):
+                            attachment_urls.append(signed["signedURL"])
+                            print(f"[Telegram] Signed URL gerada para {path}")
         
         # Chamar webhook n8n /send - n8n insere no banco
         try:
@@ -125,7 +126,7 @@ async def send_message(
     if channel == "email":
         print(f"[Email] Enviando email para conversa {data.conversation_id}")
         
-        # Buscar attachments URLs se houver
+        # Buscar attachments URLs se houver (signed URLs pois bucket é privado)
         attachment_urls = []
         if data.attachments:
             for att_id in data.attachments:
@@ -136,10 +137,11 @@ async def send_message(
                     bucket = att_result.data.get("storage_bucket", "attachments")
                     path = att_result.data.get("storage_path")
                     if path:
-                        from ..config import get_settings
-                        settings = get_settings()
-                        url = f"{settings.supabase_url}/storage/v1/object/public/{bucket}/{path}"
-                        attachment_urls.append(url)
+                        # Gerar signed URL (válida por 1 hora)
+                        signed = db.storage.from_(bucket).create_signed_url(path, 3600)
+                        if signed and signed.get("signedURL"):
+                            attachment_urls.append(signed["signedURL"])
+                            print(f"[Email] Signed URL gerada para {path}")
         
         # Buscar ultima mensagem inbound para threading
         email_reply_to = None
@@ -356,7 +358,7 @@ async def edit_message(
     """
     Edita o texto de uma mensagem.
     Só pode editar mensagens outbound (enviadas pelo usuário).
-    Cria um job para o worker editar no canal externo (Telegram/etc).
+    Para Telegram: chama webhook n8n que edita via worker.
     """
     msg_result = db.table("messages").select("*").eq(
         "id", str(message_id)
@@ -377,22 +379,55 @@ async def edit_message(
         raise HTTPException(status_code=400, detail="Texto muito longo (máx 4096)")
 
     now = datetime.utcnow().isoformat()
-
+    
+    # Para Telegram: chama n8n webhook
+    if msg.get("channel") == "telegram":
+        external_msg_id = msg.get("external_message_id")
+        if not external_msg_id or str(external_msg_id).startswith("local-"):
+            raise HTTPException(status_code=400, detail="Mensagem não pode ser editada (sem ID externo)")
+        
+        try:
+            import os
+            n8n_webhook_url = os.environ.get(
+                "N8N_TELEGRAM_EDIT_WEBHOOK", 
+                "https://n8nwebhook.thereconquestmap.com/webhook/telegram/edit"
+            )
+            n8n_api_key = os.environ.get("N8N_API_KEY", "")
+            
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    n8n_webhook_url,
+                    headers={
+                        "X-API-KEY": n8n_api_key,
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "message_id": str(message_id),
+                        "conversation_id": msg.get("conversation_id"),
+                        "external_message_id": external_msg_id,
+                        "new_text": text.strip(),
+                    },
+                )
+            
+            if response.status_code == 200:
+                resp_data = response.json()
+                if resp_data.get("status") == "ok":
+                    return {"status": "ok", "edited_at": now}
+                else:
+                    raise HTTPException(status_code=500, detail=resp_data.get('error', 'Erro ao editar'))
+            else:
+                raise HTTPException(status_code=500, detail=f"Erro n8n: {response.status_code}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[Edit] Erro ao editar via n8n: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    # Para outros canais: atualiza apenas no banco
     db.table("messages").update({
         "text": text.strip(),
         "edited_at": now,
     }).eq("id", str(message_id)).execute()
-
-    # Criar job para editar no canal externo
-    if msg.get("channel") == "telegram" and msg.get("external_message_id"):
-        db.table("message_jobs").insert({
-            "owner_id": str(owner_id),
-            "message_id": str(message_id),
-            "integration_account_id": msg.get("integration_account_id"),
-            "action": "edit",
-            "payload": {"new_text": text.strip()},
-            "status": "pending",
-        }).execute()
 
     return {"status": "ok", "edited_at": now}
 
@@ -400,13 +435,17 @@ async def edit_message(
 @router.delete("/{message_id}")
 async def delete_message(
     message_id: UUID,
+    for_everyone: bool = True,
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
     """
     Deleta uma mensagem (soft delete).
     Só pode deletar mensagens outbound (enviadas pelo usuário).
-    Cria um job para deletar no canal externo (Telegram/etc).
+    Para Telegram: chama webhook n8n que deleta via worker.
+    
+    Args:
+        for_everyone: Se True, apaga para todos (revoke). Se False, só para mim.
     """
     msg_result = db.table("messages").select("*").eq(
         "id", str(message_id)
@@ -421,21 +460,58 @@ async def delete_message(
         raise HTTPException(status_code=400, detail="Só pode deletar mensagens enviadas")
 
     now = datetime.utcnow().isoformat()
-
+    
+    # Para Telegram: chama n8n webhook
+    if msg.get("channel") == "telegram":
+        external_msg_id = msg.get("external_message_id")
+        if not external_msg_id or str(external_msg_id).startswith("local-"):
+            # Sem ID externo, apenas soft delete local
+            db.table("messages").update({
+                "deleted_at": now,
+            }).eq("id", str(message_id)).execute()
+            return {"status": "ok", "deleted_at": now}
+        
+        try:
+            import os
+            n8n_webhook_url = os.environ.get(
+                "N8N_TELEGRAM_DELETE_WEBHOOK", 
+                "https://n8nwebhook.thereconquestmap.com/webhook/telegram/delete"
+            )
+            n8n_api_key = os.environ.get("N8N_API_KEY", "")
+            
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    n8n_webhook_url,
+                    headers={
+                        "X-API-KEY": n8n_api_key,
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "message_id": str(message_id),
+                        "conversation_id": msg.get("conversation_id"),
+                        "external_message_id": external_msg_id,
+                        "revoke": for_everyone,
+                    },
+                )
+            
+            if response.status_code == 200:
+                resp_data = response.json()
+                if resp_data.get("status") == "ok":
+                    return {"status": "ok", "deleted_at": now}
+                else:
+                    raise HTTPException(status_code=500, detail=resp_data.get('error', 'Erro ao deletar'))
+            else:
+                raise HTTPException(status_code=500, detail=f"Erro n8n: {response.status_code}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[Delete] Erro ao deletar via n8n: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    # Para outros canais: apenas soft delete local
     db.table("messages").update({
         "deleted_at": now,
     }).eq("id", str(message_id)).execute()
-
-    # Criar job para deletar no canal externo
-    if msg.get("channel") == "telegram" and msg.get("external_message_id"):
-        db.table("message_jobs").insert({
-            "owner_id": str(owner_id),
-            "message_id": str(message_id),
-            "integration_account_id": msg.get("integration_account_id"),
-            "action": "delete",
-            "payload": {},
-            "status": "pending",
-        }).execute()
 
     return {"status": "ok", "deleted_at": now}
 
