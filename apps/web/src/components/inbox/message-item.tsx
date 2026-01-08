@@ -78,6 +78,25 @@ export function MessageItem({
 
   const isImage = (mimeType: string) => mimeType?.startsWith("image/") || false
   const isAudio = (mimeType: string) => mimeType?.startsWith("audio/") || mimeType === "application/ogg" || false
+  const isPdf = (mimeType: string, fileName?: string) => 
+    mimeType === "application/pdf" || fileName?.toLowerCase().endsWith(".pdf") || false
+
+  // Formata tamanho do arquivo (bytes -> KB/MB)
+  const formatFileSize = (bytes?: number) => {
+    if (!bytes || bytes <= 0) return ""
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  // Trunca nome do arquivo se muito longo
+  const truncateFileName = (name: string, maxLength = 25) => {
+    if (name.length <= maxLength) return name
+    const ext = name.lastIndexOf(".") > 0 ? name.slice(name.lastIndexOf(".")) : ""
+    const base = name.slice(0, name.lastIndexOf(".") > 0 ? name.lastIndexOf(".") : name.length)
+    const maxBase = maxLength - ext.length - 3 // 3 para "..."
+    return base.slice(0, maxBase) + "..." + ext
+  }
 
   // Carrega URLs das imagens e áudios
   useEffect(() => {
@@ -549,21 +568,64 @@ export function MessageItem({
         {/* Outros arquivos (não-imagens e não-áudios) */}
         {message.attachments && message.attachments.filter(att => !isImage(att.mime_type) && !isAudio(att.mime_type)).length > 0 && (
           <div className="mt-2 space-y-2">
-            {message.attachments.filter(att => !isImage(att.mime_type) && !isAudio(att.mime_type)).map((att) => (
-              <button
-                key={att.id}
-                onClick={() => onDownload?.(att.id, att.file_name || "arquivo")}
-                className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors ${
-                  isOutbound
-                    ? "bg-purple-700 hover:bg-purple-800"
-                    : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-700 dark:hover:bg-zinc-600"
-                }`}
-              >
-                <FileText className="h-4 w-4 flex-shrink-0" />
-                <span className="flex-1 truncate">{att.file_name || "Anexo"}</span>
-                <Download className="h-3 w-3 flex-shrink-0" />
-              </button>
-            ))}
+            {message.attachments.filter(att => !isImage(att.mime_type) && !isAudio(att.mime_type)).map((att) => {
+              // PDF tem estilo especial (WhatsApp style)
+              if (isPdf(att.mime_type, att.file_name)) {
+                const fileSize = formatFileSize(att.file_size)
+                return (
+                  <button
+                    key={att.id}
+                    onClick={() => onDownload?.(att.id, att.file_name || "documento.pdf")}
+                    className={`flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-colors ${
+                      isOutbound
+                        ? "bg-purple-600 hover:bg-purple-700"
+                        : "bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+                    }`}
+                  >
+                    {/* Badge PDF vermelho - estilo WhatsApp */}
+                    <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-lg bg-red-500">
+                      <span className="text-sm font-bold lowercase text-white">pdf</span>
+                    </div>
+
+                    {/* Nome e tamanho */}
+                    <div className="min-w-0 flex-1">
+                      <div className={`text-sm font-medium truncate ${
+                        isOutbound ? "text-white" : "text-zinc-800 dark:text-zinc-100"
+                      }`}>
+                        {truncateFileName(att.file_name || "documento.pdf")}
+                      </div>
+                      <div className={`text-xs mt-0.5 ${
+                        isOutbound ? "text-purple-200" : "text-zinc-500 dark:text-zinc-400"
+                      }`}>
+                        {fileSize || "PDF"}
+                      </div>
+                    </div>
+
+                    {/* Icone download */}
+                    <Download className={`h-5 w-5 flex-shrink-0 ${
+                      isOutbound ? "text-purple-200" : "text-zinc-400 dark:text-zinc-500"
+                    }`} />
+                  </button>
+                )
+              }
+
+              // Outros arquivos (não-PDF)
+              return (
+                <button
+                  key={att.id}
+                  onClick={() => onDownload?.(att.id, att.file_name || "arquivo")}
+                  className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors ${
+                    isOutbound
+                      ? "bg-purple-700 hover:bg-purple-800"
+                      : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-700 dark:hover:bg-zinc-600"
+                  }`}
+                >
+                  <FileText className="h-4 w-4 flex-shrink-0" />
+                  <span className="flex-1 truncate">{att.file_name || "Anexo"}</span>
+                  <Download className="h-3 w-3 flex-shrink-0" />
+                </button>
+              )
+            })}
           </div>
         )}
 
