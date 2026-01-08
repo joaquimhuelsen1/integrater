@@ -49,6 +49,9 @@ interface ComposerProps {
   onCancelReply?: () => void
   // Callback quando usuário está digitando (para enviar typing ao Telegram)
   onTyping?: () => void
+  // Para substituição de placeholders em templates
+  contactName?: string | null
+  channelLabel?: string | null
 }
 
 // Detecta tipo de arquivo pela extensão quando file.type está vazio
@@ -85,7 +88,7 @@ const EMOJI_CATEGORIES = [
   { name: "Objetos", emojis: ["💼", "📱", "💻", "📧", "📞", "💰", "💵", "📝", "✅", "❌", "⭐", "🌟", "💡", "🎯", "🚀", "⏰"] },
 ]
 
-export function Composer({ onSend, disabled, templates = [], initialText = "", onTextChange, externalFiles = [], onExternalFilesProcessed, apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000", availableChannels, selectedChannel, onChannelChange, replyTo, onCancelReply, onTyping }: ComposerProps) {
+export function Composer({ onSend, disabled, templates = [], initialText = "", onTextChange, externalFiles = [], onExternalFilesProcessed, apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000", availableChannels, selectedChannel, onChannelChange, replyTo, onCancelReply, onTyping, contactName, channelLabel }: ComposerProps) {
   const [text, setText] = useState(initialText)
   const [attachments, setAttachments] = useState<AttachmentPreview[]>([])
   const [showTemplates, setShowTemplates] = useState(false)
@@ -192,12 +195,28 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
     })
   }, [])
 
-  const insertTemplate = useCallback((template: Template) => {
-    const newText = text + template.body
+const insertTemplate = useCallback((template: Template) => {
+    // Substitui placeholders
+    let body = template.body
+    if (contactName) {
+      body = body.replace(/\{nome\}/gi, contactName)
+      // primeiro_nome = primeira palavra do nome
+      const firstName = contactName.split(" ")[0] || contactName
+      body = body.replace(/\{primeiro_nome\}/gi, firstName)
+    }
+    if (channelLabel) {
+      body = body.replace(/\{canal\}/gi, channelLabel)
+    }
+    // Remove placeholders não substituídos (caso não tenha dados)
+    body = body.replace(/\{nome\}/gi, "")
+    body = body.replace(/\{primeiro_nome\}/gi, "")
+    body = body.replace(/\{canal\}/gi, "")
+
+    const newText = text + body
     updateText(newText)
     setShowTemplates(false)
     textareaRef.current?.focus()
-  }, [text, updateText])
+  }, [text, updateText, contactName, channelLabel])
 
   const insertEmoji = useCallback((emoji: string) => {
     const newText = text + emoji

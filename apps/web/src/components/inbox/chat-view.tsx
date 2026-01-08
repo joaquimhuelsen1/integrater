@@ -1,10 +1,10 @@
 "use client"
 
 import { useRef, useEffect, useState, useCallback, useMemo } from "react"
-import { ArrowLeft, Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical, Unlink, MessageSquare, Phone, Briefcase, Users } from "lucide-react"
+import { ArrowLeft, Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical, Unlink, MessageSquare, Phone, Briefcase, Users, Copy } from "lucide-react"
 import { createClient } from "@/lib/supabase"
 import { apiFetch } from "@/lib/api"
-import { MessageItem } from "./message-item"
+import { MessageItem, MessageReaction } from "./message-item"
 import { DateDivider } from "./date-divider"
 import { ServiceMessage } from "./service-message"
 import { Composer } from "./composer"
@@ -249,10 +249,14 @@ const [isSuggesting, setIsSuggesting] = useState(false)
   // Read receipts - IDs de mensagens que foram lidas
   const [readMessageIds, setReadMessageIds] = useState<Set<string>>(new Set())
 
-  // Presence status - typing e online
+// Presence status - typing e online
   const [isTyping, setIsTyping] = useState(false)
   const [isOnline, setIsOnline] = useState(false)
   const [lastSeen, setLastSeen] = useState<string | null>(null)
+
+  // Reactions - mapa de message_id -> reações agregadas
+  const [reactionsByMessage, setReactionsByMessage] = useState<Record<string, MessageReaction[]>>({})
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
   // Realtime para eventos de leitura (sem polling)
   useEffect(() => {
@@ -389,11 +393,91 @@ const [isSuggesting, setIsSuggesting] = useState(false)
     }
   }, [conversationId, identityId])
 
-  // Agrupa mensagens por data para exibir divisores
+// Agrupa mensagens por data para exibir divisores
   const groupedMessages = useMemo(
     () => groupMessagesByDate(messages),
     [messages]
   )
+
+  // Busca ID do usuário atual
+  useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) {
+        setCurrentUserId(data.user.id)
+      }
+    })
+  }, [])
+
+  // Busca reações das mensagens e escuta realtime
+  useEffect(() => {
+    if (messages.length === 0) {
+      setReactionsByMessage({})
+      return
+    }
+
+    const messageIds = messages.map(m => m.id).filter(id => !id.startsWith("temp-"))
+    if (messageIds.length === 0) return
+
+    const supabase = createClient()
+
+    // Busca inicial
+    const fetchReactions = async () => {
+      try {
+        const { data } = await supabase
+          .from("message_reactions")
+          .select("message_id, emoji, user_id")
+          .in("message_id", messageIds)
+
+        if (data) {
+          // Agrupa por mensagem e emoji
+          const grouped: Record<string, MessageReaction[]> = {}
+          for (const r of data) {
+            const messageReactions = grouped[r.message_id] ?? (grouped[r.message_id] = [])
+            const existing = messageReactions.find(x => x.emoji === r.emoji)
+            if (existing) {
+              existing.count++
+              if (r.user_id === currentUserId) {
+                existing.userReacted = true
+              }
+            } else {
+              messageReactions.push({
+                emoji: r.emoji,
+                count: 1,
+                userReacted: r.user_id === currentUserId,
+              })
+            }
+          }
+          setReactionsByMessage(grouped)
+        }
+      } catch {
+        // Ignora erros
+      }
+    }
+
+    fetchReactions()
+
+    // Realtime para novas reações
+    const channel = supabase
+      .channel(`reactions-${conversationId || "none"}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "message_reactions",
+        },
+        () => {
+          // Refetch ao receber mudança
+          fetchReactions()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [messages, conversationId, currentUserId])
 
   // Mapa de mensagens por ID para lookup de replies
   const messagesById = useMemo(() => {
@@ -444,7 +528,7 @@ const [isSuggesting, setIsSuggesting] = useState(false)
     }
   }, [apiUrl])
 
-  const handleUnpin = useCallback(async (messageId: string) => {
+const handleUnpin = useCallback(async (messageId: string) => {
     try {
       const resp = await apiFetch(`/messages/${messageId}/unpin`, { method: "POST" })
       if (resp.ok) {
@@ -454,6 +538,64 @@ const [isSuggesting, setIsSuggesting] = useState(false)
       console.error("Erro ao desafixar mensagem:", err)
     }
   }, [apiUrl])
+
+  // Handlers para reações
+  const handleReact = useCallback(async (messageId: string, emoji: string) => {
+    if (!currentUserId) return
+
+    const supabase = createClient()
+    try {
+      // Upsert: se já existe com mesmo emoji, remove (toggle)
+      const { data: existing } = await supabase
+        .from("message_reactions")
+        .select("id")
+        .eq("message_id", messageId)
+        .eq("user_id", currentUserId)
+        .eq("emoji", emoji)
+        .maybeSingle()
+
+      if (existing) {
+        // Remove reação existente
+        await supabase
+          .from("message_reactions")
+          .delete()
+          .eq("id", existing.id)
+      } else {
+        // Remove reação anterior (se houver) e adiciona nova
+        await supabase
+          .from("message_reactions")
+          .delete()
+          .eq("message_id", messageId)
+          .eq("user_id", currentUserId)
+
+        await supabase
+          .from("message_reactions")
+          .insert({
+            message_id: messageId,
+            user_id: currentUserId,
+            emoji: emoji,
+          })
+      }
+    } catch (err) {
+      console.error("Erro ao reagir:", err)
+    }
+  }, [currentUserId])
+
+  const handleRemoveReaction = useCallback(async (messageId: string, emoji: string) => {
+    if (!currentUserId) return
+
+    const supabase = createClient()
+    try {
+      await supabase
+        .from("message_reactions")
+        .delete()
+        .eq("message_id", messageId)
+        .eq("user_id", currentUserId)
+        .eq("emoji", emoji)
+    } catch (err) {
+      console.error("Erro ao remover reação:", err)
+    }
+  }, [currentUserId])
 
   // Handlers para edit/delete
   const handleEdit = useCallback((message: Message) => {
@@ -756,7 +898,7 @@ const [isSuggesting, setIsSuggesting] = useState(false)
     }
   }, [onSyncHistory, isSyncing])
 
-  // Sincronizar contatos OpenPhone
+// Sincronizar contatos OpenPhone
   const handleSyncContacts = useCallback(async () => {
     if (!onSyncContacts || isSyncingContacts) return
     setIsSyncingContacts(true)
@@ -766,6 +908,34 @@ const [isSuggesting, setIsSuggesting] = useState(false)
       setIsSyncingContacts(false)
     }
   }, [onSyncContacts, isSyncingContacts])
+
+  // Copiar toda a conversa para clipboard
+  const copyConversation = useCallback(() => {
+    if (messages.length === 0) return
+
+    const lines = messages
+      .filter(m => m.text && !m.deleted_at) // só msgs com texto, não deletadas
+      .map(m => {
+        const prefix = m.direction === "outbound" ? "Eu" : "Aluno"
+        const date = new Date(m.sent_at)
+        const formatted = date.toLocaleString("pt-BR", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+        return `${prefix}: ${m.text} (${formatted})`
+      })
+
+    const text = lines.join("\n")
+    navigator.clipboard.writeText(text).then(() => {
+      // Feedback visual simples (toast seria melhor, mas não temos)
+      // Por enquanto só copia silenciosamente
+    }).catch(err => {
+      console.error("Erro ao copiar conversa:", err)
+    })
+  }, [messages])
 
   if (!conversationId) {
     return (
@@ -919,8 +1089,13 @@ const [isSuggesting, setIsSuggesting] = useState(false)
             </div>
             {/* Typing indicator */}
             {isTyping ? (
-              <span className="text-xs text-zinc-500 animate-pulse">
-                digitando...
+              <span className="flex items-center gap-1 text-xs text-violet-500">
+                <span>digitando</span>
+                <span className="flex gap-0.5">
+                  <span className="h-1 w-1 animate-bounce rounded-full bg-violet-500" style={{ animationDelay: "0ms" }} />
+                  <span className="h-1 w-1 animate-bounce rounded-full bg-violet-500" style={{ animationDelay: "150ms" }} />
+                  <span className="h-1 w-1 animate-bounce rounded-full bg-violet-500" style={{ animationDelay: "300ms" }} />
+                </span>
               </span>
             ) : isOnline ? (
               <span className="text-xs text-green-600 dark:text-green-400">
@@ -1018,7 +1193,7 @@ const [isSuggesting, setIsSuggesting] = useState(false)
                   {isSuggesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-purple-500" />}
                   {isSuggesting ? "Gerando..." : "Sugerir resposta"}
                 </button>
-                {/* Resumir */}
+{/* Resumir */}
                 <button
                   onClick={() => { summarizeConversation(); setShowMenu(false); }}
                   disabled={isSummarizing || messages.length === 0}
@@ -1026,6 +1201,15 @@ const [isSuggesting, setIsSuggesting] = useState(false)
                 >
                   {isSummarizing ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4 text-blue-500" />}
                   {isSummarizing ? "Resumindo..." : "Resumir conversa"}
+                </button>
+                {/* Copiar conversa */}
+                <button
+                  onClick={() => { copyConversation(); setShowMenu(false); }}
+                  disabled={messages.length === 0}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                >
+                  <Copy className="h-4 w-4 text-emerald-500" />
+                  Copiar conversa
                 </button>
                 {/* Separador */}
                 <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
@@ -1204,7 +1388,7 @@ const [isSuggesting, setIsSuggesting] = useState(false)
                     }}
                     className="transition-all duration-300"
                   >
-                    <MessageItem
+<MessageItem
                       message={item.message}
                       onDownload={onDownloadAttachment}
                       translation={showTranslation && item.message.direction === "inbound" ? translations[item.message.id] : undefined}
@@ -1217,6 +1401,9 @@ const [isSuggesting, setIsSuggesting] = useState(false)
                       isRead={readMessageIds.has(item.message.id)}
                       onEdit={handleEdit}
                       onDelete={handleDelete}
+                      reactions={reactionsByMessage[item.message.id] || []}
+                      onReact={handleReact}
+                      onRemoveReaction={handleRemoveReaction}
                     />
                   </div>
                 )
@@ -1226,7 +1413,7 @@ const [isSuggesting, setIsSuggesting] = useState(false)
           )}
         </div>
 
-        {/* Composer (flutuando sobre o mesmo background) */}
+{/* Composer (flutuando sobre o mesmo background) */}
         <Composer
           onSend={handleSendMessage}
           templates={templates}
@@ -1243,6 +1430,8 @@ const [isSuggesting, setIsSuggesting] = useState(false)
           } : null}
           onCancelReply={handleCancelReply}
           onTyping={onTyping}
+          contactName={displayName}
+          channelLabel={channel === "telegram" ? "Telegram" : channel === "email" ? "Email" : channel === "openphone_sms" ? "SMS" : null}
         />
       </div>
     </div>

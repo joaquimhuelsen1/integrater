@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Check, CheckCheck, Download, FileText, Image as ImageIcon, X, ZoomIn, ZoomOut, Mic, Play, Pause, FileAudio, Loader2, MessageSquare, Mail, Phone, Reply, Pin, Pencil, Trash2, AlertCircle } from "lucide-react"
+import { Check, CheckCheck, Download, FileText, Image as ImageIcon, X, ZoomIn, ZoomOut, Mic, Play, Pause, FileAudio, Loader2, MessageSquare, Mail, Phone, Reply, Pin, Pencil, Trash2, AlertCircle, Copy } from "lucide-react"
 import { createClient } from "@/lib/supabase"
 import type { Message, Translation } from "./chat-view"
 
@@ -15,6 +15,13 @@ const channelLabels = {
   telegram: "Telegram",
   email: "Email",
   openphone_sms: "SMS",
+}
+
+// Tipos para reações
+export interface MessageReaction {
+  emoji: string
+  count: number
+  userReacted: boolean // se o usuário atual reagiu com esse emoji
 }
 
 interface MessageItemProps {
@@ -32,7 +39,14 @@ interface MessageItemProps {
   isRead?: boolean  // Se a mensagem foi lida pelo destinatário
   onEdit?: (message: Message) => void
   onDelete?: (messageId: string) => void
+  // Reações
+  reactions?: MessageReaction[]
+  onReact?: (messageId: string, emoji: string) => void
+  onRemoveReaction?: (messageId: string, emoji: string) => void
 }
+
+// Emojis disponíveis para reações
+const REACTION_EMOJIS = ["👍", "❤️", "🔥", "😂", "😮", "😢", "👎"]
 
 export function MessageItem({
   message,
@@ -49,6 +63,9 @@ export function MessageItem({
   isRead = false,
   onEdit,
   onDelete,
+  reactions = [],
+  onReact,
+  onRemoveReaction,
 }: MessageItemProps) {
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({})
   const [audioUrls, setAudioUrls] = useState<Record<string, string>>({})
@@ -63,7 +80,9 @@ export function MessageItem({
   const [audioCurrentTime, setAudioCurrentTime] = useState<Record<string, number>>({})
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 })
+  const [showReactionPicker, setShowReactionPicker] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  const reactionPickerRef = useRef<HTMLDivElement>(null)
   const supabase = createClient()
 
   // Reply só disponível para Telegram
@@ -115,6 +134,7 @@ export function MessageItem({
         setExpandedImage(null)
         setZoomLevel(1)
         setShowContextMenu(false)
+        setShowReactionPicker(false)
       }
     }
     window.addEventListener("keydown", handleEsc)
@@ -127,12 +147,15 @@ export function MessageItem({
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setShowContextMenu(false)
       }
+      if (reactionPickerRef.current && !reactionPickerRef.current.contains(e.target as Node)) {
+        setShowReactionPicker(false)
+      }
     }
-    if (showContextMenu) {
+    if (showContextMenu || showReactionPicker) {
       document.addEventListener("mousedown", handleClickOutside)
     }
     return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [showContextMenu])
+  }, [showContextMenu, showReactionPicker])
 
   // Handler do menu de contexto (right-click)
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -586,6 +609,78 @@ export function MessageItem({
             )
           )}
         </div>
+
+        {/* Reações */}
+        {(reactions.length > 0 || onReact) && (
+          <div className="relative mt-1.5 flex flex-wrap items-center gap-1">
+            {/* Reações existentes */}
+            {reactions.map((r) => (
+              <button
+                key={r.emoji}
+                onClick={() => {
+                  if (r.userReacted) {
+                    onRemoveReaction?.(message.id, r.emoji)
+                  } else {
+                    onReact?.(message.id, r.emoji)
+                  }
+                }}
+                className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs transition-colors ${
+                  r.userReacted
+                    ? isOutbound
+                      ? "bg-white/30 text-white"
+                      : "bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300"
+                    : isOutbound
+                      ? "bg-white/10 text-white/80 hover:bg-white/20"
+                      : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
+                }`}
+                title={r.userReacted ? "Clique para remover" : "Clique para reagir"}
+              >
+                <span>{r.emoji}</span>
+                {r.count > 1 && <span>{r.count}</span>}
+              </button>
+            ))}
+
+            {/* Botão para adicionar reação */}
+            {onReact && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowReactionPicker(!showReactionPicker)}
+                  className={`flex h-6 w-6 items-center justify-center rounded-full text-sm transition-colors ${
+                    isOutbound
+                      ? "bg-white/10 text-white/60 hover:bg-white/20 hover:text-white"
+                      : "bg-zinc-100 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-600 dark:bg-zinc-700 dark:text-zinc-500 dark:hover:bg-zinc-600 dark:hover:text-zinc-300"
+                  }`}
+                  title="Adicionar reação"
+                >
+                  +
+                </button>
+
+                {/* Picker de reações */}
+                {showReactionPicker && (
+                  <div
+                    ref={reactionPickerRef}
+                    className={`absolute z-50 flex gap-1 rounded-full border bg-white px-2 py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800 ${
+                      isOutbound ? "right-0" : "left-0"
+                    } bottom-full mb-1`}
+                  >
+                    {REACTION_EMOJIS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        onClick={() => {
+                          onReact(message.id, emoji)
+                          setShowReactionPicker(false)
+                        }}
+                        className="rounded-full p-1 text-lg transition-transform hover:scale-125 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
           </div>
         </div>
 
@@ -598,6 +693,20 @@ export function MessageItem({
           className="fixed z-50 min-w-44 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
           style={{ left: menuPosition.x, top: menuPosition.y }}
         >
+          {/* Copiar texto */}
+          {message.text && (
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(message.text || "")
+                setShowContextMenu(false)
+              }}
+              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+            >
+              <Copy className="h-4 w-4 text-zinc-500" />
+              <span>Copiar texto</span>
+            </button>
+          )}
+
           {/* Responder (só Telegram) */}
           {canReply && onReply && (
             <button

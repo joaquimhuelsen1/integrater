@@ -1,12 +1,13 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { ArrowLeft, Plus, Trash2, Wifi, WifiOff, Sparkles, Edit2, RotateCcw, Play, Save, X, ChevronDown, ChevronUp, MessageSquare, Mail, AlertCircle, CheckCircle, Loader2, Cpu, Settings2, RefreshCw, Clock, Users } from "lucide-react"
+import { ArrowLeft, Plus, Trash2, Wifi, WifiOff, Sparkles, Edit2, RotateCcw, Play, Save, X, ChevronDown, ChevronUp, MessageSquare, Mail, AlertCircle, CheckCircle, Loader2, Cpu, Settings2, RefreshCw, Clock, Users, Volume2, VolumeX } from "lucide-react"
 import Link from "next/link"
 import { TelegramAuthFlow } from "./telegram-auth-flow"
 import { WorkspaceSelector } from "./workspace-selector"
 import { ThemeToggle } from "./theme-toggle"
 import { useWorkspace } from "@/contexts/workspace-context"
+import { useSoundContext } from "@/contexts/sound-context"
 import { createClient } from "@/lib/supabase"
 import { apiFetch } from "@/lib/api"
 
@@ -146,7 +147,25 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
   const [syncPeriod, setSyncPeriod] = useState<string>("1d")
   const [syncResult, setSyncResult] = useState<{ jobs: number; success: boolean } | null>(null)
 
+  // Templates state
+  interface Template {
+    id: string
+    title: string
+    content: string
+    shortcut: string | null
+  }
+  const [templates, setTemplates] = useState<Template[]>([])
+  const [templatesLoading, setTemplatesLoading] = useState(true)
+  const [editingTemplate, setEditingTemplate] = useState<string | null>(null)
+  const [editTemplateTitle, setEditTemplateTitle] = useState("")
+  const [editTemplateContent, setEditTemplateContent] = useState("")
+  const [editTemplateShortcut, setEditTemplateShortcut] = useState("")
+  const [showAddTemplate, setShowAddTemplate] = useState(false)
+  const [newTemplate, setNewTemplate] = useState({ title: "", content: "", shortcut: "" })
+  const [savingTemplate, setSavingTemplate] = useState(false)
+
   const { currentWorkspace } = useWorkspace()
+  const { isEnabled: isSoundEnabled, toggleSound, playSound } = useSoundContext()
 
   const loadAccounts = useCallback(async () => {
     if (!currentWorkspace) return
@@ -588,6 +607,91 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
     }
   }
 
+  // Templates functions
+  const loadTemplates = useCallback(async () => {
+    try {
+      const res = await apiFetch(`/templates`)
+      if (res.ok) {
+        const data = await res.json()
+        setTemplates(data)
+      }
+    } catch {
+      // Silently fail
+    } finally {
+      setTemplatesLoading(false)
+    }
+  }, [])
+
+  const createTemplate = async () => {
+    if (!newTemplate.title.trim() || !newTemplate.content.trim()) return
+    setSavingTemplate(true)
+    try {
+      const res = await apiFetch(`/templates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: newTemplate.title.trim(),
+          content: newTemplate.content.trim(),
+          shortcut: newTemplate.shortcut.trim() || null,
+        }),
+      })
+      if (res.ok) {
+        loadTemplates()
+        setShowAddTemplate(false)
+        setNewTemplate({ title: "", content: "", shortcut: "" })
+      }
+    } catch {
+      setError("Erro ao criar template")
+    } finally {
+      setSavingTemplate(false)
+    }
+  }
+
+  const updateTemplate = async (templateId: string) => {
+    if (!editTemplateTitle.trim() || !editTemplateContent.trim()) return
+    setSavingTemplate(true)
+    try {
+      const res = await apiFetch(`/templates/${templateId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: editTemplateTitle.trim(),
+          content: editTemplateContent.trim(),
+          shortcut: editTemplateShortcut.trim() || null,
+        }),
+      })
+      if (res.ok) {
+        loadTemplates()
+        setEditingTemplate(null)
+      }
+    } catch {
+      setError("Erro ao atualizar template")
+    } finally {
+      setSavingTemplate(false)
+    }
+  }
+
+  const deleteTemplate = async (templateId: string) => {
+    if (!confirm("Remover este template?")) return
+    try {
+      const res = await apiFetch(`/templates/${templateId}`, {
+        method: "DELETE",
+      })
+      if (res.ok) {
+        setTemplates(prev => prev.filter(t => t.id !== templateId))
+      }
+    } catch {
+      setError("Erro ao remover template")
+    }
+  }
+
+  const startEditTemplate = (template: Template) => {
+    setEditingTemplate(template.id)
+    setEditTemplateTitle(template.title)
+    setEditTemplateContent(template.content)
+    setEditTemplateShortcut(template.shortcut || "")
+  }
+
   useEffect(() => {
     if (currentWorkspace) {
       loadAccounts()
@@ -596,7 +700,8 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
     }
     loadPrompts()
     loadAiModels()
-  }, [currentWorkspace, loadAccounts, loadPrompts, loadOpenPhoneAccounts, loadEmailAccounts, loadAiModels])
+    loadTemplates()
+  }, [currentWorkspace, loadAccounts, loadPrompts, loadOpenPhoneAccounts, loadEmailAccounts, loadAiModels, loadTemplates])
 
   // Realtime para worker status (substitui polling de 30s)
   useEffect(() => {
@@ -653,6 +758,217 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
             {error}
           </div>
         )}
+
+        {/* Som Section */}
+        <section className="mb-8 rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="flex items-center justify-between p-4">
+            <div className="flex items-center gap-3">
+              <div className={`rounded-full p-2 ${
+                isSoundEnabled
+                  ? "bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400"
+                  : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800"
+              }`}>
+                {isSoundEnabled ? (
+                  <Volume2 className="h-5 w-5" />
+                ) : (
+                  <VolumeX className="h-5 w-5" />
+                )}
+              </div>
+              <div>
+                <h2 className="font-semibold">Sons de notificação</h2>
+                <p className="text-sm text-zinc-500">
+                  Tocar som ao enviar e receber mensagens
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              {/* Botão de teste */}
+              <button
+                onClick={() => playSound("receive")}
+                className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              >
+                Testar
+              </button>
+              {/* Toggle */}
+              <button
+                onClick={toggleSound}
+                className={`relative h-6 w-11 rounded-full transition-colors ${
+                  isSoundEnabled ? "bg-violet-500" : "bg-zinc-300 dark:bg-zinc-600"
+                }`}
+              >
+                <span
+                  className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                    isSoundEnabled ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* Templates Section */}
+        <section className="rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="flex items-center justify-between border-b border-zinc-200 p-4 dark:border-zinc-800">
+            <div>
+              <h2 className="font-semibold">Templates de Mensagem</h2>
+              <p className="text-sm text-zinc-500">
+                Respostas rápidas com placeholders: {"{nome}"}, {"{primeiro_nome}"}, {"{canal}"}
+              </p>
+            </div>
+            <button
+              onClick={() => setShowAddTemplate(true)}
+              className="flex items-center gap-2 rounded-lg bg-violet-500 px-4 py-2 text-sm font-medium text-white hover:bg-violet-600"
+            >
+              <Plus className="h-4 w-4" />
+              Adicionar
+            </button>
+          </div>
+
+          <div className="p-4">
+            {templatesLoading ? (
+              <div className="py-8 text-center text-zinc-500">Carregando...</div>
+            ) : templates.length === 0 ? (
+              <div className="py-8 text-center text-zinc-500">
+                Nenhum template criado. Crie templates para agilizar suas respostas!
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {templates.map(template => (
+                  <div
+                    key={template.id}
+                    className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700"
+                  >
+                    {editingTemplate === template.id ? (
+                      /* Modo edição */
+                      <div className="space-y-3">
+                        <input
+                          type="text"
+                          value={editTemplateTitle}
+                          onChange={(e) => setEditTemplateTitle(e.target.value)}
+                          placeholder="Título"
+                          className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800"
+                        />
+                        <textarea
+                          value={editTemplateContent}
+                          onChange={(e) => setEditTemplateContent(e.target.value)}
+                          placeholder="Conteúdo do template. Use {nome}, {primeiro_nome}, {canal} para placeholders."
+                          rows={3}
+                          className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800"
+                        />
+                        <input
+                          type="text"
+                          value={editTemplateShortcut}
+                          onChange={(e) => setEditTemplateShortcut(e.target.value)}
+                          placeholder="Atalho (ex: ola, preco, obrigado)"
+                          className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800"
+                        />
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => setEditingTemplate(null)}
+                            className="rounded-lg px-3 py-1.5 text-sm text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            onClick={() => updateTemplate(template.id)}
+                            disabled={savingTemplate}
+                            className="flex items-center gap-2 rounded-lg bg-violet-500 px-3 py-1.5 text-sm text-white hover:bg-violet-600 disabled:opacity-50"
+                          >
+                            {savingTemplate ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                            Salvar
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Modo visualização */
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium">{template.title}</p>
+                            {template.shortcut && (
+                              <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                                /{template.shortcut}
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400 whitespace-pre-wrap">
+                            {template.content}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => startEditTemplate(template)}
+                            className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => deleteTemplate(template.id)}
+                            className="rounded-lg p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Modal adicionar template */}
+            {showAddTemplate && (
+              <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50 p-4 dark:border-violet-800 dark:bg-violet-900/20">
+                <h3 className="mb-3 text-sm font-medium">Novo Template</h3>
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    value={newTemplate.title}
+                    onChange={(e) => setNewTemplate(prev => ({ ...prev, title: e.target.value }))}
+                    placeholder="Título (ex: Boas-vindas)"
+                    className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800"
+                  />
+                  <textarea
+                    value={newTemplate.content}
+                    onChange={(e) => setNewTemplate(prev => ({ ...prev, content: e.target.value }))}
+                    placeholder="Olá {primeiro_nome}! Obrigado por entrar em contato via {canal}. Como posso ajudar?"
+                    rows={3}
+                    className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800"
+                  />
+                  <input
+                    type="text"
+                    value={newTemplate.shortcut}
+                    onChange={(e) => setNewTemplate(prev => ({ ...prev, shortcut: e.target.value }))}
+                    placeholder="Atalho (opcional, ex: ola)"
+                    className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800"
+                  />
+                  <p className="text-xs text-zinc-500">
+                    Placeholders: {"{nome}"} = nome completo, {"{primeiro_nome}"} = primeiro nome, {"{canal}"} = Telegram/Email/SMS
+                  </p>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => {
+                        setShowAddTemplate(false)
+                        setNewTemplate({ title: "", content: "", shortcut: "" })
+                      }}
+                      className="rounded-lg px-3 py-1.5 text-sm text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={createTemplate}
+                      disabled={savingTemplate || !newTemplate.title.trim() || !newTemplate.content.trim()}
+                      className="flex items-center gap-2 rounded-lg bg-violet-500 px-3 py-1.5 text-sm text-white hover:bg-violet-600 disabled:opacity-50"
+                    >
+                      {savingTemplate ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                      Criar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
 
         {/* Telegram Section */}
         <section className="rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">

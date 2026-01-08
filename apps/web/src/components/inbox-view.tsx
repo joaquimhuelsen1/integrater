@@ -19,6 +19,7 @@ import { CRMPanel } from "@/components/crm/crm-panel"
 import { ArrowLeft, Search } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useWorkspace } from "@/contexts/workspace-context"
+import { useSoundContext } from "@/contexts/sound-context"
 
 // Infere mime_type pela extensão quando file.type está vazio
 function inferMimeType(file: File): string {
@@ -126,6 +127,7 @@ export function InboxView({ userEmail, workspaceId }: InboxViewProps) {
   const supabase = useMemo(() => createClient(), [])
   const router = useRouter()
   const { currentWorkspace } = useWorkspace()
+  const { playSound } = useSoundContext()
 
   // Refs para evitar re-subscriptions no realtime
   const selectedIdRef = useRef(selectedId)
@@ -927,6 +929,9 @@ I'll be waiting.`
 
     // Optimistic update: adiciona imediatamente na lista
     setMessages(prev => [...prev, optimisticMessage])
+    
+    // Toca som de envio
+    playSound("send")
 
     // Buscar dados necessários para criar a mensagem
     const { data: userData } = await supabase.auth.getUser()
@@ -1070,7 +1075,7 @@ I'll be waiting.`
 
     // Atualizar lista de conversas
     loadConversations(searchQuery)
-  }, [selectedId, selectedContactId, contactChannels, selectedSendChannel, conversations, supabase, loadConversations, loadMessages, loadContactMessages, uploadAttachment, searchQuery])
+  }, [selectedId, selectedContactId, contactChannels, selectedSendChannel, conversations, supabase, loadConversations, loadMessages, loadContactMessages, uploadAttachment, searchQuery, playSound])
 
   // Enviar typing notification para o Telegram
   const handleTyping = useCallback(async () => {
@@ -1124,12 +1129,16 @@ I'll be waiting.`
         // Já existe - apenas atualiza (pode ter vindo do optimistic update)
         return prev.map(m => m.id === msg.id ? { ...m, ...msg, sending_status: "sent" as const } : m)
       }
+      // Nova mensagem inbound - toca som de recebimento
+      if (msg.direction === "inbound") {
+        playSound("receive")
+      }
       // Nova mensagem - adiciona no final
       return [...prev, { ...msg, attachments: [] }]
     })
     // Atualiza lista de conversas (nova mensagem = conversa sobe no topo)
     loadConversations(searchQueryRef.current)
-  }, [loadConversations])
+  }, [loadConversations, playSound])
 
   const handleRealtimeUpdate = useCallback((msg: RealtimeMessage) => {
     console.log("[Realtime] UPDATE recebido:", msg.id)

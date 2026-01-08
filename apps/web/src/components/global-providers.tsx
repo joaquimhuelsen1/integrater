@@ -2,6 +2,7 @@
 
 import { ThemeProvider } from "@/contexts/theme-context"
 import { WorkspaceProvider } from "@/contexts/workspace-context"
+import { SoundProvider } from "@/contexts/sound-context"
 import { BugReportButton } from "@/components/bug-report-button"
 
 interface GlobalProvidersProps {
@@ -10,14 +11,16 @@ interface GlobalProvidersProps {
 
 /**
  * Providers globais da aplicacao (client-side)
- * Inclui: Theme, Workspace, BugReportButton
+ * Inclui: Theme, Workspace, Sound, BugReportButton
  */
 export function GlobalProviders({ children }: GlobalProvidersProps) {
   return (
     <ThemeProvider>
       <WorkspaceProvider>
-        {children}
-        <BugReportButton />
+        <SoundProvider>
+          {children}
+          <BugReportButton />
+        </SoundProvider>
       </WorkspaceProvider>
     </ThemeProvider>
   )
