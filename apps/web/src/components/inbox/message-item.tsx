@@ -80,6 +80,9 @@ export function MessageItem({
   const [audioCurrentTime, setAudioCurrentTime] = useState<Record<string, number>>({})
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 })
+  const [menuDirection, setMenuDirection] = useState<"down" | "up">("down")
+  const [showCelebration, setShowCelebration] = useState(false)
+  const [celebrationEmoji, setCelebrationEmoji] = useState("")
   const menuRef = useRef<HTMLDivElement>(null)
   const supabase = createClient()
 
@@ -155,8 +158,28 @@ export function MessageItem({
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
+    
+    // Calcula se o menu deve abrir para cima ou para baixo
+    const menuHeight = 280 // altura aproximada do menu
+    const windowHeight = window.innerHeight
+    const clickY = e.clientY
+    
+    // Se clicar muito perto do final, abre para cima
+    if (clickY + menuHeight > windowHeight - 20) {
+      setMenuDirection("up")
+    } else {
+      setMenuDirection("down")
+    }
+    
     setMenuPosition({ x: e.clientX, y: e.clientY })
     setShowContextMenu(true)
+  }
+
+  // Trigger efeito de celebração
+  const triggerCelebration = (emoji: string) => {
+    setCelebrationEmoji(emoji)
+    setShowCelebration(true)
+    setTimeout(() => setShowCelebration(false), 1500)
   }
 
   const openImage = (url: string) => {
@@ -348,7 +371,7 @@ export function MessageItem({
         className={`flex ${isOutbound ? "justify-end" : "justify-start"}`}
       >
         <div
-          className="relative max-w-[70%] cursor-pointer"
+          className={`relative max-w-[70%] cursor-pointer ${reactions.length > 0 ? "mb-4" : ""}`}
           onContextMenu={handleContextMenu}
         >
           {/* Indicador de mensagem fixada */}
@@ -604,34 +627,33 @@ export function MessageItem({
           )}
         </div>
 
-        {/* Reações existentes (clique para toggle, botão direito para menu completo) */}
+        {/* Reações existentes - Estilo Telegram (bolha roxa) */}
         {reactions.length > 0 && (
-          <div className="mt-1.5 flex flex-wrap items-center gap-1">
-            {reactions.map((r) => (
-              <button
-                key={r.emoji}
-                onClick={() => {
-                  if (r.userReacted) {
-                    onRemoveReaction?.(message.id, r.emoji)
-                  } else {
-                    onReact?.(message.id, r.emoji)
-                  }
-                }}
-                className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs transition-colors ${
-                  r.userReacted
-                    ? isOutbound
-                      ? "bg-white/30 text-white"
-                      : "bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300"
-                    : isOutbound
-                      ? "bg-white/10 text-white/80 hover:bg-white/20"
-                      : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
-                }`}
-                title={r.userReacted ? "Clique para remover" : "Clique para reagir"}
-              >
-                <span>{r.emoji}</span>
-                {r.count > 1 && <span>{r.count}</span>}
-              </button>
-            ))}
+          <div className="absolute -bottom-3 left-2 flex items-center">
+            <div className="flex items-center gap-0.5 rounded-full bg-violet-600 px-1.5 py-0.5 shadow-lg">
+              {reactions.map((r) => (
+                <button
+                  key={r.emoji}
+                  onClick={() => {
+                    if (r.userReacted) {
+                      onRemoveReaction?.(message.id, r.emoji)
+                    } else {
+                      onReact?.(message.id, r.emoji)
+                      triggerCelebration(r.emoji)
+                    }
+                  }}
+                  className="text-lg transition-transform hover:scale-110"
+                  title={r.userReacted ? "Clique para remover" : "Clique para reagir"}
+                >
+                  {r.emoji}
+                </button>
+              ))}
+              {reactions.reduce((sum, r) => sum + r.count, 0) > 1 && (
+                <span className="ml-0.5 text-xs font-medium text-white">
+                  {reactions.reduce((sum, r) => sum + r.count, 0)}
+                </span>
+              )}
+            </div>
           </div>
         )}
           </div>
@@ -639,16 +661,42 @@ export function MessageItem({
 
       </div>
 
+      {/* Efeito de celebração (corações/balões) */}
+      {showCelebration && (
+        <div className="pointer-events-none fixed inset-0 z-[100] overflow-hidden">
+          {Array.from({ length: 12 }).map((_, i) => (
+            <div
+              key={i}
+              className="absolute animate-float-up text-2xl"
+              style={{
+                left: `${menuPosition.x - 50 + Math.random() * 100}px`,
+                top: `${menuPosition.y}px`,
+                animationDelay: `${i * 0.1}s`,
+                animationDuration: `${1 + Math.random() * 0.5}s`,
+              }}
+            >
+              {["❤️", "💜", "💙", "💚", "💛", "🧡", "🎉", "✨", "🎊"][Math.floor(Math.random() * 9)]}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Menu de contexto (right-click) - Estilo Telegram */}
       {showContextMenu && (
         <div
           ref={menuRef}
-          className="fixed z-50 min-w-52 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-800"
-          style={{ left: menuPosition.x, top: menuPosition.y }}
+          className="fixed z-50 min-w-52 overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl"
+          style={{ 
+            left: menuPosition.x, 
+            ...(menuDirection === "up" 
+              ? { bottom: window.innerHeight - menuPosition.y } 
+              : { top: menuPosition.y }
+            )
+          }}
         >
-          {/* Barra de reações no topo */}
-          {onReact && (
-            <div className="flex items-center gap-1 border-b border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900">
+          {/* Barra de reações - aparece no topo ou embaixo dependendo da direção */}
+          {onReact && menuDirection === "down" && (
+            <div className="flex items-center justify-center gap-1 border-b border-zinc-700 bg-zinc-800 px-3 py-2.5">
               {REACTION_EMOJIS.map((emoji) => {
                 const hasReacted = reactions.some(r => r.emoji === emoji && r.userReacted)
                 return (
@@ -659,13 +707,14 @@ export function MessageItem({
                         onRemoveReaction?.(message.id, emoji)
                       } else {
                         onReact(message.id, emoji)
+                        triggerCelebration(emoji)
                       }
                       setShowContextMenu(false)
                     }}
-                    className={`rounded-full p-1.5 text-xl transition-all hover:scale-125 ${
+                    className={`rounded-full p-2 text-2xl transition-all hover:scale-125 ${
                       hasReacted 
-                        ? "bg-violet-100 dark:bg-violet-900/50" 
-                        : "hover:bg-zinc-200 dark:hover:bg-zinc-700"
+                        ? "bg-violet-600" 
+                        : "hover:bg-zinc-700"
                     }`}
                     title={hasReacted ? "Remover reação" : "Reagir"}
                   >
@@ -682,9 +731,9 @@ export function MessageItem({
             {canReply && onReply && (
               <button
                 onClick={() => { onReply(message); setShowContextMenu(false) }}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-zinc-100 hover:bg-zinc-800"
               >
-                <Reply className="h-4 w-4 text-zinc-500" />
+                <Reply className="h-4 w-4 text-zinc-400" />
                 <span>Responder</span>
               </button>
             )}
@@ -696,9 +745,9 @@ export function MessageItem({
                   navigator.clipboard.writeText(message.text || "")
                   setShowContextMenu(false)
                 }}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-zinc-100 hover:bg-zinc-800"
               >
-                <Copy className="h-4 w-4 text-zinc-500" />
+                <Copy className="h-4 w-4 text-zinc-400" />
                 <span>Copiar</span>
               </button>
             )}
@@ -707,17 +756,17 @@ export function MessageItem({
             {isPinned ? (
               <button
                 onClick={() => { onUnpin?.(message.id); setShowContextMenu(false) }}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-zinc-100 hover:bg-zinc-800"
               >
-                <Pin className="h-4 w-4 text-violet-500" />
+                <Pin className="h-4 w-4 text-violet-400" />
                 <span>Desafixar</span>
               </button>
             ) : (
               <button
                 onClick={() => { onPin?.(message.id); setShowContextMenu(false) }}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-zinc-100 hover:bg-zinc-800"
               >
-                <Pin className="h-4 w-4 text-zinc-500" />
+                <Pin className="h-4 w-4 text-zinc-400" />
                 <span>Fixar</span>
               </button>
             )}
@@ -726,9 +775,9 @@ export function MessageItem({
             {isOutbound && message.text && onEdit && (
               <button
                 onClick={() => { onEdit(message); setShowContextMenu(false) }}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-zinc-100 hover:bg-zinc-800"
               >
-                <Pencil className="h-4 w-4 text-zinc-500" />
+                <Pencil className="h-4 w-4 text-zinc-400" />
                 <span>Editar</span>
               </button>
             )}
@@ -737,13 +786,44 @@ export function MessageItem({
             {isOutbound && onDelete && (
               <button
                 onClick={() => { onDelete(message.id); setShowContextMenu(false) }}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-red-400 hover:bg-red-900/30"
               >
                 <Trash2 className="h-4 w-4" />
                 <span>Deletar</span>
               </button>
             )}
           </div>
+
+          {/* Barra de reações no final (quando menu abre para cima) */}
+          {onReact && menuDirection === "up" && (
+            <div className="flex items-center justify-center gap-1 border-t border-zinc-700 bg-zinc-800 px-3 py-2.5">
+              {REACTION_EMOJIS.map((emoji) => {
+                const hasReacted = reactions.some(r => r.emoji === emoji && r.userReacted)
+                return (
+                  <button
+                    key={emoji}
+                    onClick={() => {
+                      if (hasReacted) {
+                        onRemoveReaction?.(message.id, emoji)
+                      } else {
+                        onReact(message.id, emoji)
+                        triggerCelebration(emoji)
+                      }
+                      setShowContextMenu(false)
+                    }}
+                    className={`rounded-full p-2 text-2xl transition-all hover:scale-125 ${
+                      hasReacted 
+                        ? "bg-violet-600" 
+                        : "hover:bg-zinc-700"
+                    }`}
+                    title={hasReacted ? "Remover reação" : "Reagir"}
+                  >
+                    {emoji}
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
     </>

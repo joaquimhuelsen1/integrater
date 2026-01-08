@@ -181,3 +181,23 @@
   animation: slide-down 0.3s ease-out 0.1s forwards;
   animation-fill-mode: both;
 }
+
+/* Animação de celebração (corações subindo) */
+@keyframes float-up {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-80px) scale(1.2) rotate(10deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-150px) scale(0.8) rotate(-10deg);
+  }
+}
+
+.animate-float-up {
+  animation: float-up 1.5s ease-out forwards;
+}
