@@ -80,9 +80,7 @@ export function MessageItem({
   const [audioCurrentTime, setAudioCurrentTime] = useState<Record<string, number>>({})
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 })
-  const [showReactionPicker, setShowReactionPicker] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  const reactionPickerRef = useRef<HTMLDivElement>(null)
   const supabase = createClient()
 
   // Reply só disponível para Telegram
@@ -134,7 +132,6 @@ export function MessageItem({
         setExpandedImage(null)
         setZoomLevel(1)
         setShowContextMenu(false)
-        setShowReactionPicker(false)
       }
     }
     window.addEventListener("keydown", handleEsc)
@@ -147,15 +144,12 @@ export function MessageItem({
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setShowContextMenu(false)
       }
-      if (reactionPickerRef.current && !reactionPickerRef.current.contains(e.target as Node)) {
-        setShowReactionPicker(false)
-      }
     }
-    if (showContextMenu || showReactionPicker) {
+    if (showContextMenu) {
       document.addEventListener("mousedown", handleClickOutside)
     }
     return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [showContextMenu, showReactionPicker])
+  }, [showContextMenu])
 
   // Handler do menu de contexto (right-click)
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -610,10 +604,9 @@ export function MessageItem({
           )}
         </div>
 
-        {/* Reações */}
-        {(reactions.length > 0 || onReact) && (
-          <div className="relative mt-1.5 flex flex-wrap items-center gap-1">
-            {/* Reações existentes */}
+        {/* Reações existentes (clique para toggle, botão direito para menu completo) */}
+        {reactions.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-1">
             {reactions.map((r) => (
               <button
                 key={r.emoji}
@@ -639,50 +632,6 @@ export function MessageItem({
                 {r.count > 1 && <span>{r.count}</span>}
               </button>
             ))}
-
-            {/* Botão para adicionar reação */}
-            {onReact && (
-              <div className="relative">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    console.log("[Reactions] Botão + clicado")
-                    setShowReactionPicker(!showReactionPicker)
-                  }}
-                  className={`flex h-7 w-7 items-center justify-center rounded-full text-base font-bold transition-all ${
-                    isOutbound
-                      ? "bg-white/20 text-white hover:bg-white/40 hover:scale-110"
-                      : "bg-zinc-200 text-zinc-600 hover:bg-zinc-300 hover:scale-110 dark:bg-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-500"
-                  }`}
-                  title="Adicionar reação"
-                >
-                  +
-                </button>
-
-                {/* Picker de reações */}
-                {showReactionPicker && (
-                  <div
-                    ref={reactionPickerRef}
-                    className={`absolute z-50 flex gap-1 rounded-full border bg-white px-2 py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800 ${
-                      isOutbound ? "right-0" : "left-0"
-                    } bottom-full mb-1`}
-                  >
-                    {REACTION_EMOJIS.map((emoji) => (
-                      <button
-                        key={emoji}
-                        onClick={() => {
-                          onReact(message.id, emoji)
-                          setShowReactionPicker(false)
-                        }}
-                        className="rounded-full p-1 text-lg transition-transform hover:scale-125 hover:bg-zinc-100 dark:hover:bg-zinc-700"
-                      >
-                        {emoji}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         )}
           </div>
@@ -690,78 +639,111 @@ export function MessageItem({
 
       </div>
 
-      {/* Menu de contexto (right-click) */}
+      {/* Menu de contexto (right-click) - Estilo Telegram */}
       {showContextMenu && (
         <div
           ref={menuRef}
-          className="fixed z-50 min-w-44 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+          className="fixed z-50 min-w-52 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-800"
           style={{ left: menuPosition.x, top: menuPosition.y }}
         >
-          {/* Copiar texto */}
-          {message.text && (
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(message.text || "")
-                setShowContextMenu(false)
-              }}
-              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
-            >
-              <Copy className="h-4 w-4 text-zinc-500" />
-              <span>Copiar texto</span>
-            </button>
+          {/* Barra de reações no topo */}
+          {onReact && (
+            <div className="flex items-center gap-1 border-b border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900">
+              {REACTION_EMOJIS.map((emoji) => {
+                const hasReacted = reactions.some(r => r.emoji === emoji && r.userReacted)
+                return (
+                  <button
+                    key={emoji}
+                    onClick={() => {
+                      if (hasReacted) {
+                        onRemoveReaction?.(message.id, emoji)
+                      } else {
+                        onReact(message.id, emoji)
+                      }
+                      setShowContextMenu(false)
+                    }}
+                    className={`rounded-full p-1.5 text-xl transition-all hover:scale-125 ${
+                      hasReacted 
+                        ? "bg-violet-100 dark:bg-violet-900/50" 
+                        : "hover:bg-zinc-200 dark:hover:bg-zinc-700"
+                    }`}
+                    title={hasReacted ? "Remover reação" : "Reagir"}
+                  >
+                    {emoji}
+                  </button>
+                )
+              })}
+            </div>
           )}
 
-          {/* Responder (só Telegram) */}
-          {canReply && onReply && (
-            <button
-              onClick={() => { onReply(message); setShowContextMenu(false) }}
-              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
-            >
-              <Reply className="h-4 w-4 text-zinc-500" />
-              <span>Responder</span>
-            </button>
-          )}
+          {/* Opções do menu */}
+          <div className="py-1">
+            {/* Responder (só Telegram) */}
+            {canReply && onReply && (
+              <button
+                onClick={() => { onReply(message); setShowContextMenu(false) }}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+              >
+                <Reply className="h-4 w-4 text-zinc-500" />
+                <span>Responder</span>
+              </button>
+            )}
 
-          {/* Fixar/Desafixar (todos os canais) */}
-          {isPinned ? (
-            <button
-              onClick={() => { onUnpin?.(message.id); setShowContextMenu(false) }}
-              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
-            >
-              <Pin className="h-4 w-4 text-violet-500" />
-              <span>Desafixar</span>
-            </button>
-          ) : (
-            <button
-              onClick={() => { onPin?.(message.id); setShowContextMenu(false) }}
-              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
-            >
-              <Pin className="h-4 w-4 text-zinc-500" />
-              <span>Fixar</span>
-            </button>
-          )}
+            {/* Copiar texto */}
+            {message.text && (
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(message.text || "")
+                  setShowContextMenu(false)
+                }}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+              >
+                <Copy className="h-4 w-4 text-zinc-500" />
+                <span>Copiar</span>
+              </button>
+            )}
 
-          {/* Editar (só mensagens outbound com texto) */}
-          {isOutbound && message.text && onEdit && (
-            <button
-              onClick={() => { onEdit(message); setShowContextMenu(false) }}
-              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
-            >
-              <Pencil className="h-4 w-4 text-zinc-500" />
-              <span>Editar</span>
-            </button>
-          )}
+            {/* Fixar/Desafixar */}
+            {isPinned ? (
+              <button
+                onClick={() => { onUnpin?.(message.id); setShowContextMenu(false) }}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+              >
+                <Pin className="h-4 w-4 text-violet-500" />
+                <span>Desafixar</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => { onPin?.(message.id); setShowContextMenu(false) }}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+              >
+                <Pin className="h-4 w-4 text-zinc-500" />
+                <span>Fixar</span>
+              </button>
+            )}
 
-          {/* Deletar (só mensagens outbound) */}
-          {isOutbound && onDelete && (
-            <button
-              onClick={() => { onDelete(message.id); setShowContextMenu(false) }}
-              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
-            >
-              <Trash2 className="h-4 w-4" />
-              <span>Deletar</span>
-            </button>
-          )}
+            {/* Editar (só mensagens outbound com texto) */}
+            {isOutbound && message.text && onEdit && (
+              <button
+                onClick={() => { onEdit(message); setShowContextMenu(false) }}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
+              >
+                <Pencil className="h-4 w-4 text-zinc-500" />
+                <span>Editar</span>
+              </button>
+            )}
+
+            {/* Deletar (só mensagens outbound) */}
+            {isOutbound && onDelete && (
+              <button
+                onClick={() => { onDelete(message.id); setShowContextMenu(false) }}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span>Deletar</span>
+              </button>
+            )}
+          </div>
         </div>
       )}
     </>
