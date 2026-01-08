@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from supabase import Client
 from uuid import UUID, uuid4
 from datetime import datetime
@@ -351,7 +351,7 @@ async def get_message(
 @router.put("/{message_id}")
 async def edit_message(
     message_id: UUID,
-    text: str,
+    text: str = Query(..., description="Novo texto da mensagem"),
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
