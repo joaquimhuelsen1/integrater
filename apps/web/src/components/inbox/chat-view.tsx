@@ -403,6 +403,7 @@ const [isSuggesting, setIsSuggesting] = useState(false)
   useEffect(() => {
     const supabase = createClient()
     supabase.auth.getUser().then(({ data }) => {
+      console.log("[Reactions] Got user:", data.user?.id)
       if (data.user) {
         setCurrentUserId(data.user.id)
       }
@@ -541,7 +542,11 @@ const handleUnpin = useCallback(async (messageId: string) => {
 
   // Handlers para reações
   const handleReact = useCallback(async (messageId: string, emoji: string) => {
-    if (!currentUserId) return
+    console.log("[Reactions] handleReact called:", { messageId, emoji, currentUserId })
+    if (!currentUserId) {
+      console.warn("[Reactions] No currentUserId, cannot react")
+      return
+    }
 
     const supabase = createClient()
     try {

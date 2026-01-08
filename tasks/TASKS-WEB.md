@@ -4,7 +4,47 @@ Tarefas relacionadas ao frontend Next.js (apps/web).
 
 ## Pendentes
 
-<!-- Adicionar tarefas pendentes aqui -->
+#### [WEB-017] Som ao enviar/receber mensagens
+**Contexto:** UX estilo Telegram com feedback sonoro
+**Milestone:** nenhum
+**Próximos passos:**
+1. Baixar sons do Telegram (enviar + receber)
+2. Criar hook useSound
+3. Adicionar toggle nas configurações
+4. Integrar no envio e realtime de mensagens
+
+#### [WEB-018] Menu contexto + Copiar conversa
+**Contexto:** Click direito na mensagem para copiar, botão para copiar conversa inteira
+**Milestone:** nenhum
+**Próximos passos:**
+1. Menu contexto na mensagem (copiar texto)
+2. Botão "Copiar conversa" no menu do header
+3. Formato: "Eu: msg (data hora)" / "Aluno: msg (data hora)"
+4. Idioma original sem tradução
+
+#### [WEB-019] Reações em mensagens (emoji)
+**Contexto:** Reagir com emoji igual Telegram (👍❤️🔥😂😮😢👎)
+**Milestone:** nenhum
+**Próximos passos:**
+1. Criar tabela message_reactions no Supabase
+2. UI picker com 7 emojis ao hover/click
+3. 1 reação por pessoa por mensagem
+4. Exibir reações abaixo da mensagem
+
+#### [WEB-020] Indicador "digitando" roxo com animação
+**Contexto:** Melhorar visual do indicador de digitação
+**Milestone:** nenhum
+**Próximos passos:**
+1. Trocar cor para roxo (#8B5CF6)
+2. Animação 3 pontinhos pulsando
+
+#### [WEB-021] Templates editáveis com placeholders
+**Contexto:** UI para criar/editar templates com variáveis
+**Milestone:** nenhum
+**Próximos passos:**
+1. UI CRUD de templates (criar, editar, deletar)
+2. Placeholders: {nome}, {primeiro_nome}, {canal}
+3. Lista simples sem categorias
 
 ## Em Andamento
 

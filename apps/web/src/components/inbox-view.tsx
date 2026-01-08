@@ -1121,17 +1121,20 @@ I'll be waiting.`
 
   // Handlers do Realtime
   const handleRealtimeInsert = useCallback((msg: RealtimeMessage) => {
-    console.log("[Realtime] INSERT recebido:", msg.id)
+    console.log("[Realtime] INSERT recebido:", msg.id, "direction:", msg.direction)
+    
+    // Toca som ANTES do setMessages para garantir que execute
+    if (msg.direction === "inbound") {
+      console.log("[Realtime] Tocando som de recebimento")
+      playSound("receive")
+    }
+    
     setMessages(prev => {
       // Verifica se já existe (pelo ID ou se é uma msg temporária com mesmo texto/timestamp)
       const exists = prev.some(m => m.id === msg.id)
       if (exists) {
         // Já existe - apenas atualiza (pode ter vindo do optimistic update)
         return prev.map(m => m.id === msg.id ? { ...m, ...msg, sending_status: "sent" as const } : m)
-      }
-      // Nova mensagem inbound - toca som de recebimento
-      if (msg.direction === "inbound") {
-        playSound("receive")
       }
       // Nova mensagem - adiciona no final
       return [...prev, { ...msg, attachments: [] }]
