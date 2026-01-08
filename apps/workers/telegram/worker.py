@@ -607,6 +607,17 @@ class TelegramWorker:
             sender_data["username"] = entity.username
             sender_data["access_hash"] = entity.access_hash
             
+            # Captura cor do perfil (para avatar)
+            # PeerColor.color é o índice (0-6) que mapeia para as cores do Telegram
+            profile_color = getattr(entity, 'profile_color', None)
+            if profile_color and hasattr(profile_color, 'color') and profile_color.color is not None:
+                sender_data["color_index"] = profile_color.color
+                print(f"[SENDER] User {user_id} tem color_index customizado: {profile_color.color}")
+            else:
+                # Fallback: usa user_id % 7 (algoritmo padrão do Telegram)
+                sender_data["color_index"] = int(entity.id % 7)
+                print(f"[SENDER] User {user_id} usando color_index padrão: {sender_data['color_index']}")
+            
             # Busca foto de perfil
             photo_url = await self._download_profile_photo(client, entity, user_id)
             if photo_url:

@@ -183,9 +183,17 @@ export function ConversationItem({
       .slice(0, 2)
   }
   const getAvatarColor = () => {
-    // Para Telegram, usa cores oficiais baseadas no user_id
-    if (channel === "telegram" && conversation.primary_identity?.metadata?.telegram_user_id) {
-      return getTelegramAvatarColor(conversation.primary_identity.metadata.telegram_user_id)
+    // Para Telegram, usa cores oficiais
+    if (channel === "telegram") {
+      // Prioridade 1: color_index do metadata (cor customizada capturada do Telegram)
+      const colorIndex = conversation.primary_identity?.metadata?.color_index
+      if (colorIndex !== undefined && colorIndex !== null) {
+        return telegramAvatarColors[colorIndex] ?? telegramAvatarColors[0]
+      }
+      // Prioridade 2: fallback usando telegram_user_id % 7
+      if (conversation.primary_identity?.value) {
+        return getTelegramAvatarColor(conversation.primary_identity.value)
+      }
     }
     // Fallback para outros canais
     const index = conversation.id.charCodeAt(0) % defaultAvatarColors.length

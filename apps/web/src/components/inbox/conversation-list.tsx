@@ -31,6 +31,7 @@ export interface Conversation {
       title?: string
       avatar_url?: string
       telegram_user_id?: string
+      color_index?: number
     } | null
   } | null
   conversation_tags?: { tag: Tag }[]
