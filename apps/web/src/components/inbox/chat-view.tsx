@@ -229,6 +229,18 @@ const [isSuggesting, setIsSuggesting] = useState(false)
   const [editText, setEditText] = useState("")
   const [isDeleting, setIsDeleting] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Posiciona cursor no final do texto quando abre o modal de edição
+  useEffect(() => {
+    if (editingMessage && editTextareaRef.current) {
+      const textarea = editTextareaRef.current
+      textarea.focus()
+      // Posiciona cursor no final do texto
+      const length = textarea.value.length
+      textarea.setSelectionRange(length, length)
+    }
+  }, [editingMessage])
 
   // Fecha menu ao clicar fora
   useEffect(() => {
@@ -842,11 +854,11 @@ const handleUnpin = useCallback(async (messageId: string) => {
               <h3 className="font-medium text-zinc-900 dark:text-zinc-100">Editar mensagem</h3>
             </div>
             <textarea
+              ref={editTextareaRef}
               value={editText}
               onChange={(e) => setEditText(e.target.value)}
               className="mb-3 w-full resize-none rounded-lg border border-zinc-200 bg-white p-3 text-sm text-zinc-900 focus:border-violet-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
               rows={4}
-              autoFocus
             />
             <div className="flex justify-end gap-2">
               <button

@@ -563,11 +563,25 @@ curl -X PATCH -H "X-N8N-API-KEY: <API_KEY>" -H "Content-Type: application/json" 
 | `EQx2y1v8lqg30dLN` | Integrater - Telegram/Inbound | Recebe mensagens do Telegram |
 | `kKcqwx9vbAEa9L1l` | Integrater - Telegram/Outbond | Captura mensagens enviadas pelo usuário |
 | `IqbxxdHZp0dYxKj1` | Integrater - Telegram/Send | Envia mensagens via Telegram |
+| `vJjxu44NNTg9bHeA` | Integrater - Telegram/Edit | Edita mensagens no Telegram |
+| `rIDEswEHqWP4sycQ` | Integrater - Telegram/Delete | Deleta mensagens no Telegram |
 | `jRzDAgdUCncJ5PUj` | Integrater - Telegram/Sync | Sincroniza histórico de conversas |
 | `YZGHeromO7Pkr4a7` | Integrater - Email/Inbound | Recebe emails |
 | `VzWI2wvVFLb1rYyU` | Integrater - Email/Send | Envia emails |
 | `gFmRfEfAcslRQ1va` | Integrater - Sms/Inbound | Recebe SMS (OpenPhone) |
 | `KIiU67DKVQOfpmFk` | Integrater - Sms/Outbound | Envia SMS (OpenPhone) |
+
+### ⚠️ Limitação da API/MCP do n8n
+
+**NÃO É POSSÍVEL criar workflows com webhooks funcionais via API/MCP do n8n.**
+
+Ao criar workflow via API, o `webhookId` não é gerado automaticamente, fazendo com que o webhook não seja registrado e retorne 404.
+
+**Solução:** Sempre criar workflows manualmente via UI do n8n ou importar JSON pela interface.
+
+Templates JSON disponíveis em:
+- `docs/n8n-workflow-telegram-edit.json`
+- `docs/n8n-workflow-telegram-delete.json`
 
 ### Webhooks (URLs que recebem eventos)
 
@@ -576,6 +590,8 @@ curl -X PATCH -H "X-N8N-API-KEY: <API_KEY>" -H "Content-Type: application/json" 
 https://n8nwebhook.thereconquestmap.com/webhook/telegram/inbound
 https://n8nwebhook.thereconquestmap.com/webhook/telegram/outbound
 https://n8nwebhook.thereconquestmap.com/webhook/telegram/send
+https://n8nwebhook.thereconquestmap.com/webhook/telegram/edit
+https://n8nwebhook.thereconquestmap.com/webhook/telegram/delete
 https://n8nwebhook.thereconquestmap.com/webhook/telegram/sync
 
 # Email

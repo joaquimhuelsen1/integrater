@@ -1,0 +1,248 @@
+{
+  "name": "Integrater - Telegram/Delete",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telegram/delete",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook Delete",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [80, 64],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "XhGTaNXCZbwq8Pbi",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT m.id, m.external_message_id, m.conversation_id, c.workspace_id, c.primary_identity_id, ci.value as telegram_user_id\nFROM messages m\nJOIN conversations c ON c.id = m.conversation_id\nJOIN contact_identities ci ON ci.id = c.primary_identity_id\nWHERE m.id = '{{ $json.body.message_id }}'\nLIMIT 1;",
+        "options": {}
+      },
+      "name": "Get Message",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [336, 64],
+      "credentials": {
+        "postgres": {
+          "id": "ScAgDQm6RUu4SFJ9",
+          "name": "Integrater"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ia.id as account_id\nFROM integration_accounts ia\nWHERE ia.workspace_id = '{{ $('Get Message').item.json.workspace_id }}'\n  AND ia.type = 'telegram_user'\n  AND ia.is_active = true\nLIMIT 1;",
+        "options": {}
+      },
+      "name": "Get Integration Account",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [576, 64],
+      "credentials": {
+        "postgres": {
+          "id": "ScAgDQm6RUu4SFJ9",
+          "name": "Integrater"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.thereconquestmap.com/worker/delete",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "account_id",
+              "value": "={{ $('Get Integration Account').item.json.account_id }}"
+            },
+            {
+              "name": "telegram_user_id",
+              "value": "={{ parseInt($('Get Message').item.json.telegram_user_id) }}"
+            },
+            {
+              "name": "telegram_msg_id",
+              "value": "={{ parseInt($('Get Message').item.json.external_message_id) }}"
+            },
+            {
+              "name": "revoke",
+              "value": "={{ $('Webhook Delete').item.json.body.for_everyone === true }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "name": "Call Worker /delete",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [816, 64],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "XhGTaNXCZbwq8Pbi",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.success }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Delete Success?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1056, 64]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE messages SET\n  deleted_at = NOW(),\n  updated_at = NOW()\nWHERE id = '{{ $('Webhook Delete').item.json.body.message_id }}'\nRETURNING id, deleted_at;",
+        "options": {}
+      },
+      "name": "Mark Deleted",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1312, -64],
+      "credentials": {
+        "postgres": {
+          "id": "ScAgDQm6RUu4SFJ9",
+          "name": "Integrater"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'ok', message_id: $('Webhook Delete').item.json.body.message_id }) }}",
+        "options": {}
+      },
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1536, -64]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'error', error: $('Call Worker /delete').item.json.error || 'Falha ao deletar' }) }}",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "name": "Respond Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1312, 160]
+    }
+  ],
+  "connections": {
+    "Webhook Delete": {
+      "main": [
+        [
+          {
+            "node": "Get Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Message": {
+      "main": [
+        [
+          {
+            "node": "Get Integration Account",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Integration Account": {
+      "main": [
+        [
+          {
+            "node": "Call Worker /delete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Worker /delete": {
+      "main": [
+        [
+          {
+            "node": "Delete Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Success?": {
+      "main": [
+        [
+          {
+            "node": "Mark Deleted",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Deleted": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
