@@ -717,27 +717,38 @@ I'll be waiting.`
     const result = await response.json()
     const jobId = result.job_id
 
-    // Aguarda job completar (polling a cada 2s, max 60s)
+    // OTIMIZAÇÃO: Usa Realtime para aguardar job, não polling!
     if (jobId) {
-      for (let i = 0; i < 30; i++) {
-        await new Promise(r => setTimeout(r, 2000))
+      await new Promise<void>((resolve) => {
+        const channel = supabase
+          .channel(`sync-job-${jobId}`)
+          .on(
+            "postgres_changes",
+            {
+              event: "UPDATE",
+              schema: "public",
+              table: "sync_history_jobs",
+              filter: `id=eq.${jobId}`,
+            },
+            (payload) => {
+              const job = payload.new as { status: string }
+              if (job.status === "completed" || job.status === "failed") {
+                supabase.removeChannel(channel)
+                resolve()
+              }
+            }
+          )
+          .subscribe()
 
-        const { data: job } = await supabase
-          .from("sync_history_jobs")
-          .select("status")
-          .eq("id", jobId)
-          .single()
-
-        if (job?.status === "completed" || job?.status === "failed") {
-          break
-        }
-
-        // Recarrega mensagens periodicamente durante sync
-        loadMessages(conversationId)
-      }
+        // Timeout de segurança (60s max)
+        setTimeout(() => {
+          supabase.removeChannel(channel)
+          resolve()
+        }, 60000)
+      })
     }
 
-// Recarrega mensagens após sync
+    // Recarrega mensagens após sync (1x apenas)
     loadMessages(conversationId)
     loadConversations(searchQuery)
   }, [supabase, loadMessages, loadConversations, searchQuery])
@@ -1168,6 +1179,9 @@ I'll be waiting.`
   })
 
   // Realtime para conversas (substitui polling de 30s)
+  // OTIMIZAÇÃO: Usa ref para evitar re-subscribe quando loadConversations/searchQuery mudam
+  // Também adiciona debounce de 1s para evitar múltiplas queries em rajada
+  const realtimeDebounceRef = useRef<NodeJS.Timeout | null>(null)
   useEffect(() => {
     if (!currentWorkspace?.id) return
 
@@ -1182,25 +1196,45 @@ I'll be waiting.`
           filter: `workspace_id=eq.${currentWorkspace.id}`,
         },
         () => {
-          // Recarrega lista quando qualquer conversa muda
-          loadConversations(searchQuery)
+          // Debounce: evita múltiplas queries em rajada (ex: várias msgs chegando)
+          if (realtimeDebounceRef.current) {
+            clearTimeout(realtimeDebounceRef.current)
+          }
+          realtimeDebounceRef.current = setTimeout(() => {
+            loadConversationsRef.current(searchQueryRef.current)
+          }, 1000) // 1s debounce
         }
       )
       .subscribe()
 
     return () => {
+      if (realtimeDebounceRef.current) {
+        clearTimeout(realtimeDebounceRef.current)
+      }
       supabase.removeChannel(channel)
     }
-  }, [currentWorkspace?.id, searchQuery, loadConversations, supabase])
+  }, [currentWorkspace?.id, supabase]) // Removido searchQuery e loadConversations das deps!
 
   // Realtime para read status (substitui polling de 3s)
+  // OTIMIZAÇÃO: Usa ref para conversations, busca inicial apenas 1x
+  // Realtime usa payload direto em vez de refetch completo
+  const conversationsRef = useRef(conversations)
+  useEffect(() => { conversationsRef.current = conversations }, [conversations])
+  
+  // Ref para armazenar mapeamento message_id -> conversation_id
+  const msgToConvRef = useRef<Record<string, string>>({})
+  
   useEffect(() => {
-    if (!currentWorkspace?.id || conversations.length === 0) return
+    if (!currentWorkspace?.id) return
 
-    const fetchReadStatus = async () => {
+    // Busca inicial única (apenas 1x no mount)
+    const fetchReadStatusInitial = async () => {
+      const convs = conversationsRef.current
+      if (convs.length === 0) return
+      
       try {
         const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-        const convIds = conversations
+        const convIds = convs
           .filter(c => c.last_message_at && c.last_message_at > thirtyDaysAgo)
           .map(c => c.id)
 
@@ -1219,6 +1253,8 @@ I'll be waiting.`
         for (const msg of lastMessages) {
           if (!lastMsgByConv[msg.conversation_id]) {
             lastMsgByConv[msg.conversation_id] = { id: msg.id, direction: msg.direction }
+            // Salva mapeamento para uso no realtime
+            msgToConvRef.current[msg.id] = msg.conversation_id
           }
         }
 
@@ -1258,10 +1294,10 @@ I'll be waiting.`
       }
     }
 
-    // Busca inicial única
-    fetchReadStatus()
+    // Busca inicial com pequeno delay para aguardar conversations carregar
+    const initTimer = setTimeout(fetchReadStatusInitial, 500)
 
-    // Realtime: escuta novos eventos de leitura
+    // Realtime: usa payload direto, sem refetch!
     const channel = supabase
       .channel(`read-status-${currentWorkspace.id}`)
       .on(
@@ -1272,26 +1308,36 @@ I'll be waiting.`
           table: "message_events",
         },
         (payload) => {
-          const newEvent = payload.new as { type: string }
+          const newEvent = payload.new as { type: string; message_id: string }
           if (newEvent.type === "read") {
-            fetchReadStatus()
+            // OTIMIZAÇÃO: Usa payload direto, não refetch!
+            const convId = msgToConvRef.current[newEvent.message_id]
+            if (convId) {
+              setReadConversationIds(prev => new Set([...prev, convId]))
+            }
           }
         }
       )
       .subscribe()
 
     return () => {
+      clearTimeout(initTimer)
       supabase.removeChannel(channel)
     }
-  }, [currentWorkspace?.id, conversations, supabase])
+  }, [currentWorkspace?.id, supabase]) // Removido conversations das deps!
 
   // Realtime para presence status (online/offline) - substitui polling de 3s
+  // OTIMIZAÇÃO: Usa payload direto do Realtime, não refetch!
   useEffect(() => {
-    if (!currentWorkspace?.id || conversations.length === 0) return
+    if (!currentWorkspace?.id) return
 
-    const fetchPresenceStatus = async () => {
+    // Busca inicial única (apenas 1x no mount)
+    const fetchPresenceStatusInitial = async () => {
+      const convs = conversationsRef.current
+      if (convs.length === 0) return
+      
       try {
-        const identityIds = conversations
+        const identityIds = convs
           .map(c => c.primary_identity_id)
           .filter((id): id is string => !!id)
 
@@ -1331,10 +1377,10 @@ I'll be waiting.`
       }
     }
 
-    // Busca inicial única
-    fetchPresenceStatus()
+    // Busca inicial com delay
+    const initTimer = setTimeout(fetchPresenceStatusInitial, 600)
 
-    // Realtime: escuta mudanças de presence
+    // Realtime: usa payload direto, sem refetch!
     const channel = supabase
       .channel(`presence-list-${currentWorkspace.id}`)
       .on(
@@ -1344,16 +1390,63 @@ I'll be waiting.`
           schema: "public",
           table: "presence_status",
         },
-        () => {
-          fetchPresenceStatus()
+        (payload) => {
+          // OTIMIZAÇÃO: Usa payload direto!
+          const data = payload.new as { contact_identity_id: string; is_online?: boolean; is_typing?: boolean; typing_expires_at?: string } | null
+          const oldData = payload.old as { contact_identity_id: string } | null
+          
+          if (payload.eventType === "DELETE" && oldData) {
+            // Removido - considera offline
+            setOnlineIdentityIds(prev => {
+              const next = new Set(prev)
+              next.delete(oldData.contact_identity_id)
+              return next
+            })
+            setTypingIdentityIds(prev => {
+              const next = new Set(prev)
+              next.delete(oldData.contact_identity_id)
+              return next
+            })
+          } else if (data) {
+            // INSERT ou UPDATE - atualiza diretamente
+            const identityId = data.contact_identity_id
+            
+            // Online status
+            setOnlineIdentityIds(prev => {
+              const next = new Set(prev)
+              if (data.is_online) {
+                next.add(identityId)
+              } else {
+                next.delete(identityId)
+              }
+              return next
+            })
+            
+            // Typing status
+            setTypingIdentityIds(prev => {
+              const next = new Set(prev)
+              const now = new Date()
+              const typingExpired = data.typing_expires_at 
+                ? new Date(data.typing_expires_at) < now 
+                : true
+              
+              if (data.is_typing && !typingExpired) {
+                next.add(identityId)
+              } else {
+                next.delete(identityId)
+              }
+              return next
+            })
+          }
         }
       )
       .subscribe()
 
     return () => {
+      clearTimeout(initTimer)
       supabase.removeChannel(channel)
     }
-  }, [currentWorkspace?.id, conversations, supabase])
+  }, [currentWorkspace?.id, supabase]) // Removido conversations das deps!
 
   // Refs para callbacks do realtime (evita re-subscriptions)
   const loadConversationsRef = useRef(loadConversations)

@@ -44,7 +44,20 @@ const statusColors = {
   resolved: "bg-zinc-400",
 }
 
-const avatarColors = [
+// Cores exatas do Telegram (7 cores oficiais)
+// Baseado no algoritmo: user_id % 7
+const telegramAvatarColors = [
+  "bg-[#E17076]", // Vermelho (red)
+  "bg-[#FAA74A]", // Laranja (orange) 
+  "bg-[#A695E7]", // Roxo (violet)
+  "bg-[#7BC862]", // Verde (green)
+  "bg-[#6EC9CB]", // Ciano (cyan)
+  "bg-[#65AADD]", // Azul (blue)
+  "bg-[#EE7AAE]", // Rosa (pink)
+]
+
+// Fallback para outros canais
+const defaultAvatarColors = [
   "bg-blue-500",
   "bg-green-500",
   "bg-purple-500",
@@ -54,6 +67,25 @@ const avatarColors = [
   "bg-indigo-500",
   "bg-rose-500",
 ]
+
+/**
+ * Calcula a cor do avatar baseado no telegram_user_id
+ * Usa o mesmo algoritmo do Telegram: user_id % 7
+ */
+function getTelegramAvatarColor(telegramUserId: string | number | undefined): string {
+  const defaultColor = defaultAvatarColors[0] ?? "bg-blue-500"
+  
+  if (!telegramUserId) return defaultColor
+  
+  const userId = typeof telegramUserId === "string" 
+    ? parseInt(telegramUserId, 10) 
+    : telegramUserId
+  
+  if (isNaN(userId)) return defaultColor
+  
+  const colorIndex = Math.abs(userId) % 7
+  return telegramAvatarColors[colorIndex] ?? defaultColor
+}
 
 export function ConversationItem({
   conversation,
@@ -150,8 +182,8 @@ export function ConversationItem({
       .slice(0, 2)
   }
   const getAvatarColor = () => {
-    const index = conversation.id.charCodeAt(0) % avatarColors.length
-    return avatarColors[index]
+    const index = conversation.id.charCodeAt(0) % defaultAvatarColors.length
+    return defaultAvatarColors[index] ?? "bg-blue-500"
   }
 
   return (

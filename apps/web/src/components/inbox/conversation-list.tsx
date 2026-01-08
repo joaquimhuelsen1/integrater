@@ -30,6 +30,7 @@ export interface Conversation {
       username?: string
       title?: string
       avatar_url?: string
+      telegram_user_id?: string
     } | null
   } | null
   conversation_tags?: { tag: Tag }[]

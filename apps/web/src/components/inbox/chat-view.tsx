@@ -269,21 +269,30 @@ const [isSuggesting, setIsSuggesting] = useState(false)
 
 
   // Realtime para eventos de leitura (sem polling)
+  // OTIMIZAÇÃO: Usa ref para messages, subscription só muda com conversationId
+  const messagesRef = useRef(messages)
+  useEffect(() => { messagesRef.current = messages }, [messages])
+  
   useEffect(() => {
-    const outboundMsgIds = messages
-      .filter(m => m.direction === "outbound")
-      .map(m => m.id)
-      .filter(id => !id.startsWith("temp-"))
-
-    if (outboundMsgIds.length === 0) {
+    if (!conversationId) {
       setReadMessageIds(new Set())
       return
     }
 
     const supabase = createClient()
 
-    // Busca inicial única
+    // Busca inicial única (com delay para aguardar messages)
     const fetchReadEvents = async () => {
+      const currentMessages = messagesRef.current
+      const outboundMsgIds = currentMessages
+        .filter(m => m.direction === "outbound")
+        .map(m => m.id)
+        .filter(id => !id.startsWith("temp-"))
+
+      if (outboundMsgIds.length === 0) {
+        return
+      }
+
       try {
         const { data } = await supabase
           .from("message_events")
@@ -299,11 +308,12 @@ const [isSuggesting, setIsSuggesting] = useState(false)
       }
     }
 
-    fetchReadEvents()
+    // Delay para aguardar messages carregar
+    const initTimer = setTimeout(fetchReadEvents, 300)
 
-    // Realtime: escuta novos eventos de leitura
+    // Realtime: escuta novos eventos de leitura - usa payload direto
     const channel = supabase
-      .channel(`read-events-${conversationId || "none"}`)
+      .channel(`read-events-${conversationId}`)
       .on(
         "postgres_changes",
         {
@@ -313,7 +323,9 @@ const [isSuggesting, setIsSuggesting] = useState(false)
         },
         (payload) => {
           const newEvent = payload.new as { message_id: string; type: string }
-          if (newEvent.type === "read" && outboundMsgIds.includes(newEvent.message_id)) {
+          if (newEvent.type === "read") {
+            // Adiciona à lista sem verificar se está em outboundMsgIds
+            // (será filtrado na renderização)
             setReadMessageIds(prev => new Set([...prev, newEvent.message_id]))
           }
         }
@@ -321,9 +333,10 @@ const [isSuggesting, setIsSuggesting] = useState(false)
       .subscribe()
 
     return () => {
+      clearTimeout(initTimer)
       supabase.removeChannel(channel)
     }
-  }, [messages, conversationId])
+  }, [conversationId]) // REMOVIDO messages das deps!
 
   // Realtime para presence status (typing/online) - sem polling
   useEffect(() => {
