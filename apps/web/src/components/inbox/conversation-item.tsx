@@ -44,16 +44,17 @@ const statusColors = {
   resolved: "bg-zinc-400",
 }
 
-// Cores exatas do Telegram (7 cores oficiais)
-// Baseado no algoritmo: user_id % 7
+// Cores exatas do Telegram Android (7 cores oficiais)
+// Fonte: https://gist.github.com/AYMENJD/f15dcaa96ccd0e3ebbd7cb22ed164150
+// Algoritmo: user_id % 7
 const telegramAvatarColors = [
-  "bg-[#E17076]", // Vermelho (red)
-  "bg-[#FAA74A]", // Laranja (orange) 
-  "bg-[#A695E7]", // Roxo (violet)
-  "bg-[#7BC862]", // Verde (green)
-  "bg-[#6EC9CB]", // Ciano (cyan)
-  "bg-[#65AADD]", // Azul (blue)
-  "bg-[#EE7AAE]", // Rosa (pink)
+  "bg-[#FF845E]", // Red
+  "bg-[#FEBB5B]", // Orange
+  "bg-[#B694F9]", // Violet
+  "bg-[#9AD164]", // Green
+  "bg-[#5BCBE3]", // Cyan
+  "bg-[#5CAFFA]", // Blue
+  "bg-[#FF8AAC]", // Pink
 ]
 
 // Fallback para outros canais
