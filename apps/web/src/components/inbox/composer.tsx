@@ -276,6 +276,11 @@ const insertTemplate = useCallback((template: Template) => {
       e.preventDefault()
       setShowTemplates(true)
     }
+    // Ctrl+M = Traduzir para inglês
+    if (e.key === "m" && (e.ctrlKey || e.metaKey) && text.trim()) {
+      e.preventDefault()
+      translateDraft()
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       handleSubmit()
@@ -658,7 +663,7 @@ return (
               onClick={translateDraft}
               disabled={isTranslating || disabled}
               className="flex h-10 w-10 md:h-11 md:w-11 flex-shrink-0 items-center justify-center rounded-full text-purple-500 hover:bg-purple-100 active:bg-purple-200 disabled:opacity-50 dark:hover:bg-purple-900/30 dark:active:bg-purple-900/50"
-              title="Traduzir para inglês"
+              title="Traduzir para inglês (Ctrl+M)"
             >
               {isTranslating ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
