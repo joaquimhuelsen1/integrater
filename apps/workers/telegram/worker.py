@@ -425,6 +425,13 @@ class TelegramWorker:
 
             elif isinstance(update, UpdateNewMessage):
                 msg = update.message
+                # Debug: log message details
+                peer_type = type(msg.peer_id).__name__ if hasattr(msg, 'peer_id') else 'None'
+                from_type = type(msg.from_id).__name__ if hasattr(msg, 'from_id') and msg.from_id else 'None'
+                has_media = bool(getattr(msg, 'media', None))
+                is_out = getattr(msg, 'out', False)
+                print(f"[RAW-MSG] UpdateNewMessage: peer_type={peer_type} from_type={from_type} out={is_out} has_media={has_media} msg_id={msg.id}")
+                
                 if hasattr(msg, 'peer_id') and isinstance(msg.peer_id, PeerUser):
                     if hasattr(msg, 'out') and msg.out:
                         # Ignora se foi enviada via API (evita duplicata)
@@ -439,10 +446,20 @@ class TelegramWorker:
                             date=msg.date, media=getattr(msg, 'media', None)
                         )
                     elif hasattr(msg, 'from_id') and isinstance(msg.from_id, PeerUser):
-                        print(f"[RAW] UpdateNewMessage IN: id={msg.id}")
+                        print(f"[RAW] UpdateNewMessage IN: id={msg.id} from_id={msg.from_id.user_id}")
                         await self._notify_inbound(
                             acc_id, owner_id, workspace_id, client,
                             msg_id=msg.id, user_id=msg.from_id.user_id,
+                            text=msg.message if hasattr(msg, 'message') else None,
+                            date=msg.date, media=getattr(msg, 'media', None)
+                        )
+                    elif not is_out and msg.from_id is None:
+                        # Inbound message but from_id is None - use peer_id as user
+                        # This can happen in some edge cases with media messages
+                        print(f"[RAW] UpdateNewMessage IN (no from_id): id={msg.id} peer_id={msg.peer_id.user_id}")
+                        await self._notify_inbound(
+                            acc_id, owner_id, workspace_id, client,
+                            msg_id=msg.id, user_id=msg.peer_id.user_id,
                             text=msg.message if hasattr(msg, 'message') else None,
                             date=msg.date, media=getattr(msg, 'media', None)
                         )
