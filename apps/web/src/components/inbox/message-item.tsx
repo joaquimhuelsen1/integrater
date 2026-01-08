@@ -644,11 +644,15 @@ export function MessageItem({
             {onReact && (
               <div className="relative">
                 <button
-                  onClick={() => setShowReactionPicker(!showReactionPicker)}
-                  className={`flex h-6 w-6 items-center justify-center rounded-full text-sm transition-colors ${
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    console.log("[Reactions] Botão + clicado")
+                    setShowReactionPicker(!showReactionPicker)
+                  }}
+                  className={`flex h-7 w-7 items-center justify-center rounded-full text-base font-bold transition-all ${
                     isOutbound
-                      ? "bg-white/10 text-white/60 hover:bg-white/20 hover:text-white"
-                      : "bg-zinc-100 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-600 dark:bg-zinc-700 dark:text-zinc-500 dark:hover:bg-zinc-600 dark:hover:text-zinc-300"
+                      ? "bg-white/20 text-white hover:bg-white/40 hover:scale-110"
+                      : "bg-zinc-200 text-zinc-600 hover:bg-zinc-300 hover:scale-110 dark:bg-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-500"
                   }`}
                   title="Adicionar reação"
                 >

@@ -112,14 +112,20 @@ export function useSound() {
   // Toca um som
   const playSound = useCallback(
     (type: "send" | "receive") => {
-      if (!isEnabled) return
+      console.log(`[Sound] playSound("${type}") chamado, isEnabled=${isEnabled}`)
+      if (!isEnabled) {
+        console.log("[Sound] Som desabilitado, ignorando")
+        return
+      }
       if (typeof window === "undefined") return
 
       try {
         const generator = getSoundGenerator()
         if (type === "send") {
+          console.log("[Sound] Tocando som de envio")
           generator.playSend()
         } else {
+          console.log("[Sound] Tocando som de recebimento")
           generator.playReceive()
         }
       } catch (err) {
