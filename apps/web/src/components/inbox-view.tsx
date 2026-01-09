@@ -904,7 +904,7 @@ I'll be waiting.`
   }, [])
 
   // Enviar mensagem com attachments (com optimistic update)
-  const handleSendMessage = useCallback(async (text: string, attachmentFiles?: File[]) => {
+  const handleSendMessage = useCallback(async (text: string, attachmentFiles?: File[], replyToMessageId?: string) => {
     if (!selectedId) return
     if (!text.trim() && (!attachmentFiles || attachmentFiles.length === 0)) return
 
@@ -1067,6 +1067,7 @@ I'll be waiting.`
           channel: channel,
           // integration_account_id é resolvido pela API baseado no workspace
           attachments: attachmentIds, // IDs dos attachments já criados
+          reply_to_message_id: replyToMessageId || null,
         }),
       })
 
@@ -1259,10 +1260,18 @@ I'll be waiting.`
 
         if (!lastMessages) return
 
+        // Mapeia última msg total (para direção) e última OUTBOUND (para read status)
         const lastMsgByConv: Record<string, { id: string; direction: string }> = {}
+        const lastOutboundByConv: Record<string, string> = {}
+
         for (const msg of lastMessages) {
+          // Última msg total (para mostrar direção na lista)
           if (!lastMsgByConv[msg.conversation_id]) {
             lastMsgByConv[msg.conversation_id] = { id: msg.id, direction: msg.direction }
+          }
+          // Última msg OUTBOUND (para verificar read status)
+          if (msg.direction === "outbound" && !lastOutboundByConv[msg.conversation_id]) {
+            lastOutboundByConv[msg.conversation_id] = msg.id
             // Salva mapeamento para uso no realtime
             msgToConvRef.current[msg.id] = msg.conversation_id
           }
@@ -1274,9 +1283,7 @@ I'll be waiting.`
         }
         setLastMessageDirections(directions)
 
-        const outboundMsgIds = Object.values(lastMsgByConv)
-          .filter(m => m.direction === "outbound")
-          .map(m => m.id)
+        const outboundMsgIds = Object.values(lastOutboundByConv)
 
         if (outboundMsgIds.length === 0) {
           setReadConversationIds(new Set())
@@ -1292,8 +1299,8 @@ I'll be waiting.`
         if (readEvents) {
           const readMsgIds = new Set(readEvents.map(e => e.message_id))
           const readConvIds = new Set<string>()
-          for (const [convId, msg] of Object.entries(lastMsgByConv)) {
-            if (msg.direction === "outbound" && readMsgIds.has(msg.id)) {
+          for (const [convId, msgId] of Object.entries(lastOutboundByConv)) {
+            if (readMsgIds.has(msgId)) {
               readConvIds.add(convId)
             }
           }

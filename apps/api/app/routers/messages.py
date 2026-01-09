@@ -90,6 +90,7 @@ async def send_message(
                         "conversation_id": str(data.conversation_id),
                         "text": data.text or "",
                         "attachments": attachment_urls,
+                        "reply_to_message_id": str(data.reply_to_message_id) if data.reply_to_message_id else None,
                     },
                 )
             

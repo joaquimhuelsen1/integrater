@@ -109,7 +109,7 @@ interface ChatViewProps {
   messages: Message[]
   displayName: string | null
   avatarUrl?: string | null
-  onSendMessage: (text: string, attachments?: File[]) => void
+  onSendMessage: (text: string, attachments?: File[], replyToMessageId?: string) => void
   onDownloadAttachment?: (attachmentId: string, filename: string) => void
   templates?: Template[]
   tags?: Tag[]
@@ -788,10 +788,10 @@ const handleUnpin = useCallback(async (messageId: string) => {
 
   // Enviar mensagem e limpar draft e reply
   const handleSendMessage = useCallback((text: string, attachments?: File[]) => {
-    onSendMessage(text, attachments)
+    onSendMessage(text, attachments, replyToMessage?.id)
     onDraftChange?.("")
     setReplyToMessage(null) // Limpa reply após enviar
-  }, [onSendMessage, onDraftChange])
+  }, [onSendMessage, onDraftChange, replyToMessage])
 
 // Sincronizar histórico
   const handleSyncHistory = useCallback(async () => {
