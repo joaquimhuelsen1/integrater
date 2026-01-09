@@ -273,15 +273,19 @@ const [isSuggesting, setIsSuggesting] = useState(false)
   const messagesRef = useRef(messages)
   useEffect(() => { messagesRef.current = messages }, [messages])
   
+  // Ref para controlar se já buscou read events para esta conversa
+  const fetchedReadEventsRef = useRef<string | null>(null)
+
   useEffect(() => {
     if (!conversationId) {
       setReadMessageIds(new Set())
+      fetchedReadEventsRef.current = null
       return
     }
 
     const supabase = createClient()
 
-    // Busca inicial única (com delay para aguardar messages)
+    // Busca read events quando tiver mensagens outbound
     const fetchReadEvents = async () => {
       const currentMessages = messagesRef.current
       const outboundMsgIds = currentMessages
@@ -292,6 +296,12 @@ const [isSuggesting, setIsSuggesting] = useState(false)
       if (outboundMsgIds.length === 0) {
         return
       }
+
+      // Evita buscar múltiplas vezes para mesma conversa
+      if (fetchedReadEventsRef.current === conversationId) {
+        return
+      }
+      fetchedReadEventsRef.current = conversationId
 
       try {
         const { data } = await supabase
@@ -308,7 +318,7 @@ const [isSuggesting, setIsSuggesting] = useState(false)
       }
     }
 
-    // Delay para aguardar messages carregar
+    // Delay inicial para aguardar messages carregar
     const initTimer = setTimeout(fetchReadEvents, 300)
 
     // Realtime: escuta novos eventos de leitura - usa payload direto
@@ -324,8 +334,6 @@ const [isSuggesting, setIsSuggesting] = useState(false)
         (payload) => {
           const newEvent = payload.new as { message_id: string; type: string }
           if (newEvent.type === "read") {
-            // Adiciona à lista sem verificar se está em outboundMsgIds
-            // (será filtrado na renderização)
             setReadMessageIds(prev => new Set([...prev, newEvent.message_id]))
           }
         }
@@ -336,7 +344,46 @@ const [isSuggesting, setIsSuggesting] = useState(false)
       clearTimeout(initTimer)
       supabase.removeChannel(channel)
     }
-  }, [conversationId]) // REMOVIDO messages das deps!
+  }, [conversationId])
+
+  // Refaz busca de read events quando messages carregar (caso delay inicial não seja suficiente)
+  useEffect(() => {
+    if (!conversationId) return
+
+    const outboundCount = messages.filter(m => m.direction === "outbound" && !m.id.startsWith("temp-")).length
+    if (outboundCount === 0) return
+
+    // Se já buscou para esta conversa, não refaz
+    if (fetchedReadEventsRef.current === conversationId) return
+
+    const supabase = createClient()
+    const fetchReadEvents = async () => {
+      const outboundMsgIds = messages
+        .filter(m => m.direction === "outbound")
+        .map(m => m.id)
+        .filter(id => !id.startsWith("temp-"))
+
+      if (outboundMsgIds.length === 0) return
+
+      fetchedReadEventsRef.current = conversationId
+
+      try {
+        const { data } = await supabase
+          .from("message_events")
+          .select("message_id")
+          .in("message_id", outboundMsgIds)
+          .eq("type", "read")
+
+        if (data) {
+          setReadMessageIds(new Set(data.map(e => e.message_id)))
+        }
+      } catch (err) {
+        // Ignora erros
+      }
+    }
+
+    fetchReadEvents()
+  }, [conversationId, messages.length])
 
   // Realtime para presence status (typing/online) - sem polling
   useEffect(() => {
