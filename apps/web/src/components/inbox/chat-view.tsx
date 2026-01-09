@@ -269,40 +269,31 @@ const [isSuggesting, setIsSuggesting] = useState(false)
 
 
   // Realtime para eventos de leitura (sem polling)
-  // OTIMIZAÇÃO: Usa ref para messages, subscription só muda com conversationId
-  const messagesRef = useRef(messages)
-  useEffect(() => { messagesRef.current = messages }, [messages])
-  
-  // Ref para controlar se já buscou read events para esta conversa
-  const fetchedReadEventsRef = useRef<string | null>(null)
+  // Busca read events para mensagens outbound
+  // Calcula IDs das mensagens outbound para usar como dependência
+  const outboundMsgIds = useMemo(() =>
+    messages
+      .filter(m => m.direction === "outbound" && !m.id.startsWith("temp-"))
+      .map(m => m.id),
+    [messages]
+  )
 
   useEffect(() => {
     if (!conversationId) {
       setReadMessageIds(new Set())
-      fetchedReadEventsRef.current = null
+      return
+    }
+
+    if (outboundMsgIds.length === 0) {
+      setReadMessageIds(new Set())
       return
     }
 
     const supabase = createClient()
+    let cancelled = false
 
-    // Busca read events quando tiver mensagens outbound
+    // Busca read events
     const fetchReadEvents = async () => {
-      const currentMessages = messagesRef.current
-      const outboundMsgIds = currentMessages
-        .filter(m => m.direction === "outbound")
-        .map(m => m.id)
-        .filter(id => !id.startsWith("temp-"))
-
-      if (outboundMsgIds.length === 0) {
-        return
-      }
-
-      // Evita buscar múltiplas vezes para mesma conversa
-      if (fetchedReadEventsRef.current === conversationId) {
-        return
-      }
-      fetchedReadEventsRef.current = conversationId
-
       try {
         const { data } = await supabase
           .from("message_events")
@@ -310,7 +301,7 @@ const [isSuggesting, setIsSuggesting] = useState(false)
           .in("message_id", outboundMsgIds)
           .eq("type", "read")
 
-        if (data) {
+        if (!cancelled && data) {
           setReadMessageIds(new Set(data.map(e => e.message_id)))
         }
       } catch (err) {
@@ -318,10 +309,9 @@ const [isSuggesting, setIsSuggesting] = useState(false)
       }
     }
 
-    // Delay inicial para aguardar messages carregar
-    const initTimer = setTimeout(fetchReadEvents, 300)
+    fetchReadEvents()
 
-    // Realtime: escuta novos eventos de leitura - usa payload direto
+    // Realtime: escuta novos eventos de leitura
     const channel = supabase
       .channel(`read-events-${conversationId}`)
       .on(
@@ -341,49 +331,10 @@ const [isSuggesting, setIsSuggesting] = useState(false)
       .subscribe()
 
     return () => {
-      clearTimeout(initTimer)
+      cancelled = true
       supabase.removeChannel(channel)
     }
-  }, [conversationId])
-
-  // Refaz busca de read events quando messages carregar (caso delay inicial não seja suficiente)
-  useEffect(() => {
-    if (!conversationId) return
-
-    const outboundCount = messages.filter(m => m.direction === "outbound" && !m.id.startsWith("temp-")).length
-    if (outboundCount === 0) return
-
-    // Se já buscou para esta conversa, não refaz
-    if (fetchedReadEventsRef.current === conversationId) return
-
-    const supabase = createClient()
-    const fetchReadEvents = async () => {
-      const outboundMsgIds = messages
-        .filter(m => m.direction === "outbound")
-        .map(m => m.id)
-        .filter(id => !id.startsWith("temp-"))
-
-      if (outboundMsgIds.length === 0) return
-
-      fetchedReadEventsRef.current = conversationId
-
-      try {
-        const { data } = await supabase
-          .from("message_events")
-          .select("message_id")
-          .in("message_id", outboundMsgIds)
-          .eq("type", "read")
-
-        if (data) {
-          setReadMessageIds(new Set(data.map(e => e.message_id)))
-        }
-      } catch (err) {
-        // Ignora erros
-      }
-    }
-
-    fetchReadEvents()
-  }, [conversationId, messages.length])
+  }, [conversationId, outboundMsgIds])
 
   // Realtime para presence status (typing/online) - sem polling
   useEffect(() => {
