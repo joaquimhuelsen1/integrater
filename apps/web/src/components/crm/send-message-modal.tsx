@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { X, Send, Mail, MessageSquare, FileText, Eye } from "lucide-react"
 import { apiFetch } from "@/lib/api"
 
@@ -26,18 +26,57 @@ interface ContactIdentity {
   label: string | null
 }
 
+interface DealData {
+  title: string
+  value: number
+  contact_name: string
+  contact_email: string | null
+  contact_phone: string | null
+}
+
 interface SendMessageModalProps {
   dealId: string
   contactId: string | null
+  isOpen?: boolean
   onClose: () => void
   onSent: () => void
 }
 
 type ChannelType = "email" | "openphone_sms"
 
+/**
+ * Extrai telefone do campo info do deal
+ * Formato esperado: "Label: Valor\n..."
+ */
+function extractPhoneFromInfo(info: string | null | undefined): string | null {
+  if (!info) return null
+
+  // Padrões de label para telefone
+  const phoneLabels = ["telefone", "phone", "celular", "whatsapp", "tel", "mobile"]
+
+  for (const line of info.split("\n")) {
+    const [label, ...valueParts] = line.split(":")
+    if (!label || valueParts.length === 0) continue
+
+    const normalizedLabel = label.toLowerCase().trim()
+    if (phoneLabels.some((pl) => normalizedLabel.includes(pl))) {
+      const value = valueParts.join(":").trim()
+      // Limpar e validar (apenas números, +, espaços, hífens, parênteses)
+      const cleaned = value.replace(/[^\d+\s\-()]/g, "").trim()
+      if (cleaned.length >= 8) return cleaned
+    }
+  }
+
+  // Fallback: buscar padrão de telefone no texto todo
+  const phoneRegex = /\+?\d{2,3}[\s\-]?\(?\d{2,3}\)?[\s\-]?\d{4,5}[\s\-]?\d{4}/
+  const match = info.match(phoneRegex)
+  return match ? match[0] : null
+}
+
 export function SendMessageModal({
   dealId,
   contactId,
+  isOpen = true,
   onClose,
   onSent,
 }: SendMessageModalProps) {
@@ -58,152 +97,153 @@ export function SendMessageModal({
 
   // Preview com placeholders
   const [showPreview, setShowPreview] = useState(false)
-  const [dealData, setDealData] = useState<{
-    title: string
-    value: number
-    contact_name: string
-    contact_email: string
-  } | null>(null)
+  const [dealData, setDealData] = useState<DealData | null>(null)
 
-  // Carregar dados do deal para preview
-  const loadDealData = useCallback(async () => {
-    try {
-      const res = await apiFetch(`/deals/${dealId}`)
-      if (res.ok) {
-        const data = await res.json()
-        setDealData({
-          title: data.title || "",
-          value: data.value || 0,
-          contact_name: data.contact?.display_name || "",
-          contact_email: "",
-        })
-      }
-    } catch (error) {
-      console.error("Erro ao carregar deal:", error)
-    }
-  }, [dealId])
+  // Ref para evitar re-execucao do carregamento
+  const loadedRef = useRef(false)
 
-  // Carregar identities do contato
-  const loadIdentities = useCallback(async () => {
-    if (!contactId) return
-
-    try {
-      const res = await apiFetch(`/contacts/${contactId}`)
-      if (res.ok) {
-        const data = await res.json()
-        if (data.identities) {
-          setIdentities(data.identities)
-          // Preencher email do deal
-          const emailIdentity = data.identities.find(
-            (i: ContactIdentity) => i.type === "email"
-          )
-          if (emailIdentity && dealData) {
-            setDealData({ ...dealData, contact_email: emailIdentity.value })
-          }
-        }
-      }
-    } catch (error) {
-      console.error("Erro ao carregar identities:", error)
-    }
-  }, [contactId, dealData])
-
-  // Carregar templates
-  const loadTemplates = useCallback(async () => {
-    try {
-      const res = await apiFetch(`/templates`)
-      if (res.ok) {
-        const data = await res.json()
-        setTemplates(data)
-      }
-    } catch (error) {
-      console.error("Erro ao carregar templates:", error)
-    }
-  }, [])
-
-  // Carregar contas de integracao
-  const loadIntegrationAccounts = useCallback(async () => {
-    try {
-      // Buscar contas de email IMAP/SMTP
-      const emailRes = await apiFetch(`/integrations?type=email_imap_smtp`)
-      if (emailRes.ok) {
-        const emailAccounts = await emailRes.json()
-
-        // Buscar contas OpenPhone
-        const smsRes = await apiFetch(`/integrations?type=openphone`)
-        let smsAccounts: IntegrationAccount[] = []
-        if (smsRes.ok) {
-          smsAccounts = await smsRes.json()
-        }
-
-        setIntegrationAccounts([...emailAccounts, ...smsAccounts])
-      }
-    } catch (error) {
-      console.error("Erro ao carregar integration accounts:", error)
-    }
-  }, [])
-
-  // Carregar todos os dados ao montar
+  // Carregar todos os dados ao montar - APENAS dealId, contactId e isOpen como deps
   useEffect(() => {
+    if (!isOpen) return
+    if (loadedRef.current) return
+    loadedRef.current = true
+
     const loadAll = async () => {
       setIsLoading(true)
-      await Promise.all([
-        loadDealData(),
-        loadIdentities(),
-        loadTemplates(),
-        loadIntegrationAccounts(),
-      ])
-      setIsLoading(false)
+      try {
+        // 1. Deal data
+        const dealRes = await apiFetch(`/deals/${dealId}`)
+        let loadedDealData: DealData | null = null
+        if (dealRes.ok) {
+          const deal = await dealRes.json()
+
+          // Buscar telefone de multiplas fontes
+          let phone: string | null = null
+          if (deal.contact?.identities) {
+            const phoneIdentity = deal.contact.identities.find(
+              (i: ContactIdentity) => i.type === "phone"
+            )
+            if (phoneIdentity) {
+              phone = phoneIdentity.value
+            }
+          }
+          if (!phone && deal.info) {
+            phone = extractPhoneFromInfo(deal.info)
+          }
+
+          loadedDealData = {
+            title: deal.title || "",
+            value: deal.value || 0,
+            contact_name: deal.contact?.display_name || "",
+            contact_email: null,
+            contact_phone: phone,
+          }
+        }
+
+        // 2. Identities do contact
+        if (contactId) {
+          const identRes = await apiFetch(`/contacts/${contactId}`)
+          if (identRes.ok) {
+            const contact = await identRes.json()
+            const loadedIdentities = contact.identities || []
+            setIdentities(loadedIdentities)
+
+            // Auto-preencher email/phone do dealData
+            const emailId = loadedIdentities.find((i: ContactIdentity) => i.type === "email")
+            const phoneId = loadedIdentities.find((i: ContactIdentity) => i.type === "phone")
+            if (loadedDealData && (emailId || phoneId)) {
+              loadedDealData = {
+                ...loadedDealData,
+                contact_email: emailId?.value || null,
+                contact_phone: phoneId?.value || loadedDealData.contact_phone || null,
+              }
+            }
+          }
+        }
+
+        if (loadedDealData) {
+          setDealData(loadedDealData)
+        }
+
+        // 3. Templates
+        const templatesRes = await apiFetch("/templates")
+        if (templatesRes.ok) {
+          setTemplates(await templatesRes.json())
+        }
+
+        // 4. Integration accounts (email + sms)
+        const emailRes = await apiFetch("/integrations?type=email_imap_smtp")
+        let allAccounts: IntegrationAccount[] = []
+        if (emailRes.ok) {
+          allAccounts = await emailRes.json()
+        }
+
+        const smsRes = await apiFetch("/integrations?type=openphone")
+        if (smsRes.ok) {
+          const smsAccounts = await smsRes.json()
+          allAccounts = [...allAccounts, ...smsAccounts]
+        }
+        setIntegrationAccounts(allAccounts)
+      } catch (error) {
+        console.error("Erro ao carregar dados:", error)
+      } finally {
+        setIsLoading(false)
+      }
     }
+
     loadAll()
-  }, [loadDealData, loadIdentities, loadTemplates, loadIntegrationAccounts])
+  }, [dealId, contactId, isOpen])
 
-  // Filtrar templates pelo canal selecionado
-  const filteredTemplates = templates.filter((t) => {
-    if (!t.channel_hint) return true
-    if (channel === "email") return t.channel_hint === "email"
-    if (channel === "openphone_sms") return t.channel_hint === "openphone_sms"
-    return true
-  })
+  // Filtrar templates pelo canal selecionado - usar useMemo
+  const filteredTemplates = useMemo(() => {
+    return templates.filter((t) => {
+      if (!t.channel_hint) return true
+      if (channel === "email") return t.channel_hint === "email"
+      if (channel === "openphone_sms") return t.channel_hint === "openphone_sms"
+      return true
+    })
+  }, [templates, channel])
 
-  // Filtrar contas pelo canal selecionado
-  const filteredAccounts = integrationAccounts.filter((a) => {
-    if (channel === "email") return a.type === "email_imap_smtp"
-    if (channel === "openphone_sms") return a.type === "openphone"
-    return false
-  })
+  // Filtrar contas pelo canal selecionado - usar useMemo
+  const filteredAccounts = useMemo(() => {
+    return integrationAccounts.filter((a) => {
+      if (channel === "email") return a.type === "email_imap_smtp"
+      if (channel === "openphone_sms") return a.type === "openphone"
+      return false
+    })
+  }, [integrationAccounts, channel])
 
-  // Auto-selecionar primeira conta quando muda o canal
+  // Filtrar identities pelo canal selecionado - usar useMemo
+  const filteredIdentities = useMemo(() => {
+    return identities.filter((i) => {
+      if (channel === "email") return i.type === "email"
+      if (channel === "openphone_sms") return i.type === "phone"
+      return false
+    })
+  }, [identities, channel])
+
+  // Reset quando canal muda
+  useEffect(() => {
+    setIntegrationAccountId("")
+    setSelectedIdentity(null)
+  }, [channel])
+
+  // Auto-selecionar primeira conta quando disponivel E nao tem selecao
+  // Usar length para evitar loops
   useEffect(() => {
     const firstAccount = filteredAccounts[0]
     if (filteredAccounts.length > 0 && !integrationAccountId && firstAccount) {
       setIntegrationAccountId(firstAccount.id)
-    } else if (filteredAccounts.length > 0 && firstAccount) {
-      // Verificar se a conta selecionada ainda pertence ao canal
-      const stillValid = filteredAccounts.some((a) => a.id === integrationAccountId)
-      if (!stillValid) {
-        setIntegrationAccountId(firstAccount.id)
-      }
-    } else {
-      setIntegrationAccountId("")
     }
-  }, [channel, filteredAccounts, integrationAccountId])
+  }, [filteredAccounts.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Filtrar identities pelo canal selecionado
-  const filteredIdentities = identities.filter((i) => {
-    if (channel === "email") return i.type === "email"
-    if (channel === "openphone_sms") return i.type === "phone"
-    return false
-  })
-
-  // Auto-selecionar primeira identity
+  // Auto-selecionar primeira identity quando disponivel E nao tem selecao
   useEffect(() => {
     const firstIdentity = filteredIdentities[0]
-    if (filteredIdentities.length > 0 && firstIdentity) {
+    if (filteredIdentities.length > 0 && !selectedIdentity && firstIdentity) {
       setSelectedIdentity(firstIdentity)
-    } else {
-      setSelectedIdentity(null)
     }
-  }, [filteredIdentities])
+  }, [filteredIdentities.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Quando seleciona um template, preencher o body
   const handleTemplateSelect = (tplId: string) => {
@@ -246,8 +286,6 @@ export function SendMessageModal({
 
     setIsSending(true)
     try {
-      // TODO: Endpoint /deals/{id}/send-message ainda nao existe
-      // Por enquanto, simular sucesso
       const res = await apiFetch(`/deals/${dealId}/send-message`, {
         method: "POST",
         body: JSON.stringify({
@@ -273,6 +311,8 @@ export function SendMessageModal({
       setIsSending(false)
     }
   }
+
+  if (!isOpen) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50">

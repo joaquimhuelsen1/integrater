@@ -923,6 +923,28 @@ export function DealModal({
                   </div>
                 )}
 
+                {/* Campos Personalizados do Deal */}
+                {deal?.custom_fields && typeof deal.custom_fields === 'object' && Object.keys(deal.custom_fields).length > 0 && (
+                  <div className="mb-4">
+                    <div className="flex items-center gap-2 text-zinc-500 mb-2">
+                      <FileText className="h-4 w-4" />
+                      <span className="text-sm font-medium">Campos Personalizados</span>
+                    </div>
+                    <div className="rounded-lg bg-zinc-50 dark:bg-zinc-800/50 p-3 text-sm space-y-1">
+                      {Object.entries(deal.custom_fields).map(([key, value]) => (
+                        <div key={key} className="flex flex-col">
+                          <span className="text-xs text-zinc-500 capitalize">
+                            {key.replace(/_/g, ' ')}
+                          </span>
+                          <span className="text-zinc-900 dark:text-zinc-100">
+                            {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Contact Custom Fields */}
                 {selectedContact?.metadata && Object.keys(selectedContact.metadata).length > 0 && (
                   <div className="border-t border-zinc-200 pt-4 dark:border-zinc-700">
