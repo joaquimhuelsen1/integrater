@@ -1,7 +1,6 @@
-import os
 import logging
 import sys
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -35,6 +34,7 @@ from app.routers import (
     analytics_router,
     loss_reasons_router,
     webhooks_router,
+    automations_router,
 )
 
 settings = get_settings()
@@ -115,3 +115,4 @@ app.include_router(workspaces_router)
 app.include_router(analytics_router)
 app.include_router(loss_reasons_router)
 app.include_router(webhooks_router)
+app.include_router(automations_router)

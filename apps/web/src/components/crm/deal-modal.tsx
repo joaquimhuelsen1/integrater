@@ -21,6 +21,7 @@ import {
   File,
   MoreVertical,
   Archive,
+  Send,
 } from "lucide-react"
 import { ContactSelector } from "./contact-selector"
 import { DealTimeline } from "./deal-timeline"
@@ -79,6 +80,7 @@ interface DealModalProps {
   stages: Stage[]
   onClose: () => void
   onSave: () => void
+  onSendMessage?: (dealId: string) => void
 }
 
 type TabType = "activity" | "notes" | "products" | "files"
@@ -90,6 +92,7 @@ export function DealModal({
   stages,
   onClose,
   onSave,
+  onSendMessage,
 }: DealModalProps) {
   const [deal, setDeal] = useState<Deal | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -579,6 +582,18 @@ export function DealModal({
               >
                 <RotateCcw className="h-4 w-4" />
                 <span className="hidden md:inline">Reabrir</span>
+              </button>
+            )}
+
+            {/* Send message button */}
+            {!isNew && (
+              <button
+                onClick={() => dealId && onSendMessage?.(dealId)}
+                className="flex items-center gap-1 rounded-lg border border-zinc-300 px-2 md:px-3 py-1.5 text-sm hover:bg-zinc-50 active:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
+                title="Enviar mensagem"
+              >
+                <Send className="h-4 w-4" />
+                <span className="hidden md:inline">Enviar mensagem</span>
               </button>
             )}
 

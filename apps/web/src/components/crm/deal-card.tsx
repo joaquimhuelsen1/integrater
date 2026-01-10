@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { Trophy, XCircle, MoreVertical, Trash2, Archive } from "lucide-react"
+import { Trophy, XCircle, MoreVertical, Trash2, Archive, MessageSquare } from "lucide-react"
 
 interface DealTag {
   id: string
@@ -34,9 +34,10 @@ interface DealCardProps {
   isDragging?: boolean
   onArchive?: (dealId: string) => void
   onDelete?: (dealId: string) => void
+  onSendMessage?: (dealId: string) => void
 }
 
-export function DealCard({ deal, onClick, isDragging, onArchive, onDelete }: DealCardProps) {
+export function DealCard({ deal, onClick, isDragging, onArchive, onDelete, onSendMessage }: DealCardProps) {
   const [showMenu, setShowMenu] = useState(false)
   
   const {
@@ -120,6 +121,12 @@ export function DealCard({ deal, onClick, isDragging, onArchive, onDelete }: Dea
     }
   }
 
+  const handleSendMessage = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setShowMenu(false)
+    onSendMessage?.(deal.id)
+  }
+
   return (
     <div
       ref={setNodeRef}
@@ -155,6 +162,13 @@ export function DealCard({ deal, onClick, isDragging, onArchive, onDelete }: Dea
               onClick={(e) => { e.stopPropagation(); setShowMenu(false) }}
             />
             <div className="absolute right-0 top-8 md:top-7 z-20 w-40 md:w-36 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+              <button
+                onClick={handleSendMessage}
+                className="flex w-full items-center gap-2 px-3 py-3 md:py-2 text-sm text-zinc-700 hover:bg-zinc-100 active:bg-zinc-200 dark:text-zinc-300 dark:hover:bg-zinc-700 dark:active:bg-zinc-600"
+              >
+                <MessageSquare className="h-5 w-5 md:h-4 md:w-4" />
+                Enviar mensagem
+              </button>
               <button
                 onClick={handleArchive}
                 className="flex w-full items-center gap-2 px-3 py-3 md:py-2 text-sm text-zinc-700 hover:bg-zinc-100 active:bg-zinc-200 dark:text-zinc-300 dark:hover:bg-zinc-700 dark:active:bg-zinc-600"

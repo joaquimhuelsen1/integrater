@@ -1,14 +1,19 @@
 """
 Router Deals - CRUD de deals, produtos e atividades (CRM).
 """
+import os
 from fastapi import APIRouter, Depends, HTTPException, Query
 from supabase import Client
-from uuid import UUID
-from datetime import datetime
+from uuid import UUID, uuid4
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
+from pydantic import BaseModel
+import httpx
 
 from app.deps import get_supabase, get_current_user_id
+from app.models.enums import AutomationTriggerType
+from app.services.automation_executor import AutomationExecutor
 from app.models.crm import (
     Deal,
     DealCreate,
@@ -21,12 +26,10 @@ from app.models.crm import (
     DealActivity,
     DealActivityCreate,
     DealActivityUpdate,
-    DealActivityWithStages,
     DealFile,
     DealFileCreate,
     DealTag,
 )
-from app.models.enums import DealActivityType
 
 router = APIRouter(prefix="/deals", tags=["deals"])
 
@@ -304,7 +307,7 @@ async def archive_deal(
 ):
     """Arquiva deal (soft delete)."""
     result = db.table("deals").update(
-        {"archived_at": datetime.utcnow().isoformat()}
+        {"archived_at": datetime.now(timezone.utc).isoformat()}
     ).eq("id", str(deal_id)).eq("owner_id", str(owner_id)).execute()
 
     if not result.data:
@@ -383,7 +386,7 @@ async def win_deal(
 ):
     """Marca deal como ganho."""
     result = db.table("deals").update(
-        {"won_at": datetime.utcnow().isoformat()}
+        {"won_at": datetime.now(timezone.utc).isoformat()}
     ).eq("id", str(deal_id)).eq("owner_id", str(owner_id)).is_(
         "won_at", "null"
     ).is_("lost_at", "null").execute()
@@ -410,7 +413,7 @@ async def lose_deal(
     owner_id: UUID = Depends(get_current_user_id),
 ):
     """Marca deal como perdido."""
-    update_data = {"lost_at": datetime.utcnow().isoformat()}
+    update_data = {"lost_at": datetime.now(timezone.utc).isoformat()}
 
     # Busca nome do motivo se reason_id informado
     reason_name = None
@@ -511,7 +514,7 @@ async def add_product(
             raise HTTPException(status_code=400, detail="Nome do produto é obrigatório")
 
         payload["name"] = data.name
-        payload["value"] = float(data.value) if data.value else 0
+        payload["value"] = str(float(data.value)) if data.value else "0"
 
     result = db.table("deal_products").insert(payload).execute()
     return result.data[0]
@@ -752,6 +755,15 @@ async def remove_tag_from_deal(
     owner_id: UUID = Depends(get_current_user_id),
 ):
     """Remove tag do deal."""
+    # Verifica se deal pertence ao owner
+    deal = db.table("deals").select("id").eq(
+        "id", str(deal_id)
+    ).eq("owner_id", str(owner_id)).single().execute()
+
+    if not deal.data:
+        raise HTTPException(status_code=404, detail="Deal nao encontrado")
+
+    # Remove associacao (deal_tag_assignments nao tem owner_id)
     db.table("deal_tag_assignments").delete().eq(
         "deal_id", str(deal_id)
     ).eq("tag_id", str(tag_id)).execute()
@@ -812,4 +824,222 @@ async def delete_file(
 
     if not result.data:
         raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+
+
+# ============================================
+# Send Message (para automacoes CRM)
+# ============================================
+class DealSendMessageRequest(BaseModel):
+    """Request para enviar mensagem a partir de um deal."""
+    channel: str  # "email" | "openphone_sms"
+    integration_account_id: UUID
+    to_identity_id: UUID
+    subject: str | None = None  # Apenas para email
+    body: str
+
+
+@router.post("/{deal_id}/send-message", status_code=201)
+async def send_message_from_deal(
+    deal_id: UUID,
+    data: DealSendMessageRequest,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """
+    Envia mensagem a partir de um deal (para automacoes CRM).
+
+    Suporta canais: email, openphone_sms
+    Apos envio bem-sucedido, dispara trigger message_sent para automacoes.
+    """
+    # Validar canal
+    if data.channel not in ("email", "openphone_sms"):
+        raise HTTPException(
+            status_code=400,
+            detail="Canal invalido. Use 'email' ou 'openphone_sms'"
+        )
+
+    # Buscar deal para obter contact_id
+    deal_result = db.table("deals").select(
+        "id, contact_id, title, value, pipeline_id, stage_id"
+    ).eq("id", str(deal_id)).eq("owner_id", str(owner_id)).single().execute()
+
+    if not deal_result.data:
+        raise HTTPException(status_code=404, detail="Deal nao encontrado")
+
+    deal = deal_result.data
+    contact_id = deal.get("contact_id")
+
+    # Buscar identity para obter valor (email ou telefone)
+    identity_result = db.table("contact_identities").select(
+        "id, type, value"
+    ).eq("id", str(data.to_identity_id)).single().execute()
+
+    if not identity_result.data:
+        raise HTTPException(status_code=404, detail="Identity nao encontrada")
+
+    identity = identity_result.data
+    to_address = identity.get("value")
+
+    # Buscar integration_account para validar
+    int_account_result = db.table("integration_accounts").select(
+        "id, type, is_active, credentials_encrypted"
+    ).eq("id", str(data.integration_account_id)).eq(
+        "owner_id", str(owner_id)
+    ).eq("is_active", True).single().execute()
+
+    if not int_account_result.data:
+        raise HTTPException(
+            status_code=404,
+            detail="Integration account nao encontrada ou inativa"
+        )
+
+    n8n_api_key = os.environ.get("N8N_API_KEY", "")
+    message_id = str(uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+
+    # ============================================
+    # EMAIL
+    # ============================================
+    if data.channel == "email":
+        n8n_webhook_url = os.environ.get(
+            "N8N_WEBHOOK_EMAIL_SEND",
+            "https://n8nwebhook.thereconquestmap.com/webhook/email/send"
+        )
+
+        # Buscar conversation existente ou None
+        conv_result = db.table("conversations").select("id").eq(
+            "owner_id", str(owner_id)
+        ).eq("primary_identity_id", str(data.to_identity_id)).limit(1).execute()
+
+        conversation_id = conv_result.data[0]["id"] if conv_result.data else None
+
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    n8n_webhook_url,
+                    headers={
+                        "X-API-KEY": n8n_api_key,
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "id": message_id,
+                        "conversation_id": conversation_id,
+                        "integration_account_id": str(data.integration_account_id),
+                        "to": to_address,
+                        "subject": data.subject or f"Re: {deal.get('title', 'Deal')}",
+                        "text": data.body,
+                        "attachments": [],
+                    },
+                )
+
+            if response.status_code == 200:
+                resp_data = response.json()
+                if resp_data.get("status") == "ok":
+                    # Dispara trigger message_sent
+                    executor = AutomationExecutor(db=db, owner_id=str(owner_id))
+                    await executor.dispatch_trigger(
+                        trigger_type=AutomationTriggerType.message_sent,
+                        deal_id=deal_id,
+                        trigger_data={
+                            "channel": "email",
+                            "integration_account_id": str(data.integration_account_id),
+                            "contact_id": contact_id,
+                            "message_id": message_id,
+                        },
+                    )
+
+                    return {
+                        "id": message_id,
+                        "deal_id": str(deal_id),
+                        "channel": "email",
+                        "to": to_address,
+                        "sent_at": now,
+                        "status": "sent",
+                    }
+                else:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=resp_data.get("error", "Erro ao enviar email")
+                    )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Erro n8n: {response.status_code}"
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # ============================================
+    # OPENPHONE SMS
+    # ============================================
+    if data.channel == "openphone_sms":
+        n8n_webhook_url = os.environ.get(
+            "N8N_WEBHOOK_OPENPHONE_SEND",
+            "https://n8nwebhook.thereconquestmap.com/webhook/openphone/send"
+        )
+
+        # Buscar conversation existente ou None
+        conv_result = db.table("conversations").select("id").eq(
+            "owner_id", str(owner_id)
+        ).eq("primary_identity_id", str(data.to_identity_id)).limit(1).execute()
+
+        conversation_id = conv_result.data[0]["id"] if conv_result.data else None
+
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    n8n_webhook_url,
+                    headers={
+                        "X-API-KEY": n8n_api_key,
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "id": message_id,
+                        "conversation_id": conversation_id,
+                        "integration_account_id": str(data.integration_account_id),
+                        "to": to_address,
+                        "text": data.body,
+                    },
+                )
+
+            if response.status_code == 200:
+                resp_data = response.json()
+                if resp_data.get("status") == "ok":
+                    # Dispara trigger message_sent
+                    executor = AutomationExecutor(db=db, owner_id=str(owner_id))
+                    await executor.dispatch_trigger(
+                        trigger_type=AutomationTriggerType.message_sent,
+                        deal_id=deal_id,
+                        trigger_data={
+                            "channel": "openphone_sms",
+                            "integration_account_id": str(data.integration_account_id),
+                            "contact_id": contact_id,
+                            "message_id": message_id,
+                        },
+                    )
+
+                    return {
+                        "id": message_id,
+                        "deal_id": str(deal_id),
+                        "channel": "openphone_sms",
+                        "to": to_address,
+                        "sent_at": now,
+                        "status": "sent",
+                    }
+                else:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=resp_data.get("error", "Erro ao enviar SMS")
+                    )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Erro n8n: {response.status_code}"
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { ArrowLeft, Plus, Trash2, Wifi, WifiOff, Sparkles, Edit2, RotateCcw, Play, Save, X, ChevronDown, ChevronUp, MessageSquare, Mail, AlertCircle, CheckCircle, Loader2, Cpu, Settings2, RefreshCw, Clock, Users, Volume2, VolumeX } from "lucide-react"
+import { ArrowLeft, Plus, Trash2, Wifi, WifiOff, Sparkles, Edit2, RotateCcw, Play, Save, X, ChevronDown, ChevronUp, MessageSquare, Mail, AlertCircle, CheckCircle, Loader2, Cpu, Settings2, RefreshCw, Clock, Users, Volume2, VolumeX, Zap, Briefcase, ChevronRight } from "lucide-react"
 import Link from "next/link"
 import { TelegramAuthFlow } from "./telegram-auth-flow"
 import { WorkspaceSelector } from "./workspace-selector"
@@ -758,6 +758,42 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
             {error}
           </div>
         )}
+
+        {/* Links para subpaginas */}
+        <section className="mb-8 rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
+            <Link
+              href="/settings/workspaces"
+              className="flex items-center justify-between p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="rounded-full bg-blue-100 p-2 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+                  <Briefcase className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="font-medium">Gerenciar Workspaces</p>
+                  <p className="text-sm text-zinc-500">Editar, excluir e definir workspace padrao</p>
+                </div>
+              </div>
+              <ChevronRight className="h-5 w-5 text-zinc-400" />
+            </Link>
+            <Link
+              href="/settings/automations"
+              className="flex items-center justify-between p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="rounded-full bg-violet-100 p-2 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400">
+                  <Zap className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="font-medium">Automacoes</p>
+                  <p className="text-sm text-zinc-500">Regras automaticas para conversas</p>
+                </div>
+              </div>
+              <ChevronRight className="h-5 w-5 text-zinc-400" />
+            </Link>
+          </div>
+        </section>
 
         {/* Som Section */}
         <section className="mb-8 rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">

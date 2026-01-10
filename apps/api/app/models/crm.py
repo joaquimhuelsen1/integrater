@@ -13,6 +13,7 @@ from .enums import (
     DealActivityType,
     AutomationTriggerType,
     AutomationActionType,
+    AutomationExecutionStatus,
 )
 
 
@@ -318,6 +319,28 @@ class AutomationRule(AutomationRuleBase, TimestampMixin, BaseSchema):
     owner_id: UUID
     pipeline_id: UUID
     is_active: bool
+
+
+# ============================================
+# Automation Execution (historico de execucoes)
+# ============================================
+class AutomationExecution(BaseSchema):
+    id: UUID
+    owner_id: UUID
+    rule_id: UUID
+    deal_id: UUID
+    trigger_type: AutomationTriggerType
+    trigger_data: dict[str, Any] = {}
+    action_type: AutomationActionType
+    action_data: dict[str, Any] = {}
+    status: AutomationExecutionStatus
+    error_message: str | None = None
+    executed_at: datetime
+
+
+class AutomationExecutionWithRule(AutomationExecution):
+    """Execution com dados da regra (para listagem)."""
+    rule: AutomationRule | None = None
 
 
 # ============================================

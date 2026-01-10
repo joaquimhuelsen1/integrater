@@ -101,6 +101,7 @@ class DealActivityType(str, Enum):
 
 class AutomationTriggerType(str, Enum):
     message_received = "message_received"
+    message_sent = "message_sent"
     stage_changed = "stage_changed"
     time_in_stage = "time_in_stage"
     field_changed = "field_changed"
@@ -112,3 +113,10 @@ class AutomationActionType(str, Enum):
     update_field = "update_field"
     create_task = "create_task"
     send_notification = "send_notification"
+    add_tag = "add_tag"
+    send_message = "send_message"
+
+
+class AutomationExecutionStatus(str, Enum):
+    success = "success"
+    failed = "failed"
