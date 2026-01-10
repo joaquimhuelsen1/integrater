@@ -1,0 +1,181 @@
+"use client"
+
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from "recharts"
+import { RefreshCw } from "lucide-react"
+
+export interface TrendData {
+  date: string
+  created: number
+  won: number
+  lost: number
+  won_value: number
+}
+
+interface TrendChartProps {
+  data: TrendData[]
+  isLoading?: boolean
+}
+
+const formatCurrency = (value: number) => {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    notation: value >= 1000000 ? "compact" : "standard",
+    maximumFractionDigits: value >= 1000000 ? 1 : 0,
+  }).format(value)
+}
+
+const formatDate = (dateStr: string) => {
+  const date = new Date(dateStr)
+  return date.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+  })
+}
+
+interface CustomTooltipProps {
+  active?: boolean
+  payload?: Array<{
+    name: string
+    value: number
+    color: string
+    dataKey: string
+    payload: TrendData
+  }>
+  label?: string
+}
+
+function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
+  if (!active || !payload || !payload.length || !payload[0]) return null
+
+  const data = payload[0].payload
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-3 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+      <p className="mb-2 font-medium text-zinc-900 dark:text-zinc-100">
+        {label ? formatDate(label) : ""}
+      </p>
+      <div className="space-y-1 text-sm">
+        <div className="flex items-center gap-2">
+          <div className="h-2 w-2 rounded-full bg-blue-500" />
+          <span className="text-zinc-600 dark:text-zinc-400">Criados:</span>
+          <span className="font-medium">{data?.created ?? 0}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="h-2 w-2 rounded-full bg-green-500" />
+          <span className="text-zinc-600 dark:text-zinc-400">Ganhos:</span>
+          <span className="font-medium">{data?.won ?? 0}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="h-2 w-2 rounded-full bg-red-500" />
+          <span className="text-zinc-600 dark:text-zinc-400">Perdidos:</span>
+          <span className="font-medium">{data?.lost ?? 0}</span>
+        </div>
+        {data?.won_value !== undefined && data.won_value > 0 && (
+          <div className="mt-2 border-t border-zinc-200 pt-2 dark:border-zinc-700">
+            <span className="text-zinc-600 dark:text-zinc-400">Valor ganho: </span>
+            <span className="font-medium text-green-600 dark:text-green-400">
+              {formatCurrency(data.won_value)}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export function TrendChart({ data, isLoading }: TrendChartProps) {
+  if (isLoading) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <RefreshCw className="h-6 w-6 animate-spin text-zinc-400" />
+      </div>
+    )
+  }
+
+  if (!data || data.length === 0) {
+    return (
+      <div className="flex h-64 items-center justify-center text-zinc-400">
+        Sem dados para o periodo selecionado
+      </div>
+    )
+  }
+
+  return (
+    <div className="h-64 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart
+          data={data}
+          margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
+        >
+          <CartesianGrid
+            strokeDasharray="3 3"
+            stroke="currentColor"
+            className="text-zinc-200 dark:text-zinc-700"
+          />
+          <XAxis
+            dataKey="date"
+            tickFormatter={formatDate}
+            tick={{ fontSize: 12 }}
+            stroke="currentColor"
+            className="text-zinc-500"
+          />
+          <YAxis
+            tick={{ fontSize: 12 }}
+            stroke="currentColor"
+            className="text-zinc-500"
+            allowDecimals={false}
+          />
+          <Tooltip content={<CustomTooltip />} />
+          <Legend
+            wrapperStyle={{ fontSize: "12px" }}
+            formatter={(value) => {
+              const labels: Record<string, string> = {
+                created: "Criados",
+                won: "Ganhos",
+                lost: "Perdidos",
+              }
+              return labels[value] || value
+            }}
+          />
+          <Line
+            type="monotone"
+            dataKey="created"
+            stroke="#3b82f6"
+            strokeWidth={2}
+            dot={{ r: 3 }}
+            activeDot={{ r: 5 }}
+            name="created"
+          />
+          <Line
+            type="monotone"
+            dataKey="won"
+            stroke="#22c55e"
+            strokeWidth={2}
+            dot={{ r: 3 }}
+            activeDot={{ r: 5 }}
+            name="won"
+          />
+          <Line
+            type="monotone"
+            dataKey="lost"
+            stroke="#ef4444"
+            strokeWidth={2}
+            dot={{ r: 3 }}
+            activeDot={{ r: 5 }}
+            name="lost"
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}

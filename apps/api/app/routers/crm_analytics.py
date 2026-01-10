@@ -175,7 +175,7 @@ async def get_performance_data(
         ).date().isoformat()
 
         if created_date not in daily_data:
-            daily_data[created_date] = {"created": 0, "won": 0, "lost": 0, "won_value": 0}
+            daily_data[created_date] = {"created": 0, "won": 0, "lost": 0, "won_value": Decimal("0")}
         daily_data[created_date]["created"] += 1
 
         # Won
@@ -184,9 +184,9 @@ async def get_performance_data(
                 deal["won_at"].replace("Z", "+00:00")
             ).date().isoformat()
             if won_date not in daily_data:
-                daily_data[won_date] = {"created": 0, "won": 0, "lost": 0, "won_value": 0}
+                daily_data[won_date] = {"created": 0, "won": 0, "lost": 0, "won_value": Decimal("0")}
             daily_data[won_date]["won"] += 1
-            daily_data[won_date]["won_value"] += float(deal["value"])
+            daily_data[won_date]["won_value"] += Decimal(str(deal["value"]))
 
         # Lost
         if deal.get("lost_at"):
@@ -194,18 +194,24 @@ async def get_performance_data(
                 deal["lost_at"].replace("Z", "+00:00")
             ).date().isoformat()
             if lost_date not in daily_data:
-                daily_data[lost_date] = {"created": 0, "won": 0, "lost": 0, "won_value": 0}
+                daily_data[lost_date] = {"created": 0, "won": 0, "lost": 0, "won_value": Decimal("0")}
             daily_data[lost_date]["lost"] += 1
 
     # Convert to sorted list
     sorted_dates = sorted(daily_data.keys())
     performance = [
-        {"date": date, **daily_data[date]}
+        {
+            "date": date,
+            "created": daily_data[date]["created"],
+            "won": daily_data[date]["won"],
+            "lost": daily_data[date]["lost"],
+            "won_value": float(daily_data[date]["won_value"])
+        }
         for date in sorted_dates
         if datetime.fromisoformat(date) >= date_from.date()
     ]
 
-    return {"performance": performance}
+    return {"trend": performance}
 
 
 @router.get("/top-deals")
@@ -607,17 +613,17 @@ async def get_comparison(
             elif lost_at >= previous_start:
                 previous_period["lost_deals"] += 1
 
-    # Calcular variações
+    # Calcular variacoes percentuais
     def calc_variation(current: float, previous: float) -> float:
         if previous == 0:
             return 100.0 if current > 0 else 0.0
         return round((current - previous) / previous * 100, 1)
 
     variations = {
-        "new_deals": calc_variation(current_period["new_deals"], previous_period["new_deals"]),
-        "won_deals": calc_variation(current_period["won_deals"], previous_period["won_deals"]),
-        "lost_deals": calc_variation(current_period["lost_deals"], previous_period["lost_deals"]),
-        "won_value": calc_variation(float(current_period["won_value"]), float(previous_period["won_value"])),
+        "new_deals_pct": calc_variation(current_period["new_deals"], previous_period["new_deals"]),
+        "won_deals_pct": calc_variation(current_period["won_deals"], previous_period["won_deals"]),
+        "lost_deals_pct": calc_variation(current_period["lost_deals"], previous_period["lost_deals"]),
+        "won_value_pct": calc_variation(float(current_period["won_value"]), float(previous_period["won_value"])),
     }
 
     return {
