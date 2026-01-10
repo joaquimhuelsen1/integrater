@@ -42,7 +42,7 @@ from shared.crypto import decrypt
 from shared.heartbeat import Heartbeat
 
 # Importa modulos locais
-from webhooks import notify_inbound_email, notify_outbound_email
+from webhooks import notify_inbound_email
 from api import app as fastapi_app, set_worker, EMAIL_WORKER_HTTP_PORT
 from ses import send_email_ses, is_ses_configured
 
@@ -469,30 +469,16 @@ class EmailWorker:
         )
         
         if smtp_result["success"]:
-            # SMTP funcionou - salva na pasta Sent e notifica
+            # SMTP funcionou - salva na pasta Sent
+            # NOTA: NAO notifica n8n aqui - o endpoint /email/send ja insere a mensagem
             message_id = smtp_result["message_id"]
             msg = smtp_result.get("msg")
-            
+
             if msg:
                 await self._save_to_sent_folder(account_id, msg, config, from_email, password)
-            
+
             print(f"[SMTP] Email enviado para {to_email}: {subject}")
-            
-            await notify_outbound_email(
-                account_id=account_id,
-                owner_id=owner_id,
-                workspace_id=workspace_id,
-                from_email=from_email,
-                to_email=to_email,
-                subject=subject,
-                body=body,
-                html=html,
-                attachments=None,
-                message_id=message_id,
-                in_reply_to=in_reply_to,
-                timestamp=datetime.now(timezone.utc),
-            )
-            
+
             return {"success": True, "message_id": message_id, "method": "smtp"}
         
         # 2. SMTP falhou - verifica se deve tentar SES
@@ -522,24 +508,10 @@ class EmailWorker:
             )
             
             if ses_result["success"]:
+                # NOTA: NAO notifica n8n aqui - o endpoint /email/send ja insere a mensagem
                 message_id = ses_result["message_id"]
                 print(f"[SES] Email enviado para {to_email}: {subject}")
-                
-                await notify_outbound_email(
-                    account_id=account_id,
-                    owner_id=owner_id,
-                    workspace_id=workspace_id,
-                    from_email=from_email,
-                    to_email=to_email,
-                    subject=subject,
-                    body=body,
-                    html=html,
-                    attachments=None,
-                    message_id=message_id,
-                    in_reply_to=in_reply_to,
-                    timestamp=datetime.now(timezone.utc),
-                )
-                
+
                 return {"success": True, "message_id": message_id, "method": "ses"}
             else:
                 # SES tambem falhou
