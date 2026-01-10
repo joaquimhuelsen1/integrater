@@ -987,7 +987,7 @@ async def send_message_from_deal(
 
     # Buscar integration_account para validar
     int_account_result = db.table("integration_accounts").select(
-        "id, type, is_active, credentials_encrypted"
+        "id, type, is_active, secrets_encrypted"
     ).eq("id", str(data.integration_account_id)).eq(
         "owner_id", str(owner_id)
     ).eq("is_active", True).single().execute()
