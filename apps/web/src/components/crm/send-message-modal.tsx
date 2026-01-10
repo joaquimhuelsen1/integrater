@@ -236,18 +236,30 @@ export function SendMessageModal({
     setManualPhone("")
   }, [channel])
 
-  // Pre-preencher inputs manuais com custom_fields quando nao tem identities
+  // Pre-preencher inputs manuais quando campo esta vazio e nao tem identity selecionada
   useEffect(() => {
-    if (filteredIdentities.length === 0 && fullDeal?.custom_fields) {
-      const cf = fullDeal.custom_fields as Record<string, unknown>
-      if (channel === "email" && cf.email_compra) {
-        setManualEmail(String(cf.email_compra))
-      }
-      if (channel === "openphone_sms" && cf.telefone_contato) {
-        setManualPhone(String(cf.telefone_contato))
+    if (!fullDeal) return
+
+    // Pre-preencher email quando vazio e sem identity
+    if (channel === "email" && !manualEmail && !selectedIdentity) {
+      // Tentar custom_fields primeiro, depois campo raiz
+      const cf = fullDeal.custom_fields as Record<string, unknown> | undefined
+      const emailValue = cf?.email_compra || fullDeal.email_compra
+      if (emailValue) {
+        setManualEmail(String(emailValue))
       }
     }
-  }, [channel, filteredIdentities.length, fullDeal])
+
+    // Pre-preencher telefone quando vazio e sem identity
+    if (channel === "openphone_sms" && !manualPhone && !selectedIdentity) {
+      // Tentar custom_fields primeiro, depois campo raiz
+      const cf = fullDeal.custom_fields as Record<string, unknown> | undefined
+      const phoneValue = cf?.telefone_contato || fullDeal.telefone_contato
+      if (phoneValue) {
+        setManualPhone(String(phoneValue))
+      }
+    }
+  }, [channel, fullDeal, manualEmail, manualPhone, selectedIdentity])
 
   // Auto-selecionar primeira conta quando disponivel E nao tem selecao
   // Usar length para evitar loops
@@ -486,13 +498,13 @@ export function SendMessageModal({
                       <div>
                         <input
                           type="tel"
-                          placeholder="+55 11 99999-9999"
+                          placeholder="+1 555 123-4567"
                           value={manualPhone}
                           onChange={(e) => setManualPhone(e.target.value)}
                           className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-sm dark:border-zinc-700 dark:bg-zinc-800"
                         />
                         <p className="text-xs text-zinc-500 mt-1">
-                          Formato: +55 DDD NUMERO
+                          Formato: +1 XXXXXXXXXX
                         </p>
                       </div>
                     )}

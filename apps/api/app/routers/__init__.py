@@ -25,6 +25,7 @@ from .analytics import router as analytics_router
 from .loss_reasons import router as loss_reasons_router
 from .webhooks import router as webhooks_router
 from .automations import router as automations_router
+from .integrations import router as integrations_router
 
 __all__ = [
     "health_router",
@@ -54,4 +55,5 @@ __all__ = [
     "loss_reasons_router",
     "webhooks_router",
     "automations_router",
+    "integrations_router",
 ]
