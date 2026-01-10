@@ -254,3 +254,385 @@ async def get_overdue_deals(
     result = query.order("expected_close_date").limit(limit).execute()
 
     return {"deals": result.data or []}
+
+
+@router.get("/sales-cycle")
+async def get_sales_cycle(
+    pipeline_id: Optional[UUID] = None,
+    days: int = Query(default=30, ge=1, le=365),
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Retorna métricas do ciclo de vendas (tempo médio entre criação e won)."""
+    date_from = datetime.utcnow() - timedelta(days=days)
+
+    # Buscar deals ganhos no período
+    query = db.table("deals").select("created_at, won_at").eq(
+        "owner_id", str(owner_id)
+    ).not_.is_("won_at", "null")
+
+    if pipeline_id:
+        query = query.eq("pipeline_id", str(pipeline_id))
+
+    result = query.execute()
+    deals = result.data or []
+
+    # Filtrar deals ganhos no período
+    won_in_period = []
+    for deal in deals:
+        won_at = datetime.fromisoformat(deal["won_at"].replace("Z", "+00:00"))
+        if won_at.replace(tzinfo=None) >= date_from:
+            created_at = datetime.fromisoformat(deal["created_at"].replace("Z", "+00:00"))
+            cycle_days = (won_at - created_at).days
+            won_in_period.append(cycle_days)
+
+    if not won_in_period:
+        return {
+            "avg_days": 0,
+            "min_days": 0,
+            "max_days": 0,
+            "deals_count": 0,
+            "period_days": days,
+        }
+
+    avg_days = sum(won_in_period) / len(won_in_period)
+
+    return {
+        "avg_days": round(avg_days, 1),
+        "min_days": min(won_in_period),
+        "max_days": max(won_in_period),
+        "deals_count": len(won_in_period),
+        "period_days": days,
+    }
+
+
+@router.get("/win-rate-by-stage/{pipeline_id}")
+async def get_win_rate_by_stage(
+    pipeline_id: UUID,
+    days: int = Query(default=90, ge=1, le=365),
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Retorna win rate por stage (conversão entre stages)."""
+    date_from = datetime.utcnow() - timedelta(days=days)
+
+    # Buscar stages do pipeline
+    stages_result = db.table("stages").select("id, name, position, color").eq(
+        "pipeline_id", str(pipeline_id)
+    ).eq("owner_id", str(owner_id)).order("position").execute()
+    stages = stages_result.data or []
+
+    if not stages:
+        return {"stages": []}
+
+    # Buscar atividades de mudança de stage no período
+    activities_result = db.table("deal_activities").select(
+        "deal_id, old_value, new_value, created_at"
+    ).eq("owner_id", str(owner_id)).eq(
+        "activity_type", "stage_change"
+    ).gte("created_at", date_from.isoformat()).execute()
+
+    activities = activities_result.data or []
+
+    # Buscar deals para saber quais foram won/lost
+    deals_result = db.table("deals").select(
+        "id, won_at, lost_at"
+    ).eq("pipeline_id", str(pipeline_id)).eq("owner_id", str(owner_id)).execute()
+
+    deals = {d["id"]: d for d in (deals_result.data or [])}
+
+    # Mapear stage_id -> dados
+    stage_stats = {}
+    for stage in stages:
+        stage_stats[stage["id"]] = {
+            "stage_id": stage["id"],
+            "stage_name": stage["name"],
+            "position": stage["position"],
+            "color": stage["color"],
+            "deals_entered": 0,
+            "deals_to_won": 0,
+            "deals_to_lost": 0,
+            "win_rate": 0.0,
+        }
+
+    # Processar atividades
+    for activity in activities:
+        old_stage = activity.get("old_value")
+        new_stage = activity.get("new_value")
+        deal_id = activity["deal_id"]
+
+        # Contar entrada em stage
+        if new_stage and new_stage in stage_stats:
+            stage_stats[new_stage]["deals_entered"] += 1
+
+        # Verificar se deal foi won ou lost
+        deal = deals.get(deal_id)
+        if deal and old_stage and old_stage in stage_stats:
+            if deal.get("won_at"):
+                stage_stats[old_stage]["deals_to_won"] += 1
+            elif deal.get("lost_at"):
+                stage_stats[old_stage]["deals_to_lost"] += 1
+
+    # Calcular win rate por stage
+    result_stages = []
+    for stage in stages:
+        stats = stage_stats[stage["id"]]
+        total_exits = stats["deals_to_won"] + stats["deals_to_lost"]
+        if total_exits > 0:
+            stats["win_rate"] = round(stats["deals_to_won"] / total_exits * 100, 1)
+        result_stages.append(stats)
+
+    return {"stages": result_stages, "period_days": days}
+
+
+@router.get("/loss-reasons-stats")
+async def get_loss_reasons_stats(
+    pipeline_id: Optional[UUID] = None,
+    days: int = Query(default=90, ge=1, le=365),
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Retorna estatísticas de motivos de perda."""
+    date_from = datetime.utcnow() - timedelta(days=days)
+
+    # Buscar deals perdidos no período
+    query = db.table("deals").select(
+        "id, value, lost_at, lost_reason_id"
+    ).eq("owner_id", str(owner_id)).not_.is_("lost_at", "null")
+
+    if pipeline_id:
+        query = query.eq("pipeline_id", str(pipeline_id))
+
+    result = query.execute()
+    deals = result.data or []
+
+    # Filtrar por período
+    lost_deals = []
+    for deal in deals:
+        lost_at = datetime.fromisoformat(deal["lost_at"].replace("Z", "+00:00"))
+        if lost_at.replace(tzinfo=None) >= date_from:
+            lost_deals.append(deal)
+
+    if not lost_deals:
+        return {"reasons": [], "total_lost": 0, "period_days": days}
+
+    # Buscar motivos de perda
+    reasons_result = db.table("loss_reasons").select("id, name").eq(
+        "owner_id", str(owner_id)
+    ).execute()
+    reasons_map = {r["id"]: r["name"] for r in (reasons_result.data or [])}
+
+    # Agrupar por reason
+    reason_stats: dict[Optional[str], dict] = {}
+    for deal in lost_deals:
+        reason_id = deal.get("lost_reason_id")
+        if reason_id not in reason_stats:
+            reason_stats[reason_id] = {
+                "reason_id": reason_id,
+                "reason_name": reasons_map.get(reason_id, "Sem motivo") if reason_id else "Sem motivo",
+                "count": 0,
+                "total_value": Decimal("0"),
+            }
+        reason_stats[reason_id]["count"] += 1
+        reason_stats[reason_id]["total_value"] += Decimal(str(deal["value"]))
+
+    # Calcular percentuais
+    total_lost = len(lost_deals)
+    reasons_list = []
+    for stats in reason_stats.values():
+        stats["percentage"] = round(stats["count"] / total_lost * 100, 1)
+        stats["total_value"] = float(stats["total_value"])
+        reasons_list.append(stats)
+
+    # Ordenar por count descrescente
+    reasons_list.sort(key=lambda x: x["count"], reverse=True)
+
+    return {"reasons": reasons_list, "total_lost": total_lost, "period_days": days}
+
+
+@router.get("/channel-performance")
+async def get_channel_performance(
+    pipeline_id: Optional[UUID] = None,
+    days: int = Query(default=30, ge=1, le=365),
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Retorna performance por canal de comunicação."""
+    date_from = datetime.utcnow() - timedelta(days=days)
+
+    # Buscar conversations por canal
+    conversations_result = db.table("conversations").select(
+        "id, channel, contact_id"
+    ).eq("owner_id", str(owner_id)).execute()
+    conversations = conversations_result.data or []
+
+    # Mapear conversation -> channel
+    conv_channel_map = {c["id"]: c["channel"] for c in conversations}
+    conv_contact_map = {c["id"]: c["contact_id"] for c in conversations}
+
+    # Buscar mensagens no período
+    messages_result = db.table("messages").select(
+        "conversation_id, created_at"
+    ).eq("owner_id", str(owner_id)).gte(
+        "created_at", date_from.isoformat()
+    ).execute()
+    messages = messages_result.data or []
+
+    # Buscar deals para calcular won_value por canal
+    deals_query = db.table("deals").select(
+        "id, contact_id, value, won_at"
+    ).eq("owner_id", str(owner_id)).not_.is_("won_at", "null")
+
+    if pipeline_id:
+        deals_query = deals_query.eq("pipeline_id", str(pipeline_id))
+
+    deals_result = deals_query.execute()
+    deals = deals_result.data or []
+
+    # Mapear contact -> deals ganhos no período
+    contact_won_value: dict[str, Decimal] = {}
+    for deal in deals:
+        won_at = datetime.fromisoformat(deal["won_at"].replace("Z", "+00:00"))
+        if won_at.replace(tzinfo=None) >= date_from:
+            contact_id = deal.get("contact_id")
+            if contact_id:
+                if contact_id not in contact_won_value:
+                    contact_won_value[contact_id] = Decimal("0")
+                contact_won_value[contact_id] += Decimal(str(deal["value"]))
+
+    # Agregar por canal
+    channel_stats: dict[str, dict] = {}
+    contacts_by_channel: dict[str, set] = {}
+
+    for msg in messages:
+        conv_id = msg["conversation_id"]
+        channel = conv_channel_map.get(conv_id, "unknown")
+        contact_id = conv_contact_map.get(conv_id)
+
+        if channel not in channel_stats:
+            channel_stats[channel] = {
+                "channel": channel,
+                "messages_count": 0,
+                "deals_touched": 0,
+                "won_value": Decimal("0"),
+            }
+            contacts_by_channel[channel] = set()
+
+        channel_stats[channel]["messages_count"] += 1
+
+        if contact_id:
+            contacts_by_channel[channel].add(contact_id)
+
+    # Calcular deals_touched e won_value por canal
+    for channel, contacts in contacts_by_channel.items():
+        channel_stats[channel]["deals_touched"] = len(contacts)
+        for contact_id in contacts:
+            if contact_id in contact_won_value:
+                channel_stats[channel]["won_value"] += contact_won_value[contact_id]
+
+    # Converter Decimal para float
+    channels_list = []
+    for stats in channel_stats.values():
+        stats["won_value"] = float(stats["won_value"])
+        channels_list.append(stats)
+
+    # Ordenar por messages_count
+    channels_list.sort(key=lambda x: x["messages_count"], reverse=True)
+
+    return {"channels": channels_list, "period_days": days}
+
+
+@router.get("/comparison")
+async def get_comparison(
+    pipeline_id: Optional[UUID] = None,
+    days: int = Query(default=30, ge=1, le=365),
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Retorna comparativo entre período atual e anterior."""
+    now = datetime.utcnow()
+    current_start = now - timedelta(days=days)
+    previous_start = current_start - timedelta(days=days)
+
+    # Buscar todos os deals
+    query = db.table("deals").select(
+        "id, value, created_at, won_at, lost_at"
+    ).eq("owner_id", str(owner_id))
+
+    if pipeline_id:
+        query = query.eq("pipeline_id", str(pipeline_id))
+
+    result = query.execute()
+    deals = result.data or []
+
+    # Separar por período
+    current_period = {
+        "new_deals": 0,
+        "won_deals": 0,
+        "lost_deals": 0,
+        "won_value": Decimal("0"),
+    }
+    previous_period = {
+        "new_deals": 0,
+        "won_deals": 0,
+        "lost_deals": 0,
+        "won_value": Decimal("0"),
+    }
+
+    for deal in deals:
+        created_at = datetime.fromisoformat(deal["created_at"].replace("Z", "+00:00")).replace(tzinfo=None)
+        value = Decimal(str(deal["value"]))
+
+        # Novos deals
+        if created_at >= current_start:
+            current_period["new_deals"] += 1
+        elif created_at >= previous_start:
+            previous_period["new_deals"] += 1
+
+        # Won deals
+        if deal.get("won_at"):
+            won_at = datetime.fromisoformat(deal["won_at"].replace("Z", "+00:00")).replace(tzinfo=None)
+            if won_at >= current_start:
+                current_period["won_deals"] += 1
+                current_period["won_value"] += value
+            elif won_at >= previous_start:
+                previous_period["won_deals"] += 1
+                previous_period["won_value"] += value
+
+        # Lost deals
+        if deal.get("lost_at"):
+            lost_at = datetime.fromisoformat(deal["lost_at"].replace("Z", "+00:00")).replace(tzinfo=None)
+            if lost_at >= current_start:
+                current_period["lost_deals"] += 1
+            elif lost_at >= previous_start:
+                previous_period["lost_deals"] += 1
+
+    # Calcular variações
+    def calc_variation(current: float, previous: float) -> float:
+        if previous == 0:
+            return 100.0 if current > 0 else 0.0
+        return round((current - previous) / previous * 100, 1)
+
+    variations = {
+        "new_deals": calc_variation(current_period["new_deals"], previous_period["new_deals"]),
+        "won_deals": calc_variation(current_period["won_deals"], previous_period["won_deals"]),
+        "lost_deals": calc_variation(current_period["lost_deals"], previous_period["lost_deals"]),
+        "won_value": calc_variation(float(current_period["won_value"]), float(previous_period["won_value"])),
+    }
+
+    return {
+        "current_period": {
+            "new_deals": current_period["new_deals"],
+            "won_deals": current_period["won_deals"],
+            "lost_deals": current_period["lost_deals"],
+            "won_value": float(current_period["won_value"]),
+        },
+        "previous_period": {
+            "new_deals": previous_period["new_deals"],
+            "won_deals": previous_period["won_deals"],
+            "lost_deals": previous_period["lost_deals"],
+            "won_value": float(previous_period["won_value"]),
+        },
+        "variations": variations,
+        "period_days": days,
+    }

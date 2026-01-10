@@ -88,6 +88,10 @@ export function SendMessageModal({
   const [body, setBody] = useState("")
   const [isSending, setIsSending] = useState(false)
 
+  // Inputs manuais para envio direto (sem identity previa)
+  const [manualEmail, setManualEmail] = useState("")
+  const [manualPhone, setManualPhone] = useState("")
+
   // Dados carregados
   const [templates, setTemplates] = useState<Template[]>([])
   const [integrationAccounts, setIntegrationAccounts] = useState<IntegrationAccount[]>([])
@@ -98,6 +102,7 @@ export function SendMessageModal({
   // Preview com placeholders
   const [showPreview, setShowPreview] = useState(false)
   const [dealData, setDealData] = useState<DealData | null>(null)
+  const [fullDeal, setFullDeal] = useState<Record<string, unknown> | null>(null)
 
   // Ref para evitar re-execucao do carregamento
   const loadedRef = useRef(false)
@@ -116,6 +121,7 @@ export function SendMessageModal({
         let loadedDealData: DealData | null = null
         if (dealRes.ok) {
           const deal = await dealRes.json()
+          setFullDeal(deal)  // Salvar deal completo para custom_fields
 
           // Buscar telefone de multiplas fontes
           let phone: string | null = null
@@ -226,7 +232,22 @@ export function SendMessageModal({
   useEffect(() => {
     setIntegrationAccountId("")
     setSelectedIdentity(null)
+    setManualEmail("")
+    setManualPhone("")
   }, [channel])
+
+  // Pre-preencher inputs manuais com custom_fields quando nao tem identities
+  useEffect(() => {
+    if (filteredIdentities.length === 0 && fullDeal?.custom_fields) {
+      const cf = fullDeal.custom_fields as Record<string, unknown>
+      if (channel === "email" && cf.email_compra) {
+        setManualEmail(String(cf.email_compra))
+      }
+      if (channel === "openphone_sms" && cf.telefone_contato) {
+        setManualPhone(String(cf.telefone_contato))
+      }
+    }
+  }, [channel, filteredIdentities.length, fullDeal])
 
   // Auto-selecionar primeira conta quando disponivel E nao tem selecao
   // Usar length para evitar loops
@@ -258,11 +279,31 @@ export function SendMessageModal({
   const replacePlaceholders = (text: string): string => {
     if (!dealData) return text
 
-    return text
+    let result = text
+      // Placeholders basicos existentes
       .replace(/\{nome\}/gi, dealData.contact_name || "[nome]")
       .replace(/\{email\}/gi, dealData.contact_email || "[email]")
       .replace(/\{valor\}/gi, formatCurrency(dealData.value))
       .replace(/\{deal\}/gi, dealData.title || "[deal]")
+
+    // Placeholders de custom_fields
+    if (fullDeal?.custom_fields && typeof fullDeal.custom_fields === "object") {
+      const cf = fullDeal.custom_fields as Record<string, unknown>
+
+      // Placeholders fixos de custom_fields
+      result = result
+        .replace(/\{email_compra\}/gi, cf.email_compra ? String(cf.email_compra) : "[email_compra]")
+        .replace(/\{telefone_contato\}/gi, cf.telefone_contato ? String(cf.telefone_contato) : "[telefone_contato]")
+        .replace(/\{nome_completo\}/gi, cf.nome_completo ? String(cf.nome_completo) : "[nome_completo]")
+
+      // Placeholder dinamico: {cf:qualquer_campo}
+      result = result.replace(/\{cf:(\w+)\}/gi, (_match, fieldName: string) => {
+        const value = cf[fieldName]
+        return value !== undefined && value !== null ? String(value) : `[${fieldName}]`
+      })
+    }
+
+    return result
   }
 
   const formatCurrency = (val: number) => {
@@ -272,6 +313,17 @@ export function SendMessageModal({
     }).format(val)
   }
 
+  // Verifica se pode enviar (identity OU input manual)
+  const canSend = useMemo(() => {
+    if (!body.trim() || !integrationAccountId) return false
+    // Tem identity selecionada
+    if (selectedIdentity) return true
+    // OU tem input manual valido
+    if (channel === "email" && manualEmail.trim()) return true
+    if (channel === "openphone_sms" && manualPhone.trim()) return true
+    return false
+  }, [body, integrationAccountId, selectedIdentity, channel, manualEmail, manualPhone])
+
   // Enviar mensagem
   const handleSend = async () => {
     if (!body.trim()) return
@@ -279,23 +331,45 @@ export function SendMessageModal({
       alert("Selecione uma conta de envio")
       return
     }
-    if (!selectedIdentity) {
-      alert("Contato sem " + (channel === "email" ? "email" : "telefone") + " cadastrado")
+
+    // Validar destinatario
+    const hasIdentity = !!selectedIdentity
+    const hasManualEmail = channel === "email" && manualEmail.trim()
+    const hasManualPhone = channel === "openphone_sms" && manualPhone.trim()
+
+    if (!hasIdentity && !hasManualEmail && !hasManualPhone) {
+      alert("Informe o destinatario")
       return
     }
 
     setIsSending(true)
     try {
+      // Montar payload com identity OU input manual
+      const payload: Record<string, unknown> = {
+        channel,
+        integration_account_id: integrationAccountId,
+        body: replacePlaceholders(body),
+      }
+
+      if (selectedIdentity) {
+        payload.to_identity_id = selectedIdentity.id
+      } else if (channel === "email" && manualEmail.trim()) {
+        payload.to_email = manualEmail.trim()
+      } else if (channel === "openphone_sms" && manualPhone.trim()) {
+        payload.to_phone = manualPhone.trim()
+      }
+
+      if (channel === "email" && subject) {
+        payload.subject = replacePlaceholders(subject)
+      }
+
+      if (templateId) {
+        payload.template_id = templateId
+      }
+
       const res = await apiFetch(`/deals/${dealId}/send-message`, {
         method: "POST",
-        body: JSON.stringify({
-          channel,
-          integration_account_id: integrationAccountId,
-          to_identity_id: selectedIdentity.id,
-          subject: channel === "email" ? subject : undefined,
-          body: replacePlaceholders(body),
-          ...(templateId && { template_id: templateId }),
-        }),
+        body: JSON.stringify(payload),
       })
 
       if (res.ok) {
@@ -394,10 +468,34 @@ export function SendMessageModal({
               <div>
                 <label className="block text-sm font-medium mb-2">Destinatario</label>
                 {filteredIdentities.length === 0 ? (
-                  <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-700 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400">
-                    {contactId
-                      ? `Contato sem ${channel === "email" ? "email" : "telefone"} cadastrado`
-                      : "Nenhum contato vinculado ao deal"}
+                  <div className="space-y-2">
+                    {channel === "email" ? (
+                      <div>
+                        <input
+                          type="email"
+                          placeholder="email@exemplo.com"
+                          value={manualEmail}
+                          onChange={(e) => setManualEmail(e.target.value)}
+                          className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-sm dark:border-zinc-700 dark:bg-zinc-800"
+                        />
+                        <p className="text-xs text-zinc-500 mt-1">
+                          Informe o email para envio direto
+                        </p>
+                      </div>
+                    ) : (
+                      <div>
+                        <input
+                          type="tel"
+                          placeholder="+55 11 99999-9999"
+                          value={manualPhone}
+                          onChange={(e) => setManualPhone(e.target.value)}
+                          className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-sm dark:border-zinc-700 dark:bg-zinc-800"
+                        />
+                        <p className="text-xs text-zinc-500 mt-1">
+                          Formato: +55 DDD NUMERO
+                        </p>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <select
@@ -485,7 +583,7 @@ export function SendMessageModal({
                   />
                 )}
                 <p className="mt-1 text-xs text-zinc-500">
-                  Placeholders: {"{nome}"}, {"{email}"}, {"{valor}"}, {"{deal}"}
+                  Placeholders: {"{nome}"}, {"{email}"}, {"{valor}"}, {"{deal}"}, {"{email_compra}"}, {"{telefone_contato}"}, {"{nome_completo}"}, {"{cf:campo}"}
                 </p>
               </div>
             </>
@@ -502,7 +600,7 @@ export function SendMessageModal({
           </button>
           <button
             onClick={handleSend}
-            disabled={isSending || !body.trim() || !integrationAccountId || !selectedIdentity}
+            disabled={isSending || !canSend}
             className="flex items-center gap-2 rounded-lg bg-blue-500 px-4 py-2.5 md:py-2 text-sm font-medium text-white hover:bg-blue-600 active:bg-blue-700 disabled:opacity-50"
           >
             <Send className="h-4 w-4" />

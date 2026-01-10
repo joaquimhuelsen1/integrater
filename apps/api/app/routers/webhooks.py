@@ -29,6 +29,13 @@ class WebhookDealCreate(BaseModel):
     title: str
     value: float = 0
     contact_id: str | None = None
+
+    # Campos estruturados (enviados pelo n8n)
+    email_compra: str | None = None
+    telefone_contato: str | None = None
+    nome_completo: str | None = None
+
+    # Campos genéricos
     info: str | None = None
     custom_fields: dict[str, Any] = {}
     tags: list[str] = []
@@ -45,20 +52,38 @@ async def create_deal_via_workspace_webhook(
 ):
     """
     Cria um deal via webhook usando API key do workspace.
-    
+
     URL: POST /webhooks/{workspace_id}/deals
-    
+
     Headers:
         X-API-Key: API key do workspace (obrigatório)
         X-Pipeline-Id: ID do pipeline (opcional, default primeiro pipeline)
         X-Stage-Id: ID do stage (opcional, default primeiro stage)
-    
+
     Body:
         title: Nome do deal (obrigatório)
         value: Valor do deal (opcional, default 0)
         contact_id: ID do contato (opcional)
+        email_compra: Email de compra (opcional, vai para custom_fields)
+        telefone_contato: Telefone de contato (opcional, vai para custom_fields)
+        nome_completo: Nome completo (opcional, vai para custom_fields)
         info: Informações formatadas (opcional)
+        custom_fields: Campos customizados genéricos (opcional)
         tags: Lista de nomes de tags (cria automaticamente se não existir)
+
+    Exemplo de payload:
+        {
+            "title": "Venda - João Silva",
+            "value": 1500.00,
+            "email_compra": "joao@email.com",
+            "telefone_contato": "+5511999999999",
+            "nome_completo": "João da Silva",
+            "tags": ["hotmart", "curso-x"]
+        }
+
+    Nota: Campos estruturados (email_compra, telefone_contato, nome_completo)
+    são mesclados em custom_fields. Se houver conflito com campos genéricos
+    em custom_fields, os campos estruturados prevalecem.
     """
     # Valida workspace existe
     workspace_result = db.table("workspaces").select(
@@ -131,6 +156,18 @@ async def create_deal_via_workspace_webhook(
                 detail="Stage não pertence ao pipeline"
             )
 
+    # Mescla campos estruturados em custom_fields
+    merged_custom_fields = {
+        **data.custom_fields,  # Campos genéricos primeiro
+    }
+    # Adiciona campos estruturados se existirem (sobrescrevem genéricos)
+    if data.email_compra:
+        merged_custom_fields["email_compra"] = data.email_compra
+    if data.telefone_contato:
+        merged_custom_fields["telefone_contato"] = data.telefone_contato
+    if data.nome_completo:
+        merged_custom_fields["nome_completo"] = data.nome_completo
+
     # Cria o deal
     deal_payload = {
         "owner_id": owner_id,
@@ -139,7 +176,7 @@ async def create_deal_via_workspace_webhook(
         "title": data.title,
         "value": data.value,
         "info": data.info,
-        "custom_fields": data.custom_fields,
+        "custom_fields": merged_custom_fields,
     }
 
     if data.contact_id:

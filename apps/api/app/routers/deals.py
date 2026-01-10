@@ -2,13 +2,14 @@
 Router Deals - CRUD de deals, produtos e atividades (CRM).
 """
 import os
+import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from supabase import Client
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional
-from pydantic import BaseModel
+from typing import Optional, Literal
+from pydantic import BaseModel, field_validator, model_validator
 import httpx
 
 from app.deps import get_supabase, get_current_user_id
@@ -831,11 +832,63 @@ async def delete_file(
 # ============================================
 class DealSendMessageRequest(BaseModel):
     """Request para enviar mensagem a partir de um deal."""
-    channel: str  # "email" | "openphone_sms"
+    channel: Literal["email", "openphone_sms"]
     integration_account_id: UUID
-    to_identity_id: UUID
+
+    # Opcao 1: identity existente
+    to_identity_id: UUID | None = None
+
+    # Opcao 2: envio direto (sem identity previa)
+    to_email: str | None = None       # Para email
+    to_phone: str | None = None       # Para SMS (normalizado para E.164)
+
     subject: str | None = None  # Apenas para email
     body: str
+    template_id: UUID | None = None
+
+    @field_validator("to_phone", mode="before")
+    @classmethod
+    def normalize_phone(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        # Remover espacos, hifens, parenteses
+        phone = re.sub(r"[\s\-\(\)]", "", v)
+        # Adicionar + se nao tiver
+        if not phone.startswith("+"):
+            # Assumir EUA (+1) se nao tiver codigo de pais
+            if phone.startswith("1") and len(phone) == 11:
+                phone = "+" + phone
+            else:
+                phone = "+1" + phone
+
+        # Validar formato US: +1XXXXXXXXXX = 11 digitos (1 + 10 digitos do numero)
+        digits_only = re.sub(r"\D", "", phone)
+        if len(digits_only) != 11 or not phone.startswith("+1"):
+            raise ValueError("Telefone deve estar no formato US: +1XXXXXXXXXX (11 digitos)")
+
+        return phone
+
+    @field_validator("to_email", mode="before")
+    @classmethod
+    def normalize_email(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return v.lower().strip()
+
+    @model_validator(mode="after")
+    def validate_channel_recipient(self) -> "DealSendMessageRequest":
+        """Valida que o destinatario corresponde ao canal escolhido."""
+        # Se tem identity_id, nao precisa validar
+        if self.to_identity_id:
+            return self
+
+        if self.channel == "email" and self.to_phone and not self.to_email:
+            raise ValueError("Canal email requer to_email, nao to_phone")
+
+        if self.channel == "openphone_sms" and self.to_email and not self.to_phone:
+            raise ValueError("Canal SMS requer to_phone, nao to_email")
+
+        return self
 
 
 @router.post("/{deal_id}/send-message", status_code=201)
@@ -851,16 +904,9 @@ async def send_message_from_deal(
     Suporta canais: email, openphone_sms
     Apos envio bem-sucedido, dispara trigger message_sent para automacoes.
     """
-    # Validar canal
-    if data.channel not in ("email", "openphone_sms"):
-        raise HTTPException(
-            status_code=400,
-            detail="Canal invalido. Use 'email' ou 'openphone_sms'"
-        )
-
-    # Buscar deal para obter contact_id
+    # Buscar deal para obter contact_id e workspace_id
     deal_result = db.table("deals").select(
-        "id, contact_id, title, value, pipeline_id, stage_id"
+        "id, contact_id, title, value, pipeline_id, stage_id, pipelines(workspace_id)"
     ).eq("id", str(deal_id)).eq("owner_id", str(owner_id)).single().execute()
 
     if not deal_result.data:
@@ -868,17 +914,76 @@ async def send_message_from_deal(
 
     deal = deal_result.data
     contact_id = deal.get("contact_id")
+    workspace_id = deal.get("pipelines", {}).get("workspace_id") if deal.get("pipelines") else None
 
-    # Buscar identity para obter valor (email ou telefone)
-    identity_result = db.table("contact_identities").select(
-        "id, type, value"
-    ).eq("id", str(data.to_identity_id)).single().execute()
+    # Determinar destinatario: identity existente OU envio direto
+    to_address: str | None = None
+    identity_id_for_conversation: str | None = None
 
-    if not identity_result.data:
-        raise HTTPException(status_code=404, detail="Identity nao encontrada")
+    if data.to_identity_id:
+        # Opcao 1: buscar identity existente
+        identity_result = db.table("contact_identities").select(
+            "id, type, value"
+        ).eq("id", str(data.to_identity_id)).single().execute()
 
-    identity = identity_result.data
-    to_address = identity.get("value")
+        if not identity_result.data:
+            raise HTTPException(status_code=404, detail="Identity nao encontrada")
+
+        identity = identity_result.data
+        to_address = identity.get("value")
+        identity_id_for_conversation = str(data.to_identity_id)
+
+    elif data.to_email and data.channel == "email":
+        # Opcao 2a: envio direto para email
+        to_address = data.to_email
+
+        # Criar identity orfa se nao existir
+        existing = db.table("contact_identities").select("id").eq(
+            "owner_id", str(owner_id)
+        ).eq("type", "email").eq("value", to_address).execute()
+
+        if existing.data:
+            identity_id_for_conversation = existing.data[0]["id"]
+        else:
+            insert_data = {
+                "owner_id": str(owner_id),
+                "type": "email",
+                "value": to_address,
+            }
+            if workspace_id:
+                insert_data["workspace_id"] = str(workspace_id)
+            new_identity = db.table("contact_identities").insert(insert_data).execute()
+            if new_identity.data:
+                identity_id_for_conversation = new_identity.data[0]["id"]
+
+    elif data.to_phone and data.channel == "openphone_sms":
+        # Opcao 2b: envio direto para telefone
+        to_address = data.to_phone  # Ja normalizado pelo validator
+
+        # Criar identity orfa se nao existir
+        existing = db.table("contact_identities").select("id").eq(
+            "owner_id", str(owner_id)
+        ).eq("type", "phone").eq("value", to_address).execute()
+
+        if existing.data:
+            identity_id_for_conversation = existing.data[0]["id"]
+        else:
+            insert_data = {
+                "owner_id": str(owner_id),
+                "type": "phone",
+                "value": to_address,
+            }
+            if workspace_id:
+                insert_data["workspace_id"] = str(workspace_id)
+            new_identity = db.table("contact_identities").insert(insert_data).execute()
+            if new_identity.data:
+                identity_id_for_conversation = new_identity.data[0]["id"]
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Informe to_identity_id, to_email ou to_phone"
+        )
 
     # Buscar integration_account para validar
     int_account_result = db.table("integration_accounts").select(
@@ -907,11 +1012,12 @@ async def send_message_from_deal(
         )
 
         # Buscar conversation existente ou None
-        conv_result = db.table("conversations").select("id").eq(
-            "owner_id", str(owner_id)
-        ).eq("primary_identity_id", str(data.to_identity_id)).limit(1).execute()
-
-        conversation_id = conv_result.data[0]["id"] if conv_result.data else None
+        conversation_id = None
+        if identity_id_for_conversation:
+            conv_result = db.table("conversations").select("id").eq(
+                "owner_id", str(owner_id)
+            ).eq("primary_identity_id", identity_id_for_conversation).limit(1).execute()
+            conversation_id = conv_result.data[0]["id"] if conv_result.data else None
 
         try:
             async with httpx.AsyncClient(timeout=30) as client:
@@ -981,11 +1087,12 @@ async def send_message_from_deal(
         )
 
         # Buscar conversation existente ou None
-        conv_result = db.table("conversations").select("id").eq(
-            "owner_id", str(owner_id)
-        ).eq("primary_identity_id", str(data.to_identity_id)).limit(1).execute()
-
-        conversation_id = conv_result.data[0]["id"] if conv_result.data else None
+        conversation_id = None
+        if identity_id_for_conversation:
+            conv_result = db.table("conversations").select("id").eq(
+                "owner_id", str(owner_id)
+            ).eq("primary_identity_id", identity_id_for_conversation).limit(1).execute()
+            conversation_id = conv_result.data[0]["id"] if conv_result.data else None
 
         try:
             async with httpx.AsyncClient(timeout=30) as client:
