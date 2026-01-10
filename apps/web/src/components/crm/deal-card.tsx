@@ -3,12 +3,19 @@
 import { useState } from "react"
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { Trophy, XCircle, MoreVertical, Trash2, Archive, MessageSquare } from "lucide-react"
+import { Trophy, XCircle, MoreVertical, Trash2, Archive, MessageSquare, Mail, Phone } from "lucide-react"
 
 interface DealTag {
   id: string
   name: string
   color: string
+}
+
+interface CustomFields {
+  email_compra?: string
+  telefone_contato?: string
+  nome_completo?: string
+  [key: string]: string | undefined
 }
 
 interface Deal {
@@ -22,6 +29,7 @@ interface Deal {
   conversation_id?: string | null
   contact?: { id: string; display_name: string | null } | null
   tags?: DealTag[]
+  custom_fields?: CustomFields | null
   won_at: string | null
   lost_at: string | null
   created_at: string
@@ -243,6 +251,24 @@ export function DealCard({ deal, onClick, isDragging, onArchive, onDelete, onSen
           <span className="truncate text-xs text-zinc-600 dark:text-zinc-400">
             {deal.contact.display_name}
           </span>
+        </div>
+      )}
+
+      {/* Custom Fields - Contact Info */}
+      {deal.custom_fields && (deal.custom_fields.email_compra || deal.custom_fields.telefone_contato) && (
+        <div className="mb-2 space-y-1">
+          {deal.custom_fields.email_compra && (
+            <div className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+              <Mail className="h-3 w-3 flex-shrink-0" />
+              <span className="truncate">{deal.custom_fields.email_compra}</span>
+            </div>
+          )}
+          {deal.custom_fields.telefone_contato && deal.custom_fields.telefone_contato !== deal.custom_fields.email_compra && (
+            <div className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+              <Phone className="h-3 w-3 flex-shrink-0" />
+              <span className="truncate">{deal.custom_fields.telefone_contato}</span>
+            </div>
+          )}
         </div>
       )}
 
