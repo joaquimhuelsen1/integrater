@@ -256,7 +256,7 @@ export function SendMessageModal({
           to_identity_id: selectedIdentity.id,
           subject: channel === "email" ? subject : undefined,
           body: replacePlaceholders(body),
-          template_id: templateId,
+          ...(templateId && { template_id: templateId }),
         }),
       })
 

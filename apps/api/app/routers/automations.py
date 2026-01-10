@@ -145,6 +145,23 @@ async def toggle_automation_rule(
 # ============================================
 # Automation Executions (Historico)
 # ============================================
+@router.get("/executions", response_model=list[AutomationExecution])
+async def list_all_executions(
+    deal_id: Optional[UUID] = Query(default=None, description="Filtrar por deal"),
+    limit: int = Query(default=20, le=200),
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Lista execucoes de automacoes globalmente ou filtradas por deal."""
+    query = db.table("automation_executions").select("*").eq("owner_id", str(owner_id))
+
+    if deal_id:
+        query = query.eq("deal_id", str(deal_id))
+
+    result = query.order("executed_at", desc=True).limit(limit).execute()
+    return result.data
+
+
 @router.get("/{rule_id}/executions", response_model=list[AutomationExecution])
 async def list_rule_executions(
     rule_id: UUID,

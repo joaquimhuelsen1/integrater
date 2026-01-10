@@ -52,6 +52,7 @@ interface PipelineBoardProps {
   onCreateDeal: (stageId: string) => void
   onArchiveDeal?: (dealId: string) => void
   onDeleteDeal?: (dealId: string) => void
+  onSendMessage?: (dealId: string) => void
 }
 
 export function PipelineBoard({
@@ -61,6 +62,7 @@ export function PipelineBoard({
   onCreateDeal,
   onArchiveDeal,
   onDeleteDeal,
+  onSendMessage,
 }: PipelineBoardProps) {
   const [activeDeal, setActiveDeal] = useState<Deal | null>(null)
 
@@ -168,6 +170,7 @@ export function PipelineBoard({
             onCreateDeal={onCreateDeal}
             onArchiveDeal={onArchiveDeal}
             onDeleteDeal={onDeleteDeal}
+            onSendMessage={onSendMessage}
           />
         ))}
       </div>

@@ -9,6 +9,7 @@ import { DealModal } from "./deal-modal"
 import { PipelineSettings } from "./pipeline-settings"
 import { CRMDashboard } from "./crm-dashboard"
 import { LossReasonModal } from "./loss-reason-modal"
+import { SendMessageModal } from "./send-message-modal"
 import { DealFilters, defaultFilters, type DealFiltersState } from "./deal-filters"
 import { WorkspaceSelector } from "@/components/workspace-selector"
 import { ThemeToggle } from "@/components/theme-toggle"
@@ -78,6 +79,13 @@ export function CRMView() {
   const [pendingLossMove, setPendingLossMove] = useState<{
     deal: Deal
     targetStageId: string
+  } | null>(null)
+
+  // Send message modal state
+  const [showSendMessageModal, setShowSendMessageModal] = useState(false)
+  const [selectedDealForMessage, setSelectedDealForMessage] = useState<{
+    dealId: string
+    contactId: string | null
   } | null>(null)
 
   const { currentWorkspace } = useWorkspace()
@@ -337,6 +345,20 @@ export function CRMView() {
     }
   }
 
+  const handleSendMessage = (dealId: string) => {
+    // Encontrar o deal para obter contact_id
+    let contactId: string | null = null
+    for (const stage of stages) {
+      const deal = stage.deals.find((d) => d.id === dealId)
+      if (deal) {
+        contactId = deal.contact_id
+        break
+      }
+    }
+    setSelectedDealForMessage({ dealId, contactId })
+    setShowSendMessageModal(true)
+  }
+
   // Apply filters to stages/deals
   const filteredStages = useMemo(() => {
     return stages.map((stage) => {
@@ -565,6 +587,7 @@ export function CRMView() {
                 onCreateDeal={handleCreateDeal}
                 onArchiveDeal={handleArchiveDeal}
                 onDeleteDeal={handleDeleteDeal}
+                onSendMessage={handleSendMessage}
               />
             </div>
 
@@ -579,6 +602,7 @@ export function CRMView() {
                     onClick={() => handleDealClick(deal.id)}
                     onArchive={handleArchiveDeal}
                     onDelete={handleDeleteDeal}
+                    onSendMessage={handleSendMessage}
                   />
                 )) || (
                 <div className="flex flex-col items-center justify-center h-40 text-zinc-500 text-sm">
@@ -610,6 +634,7 @@ export function CRMView() {
             setCreateDealStageId(null)
           }}
           onSave={handleDealSaved}
+          onSendMessage={handleSendMessage}
         />
       )}
 
@@ -644,6 +669,22 @@ export function CRMView() {
           stageId={pendingLossMove.targetStageId}
           onClose={() => setPendingLossMove(null)}
           onConfirm={handleLossConfirm}
+        />
+      )}
+
+      {/* Send Message Modal */}
+      {showSendMessageModal && selectedDealForMessage && (
+        <SendMessageModal
+          dealId={selectedDealForMessage.dealId}
+          contactId={selectedDealForMessage.contactId}
+          onClose={() => {
+            setShowSendMessageModal(false)
+            setSelectedDealForMessage(null)
+          }}
+          onSent={() => {
+            setShowSendMessageModal(false)
+            setSelectedDealForMessage(null)
+          }}
         />
       )}
     </div>
