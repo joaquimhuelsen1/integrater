@@ -52,6 +52,42 @@ def validate_e164(phone: str) -> str:
     return phone
 
 
+def normalize_phone_e164(value: str) -> str:
+    """Normaliza telefone para formato E.164 (foco US)."""
+    if not value:
+        raise ValueError("Telefone nao pode ser vazio")
+
+    # Remove espacos, hifens, parenteses, pontos
+    phone = re.sub(r"[\s\-\(\)\.]", "", value)
+
+    # Se ja tem + e parece valido, processar
+    had_plus = phone.startswith("+")
+    if had_plus:
+        phone = phone[1:]
+
+    # Remove caracteres nao numericos
+    digits = re.sub(r"\D", "", phone)
+
+    # Detecta pais (foco US)
+    if len(digits) == 10:
+        # EUA 10 digitos sem codigo de pais
+        return "+1" + digits
+    elif len(digits) == 11 and digits.startswith("1"):
+        # EUA/Canada: 1 + area(3) + numero(7)
+        return "+" + digits
+    elif digits.startswith("55") and len(digits) in (12, 13):
+        # Brasil: 55 + DDD(2) + numero(8-9)
+        return "+" + digits
+    elif had_plus and 8 <= len(digits) <= 15:
+        # Tinha + e parece E.164 valido
+        return "+" + digits
+    elif 8 <= len(digits) <= 15:
+        # Fallback: assume que precisa de +
+        return "+" + digits
+    else:
+        raise ValueError(f"Telefone invalido: {value}")
+
+
 # --- Models ---
 
 class OpenPhoneAccountCreate(BaseModel):
@@ -497,9 +533,10 @@ async def internal_send_sms(
     
     if not identity_result.data:
         raise HTTPException(status_code=404, detail="Identity nao encontrada")
-    
-    to_phone = identity_result.data["value"]
-    
+
+    # Normaliza telefone para formato E.164
+    to_phone = normalize_phone_e164(identity_result.data["value"])
+
     # Buscar conta OpenPhone
     account_result = db.table("integration_accounts").select(
         "id, config, secrets_encrypted"
