@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import { apiFetch } from "@/lib/api"
 import {
   TrendingUp,
   TrendingDown,
@@ -111,8 +112,6 @@ export function CRMDashboard({ pipelineId, onClose }: CRMDashboardProps) {
   const [channelPerformance, setChannelPerformance] = useState<ChannelData[]>([])
   const [trendData, setTrendData] = useState<TrendData[]>([])
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-
   const loadData = useCallback(async () => {
     setIsLoading(true)
     try {
@@ -134,16 +133,16 @@ export function CRMDashboard({ pipelineId, onClose }: CRMDashboardProps) {
         channelRes,
         performanceRes,
       ] = await Promise.all([
-        fetch(`${API_URL}/crm/stats?${params}`),
-        pipelineId ? fetch(`${API_URL}/crm/funnel/${pipelineId}`) : Promise.resolve(null),
-        fetch(`${API_URL}/crm/top-deals?${params}&limit=5`),
-        fetch(`${API_URL}/crm/overdue-deals?${params}&limit=5`),
-        fetch(`${API_URL}/crm/sales-cycle?${params}`),
-        fetch(`${API_URL}/crm/comparison?${params}`),
-        fetch(`${API_URL}/crm/loss-reasons-stats?${params}`),
-        pipelineId ? fetch(`${API_URL}/crm/win-rate-by-stage/${pipelineId}?${params}`) : Promise.resolve(null),
-        fetch(`${API_URL}/crm/channel-performance?${params}`),
-        pipelineId ? fetch(`${API_URL}/crm/performance/${pipelineId}?${params}`) : Promise.resolve(null),
+        apiFetch(`/crm/stats?${params}`),
+        pipelineId ? apiFetch(`/crm/funnel/${pipelineId}`) : Promise.resolve(null),
+        apiFetch(`/crm/top-deals?${params}&limit=5`),
+        apiFetch(`/crm/overdue-deals?${params}&limit=5`),
+        apiFetch(`/crm/sales-cycle?${params}`),
+        apiFetch(`/crm/comparison?${params}`),
+        apiFetch(`/crm/loss-reasons-stats?${params}`),
+        pipelineId ? apiFetch(`/crm/win-rate-by-stage/${pipelineId}?${params}`) : Promise.resolve(null),
+        apiFetch(`/crm/channel-performance?${params}`),
+        pipelineId ? apiFetch(`/crm/performance/${pipelineId}?${params}`) : Promise.resolve(null),
       ])
 
       // Process existing responses
@@ -199,7 +198,7 @@ export function CRMDashboard({ pipelineId, onClose }: CRMDashboardProps) {
     } finally {
       setIsLoading(false)
     }
-  }, [API_URL, pipelineId, days])
+  }, [pipelineId, days])
 
   useEffect(() => {
     loadData()
