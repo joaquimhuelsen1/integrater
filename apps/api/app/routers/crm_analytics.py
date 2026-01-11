@@ -404,7 +404,7 @@ async def get_loss_reasons_stats(
 
     # Buscar deals perdidos no período
     query = db.table("deals").select(
-        "id, value, lost_at, lost_reason_id"
+        "id, value, lost_at, loss_reason_id"
     ).eq("owner_id", str(owner_id)).not_.is_("lost_at", "null")
 
     if pipeline_id:
@@ -432,7 +432,7 @@ async def get_loss_reasons_stats(
     # Agrupar por reason
     reason_stats: dict[Optional[str], dict] = {}
     for deal in lost_deals:
-        reason_id = deal.get("lost_reason_id")
+        reason_id = deal.get("loss_reason_id")
         if reason_id not in reason_stats:
             reason_stats[reason_id] = {
                 "reason_id": reason_id,
