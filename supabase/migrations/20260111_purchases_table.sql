@@ -43,12 +43,9 @@ create index if not exists idx_purchases_email on public.purchases(email);
 create index if not exists idx_purchases_order_id on public.purchases(order_id);
 create index if not exists idx_purchases_source on public.purchases(source);
 
--- =============================================
--- CONSTRAINT COMPOSTA
--- =============================================
 -- Constraint composta para evitar duplicatas entre plataformas
-ALTER TABLE public.purchases
-  ADD CONSTRAINT purchases_order_source_uniq UNIQUE (order_id, source);
+alter table public.purchases
+  add constraint purchases_order_source_uniq unique (order_id, source);
 
 -- =============================================
 -- RLS POLICIES
@@ -56,19 +53,19 @@ ALTER TABLE public.purchases
 alter table public.purchases enable row level security;
 
 -- Policy para SELECT (frontend pode ler)
-DROP POLICY IF EXISTS owner_all_purchases ON public.purchases;
-DROP POLICY IF EXISTS owner_select_purchases ON public.purchases;
-CREATE POLICY owner_select_purchases ON public.purchases
-  FOR SELECT USING (owner_id = auth.uid());
+drop policy if exists owner_select_purchases on public.purchases;
+create policy owner_select_purchases on public.purchases
+  for select using (owner_id = auth.uid());
 
--- Policy para INSERT/UPDATE/DELETE via service_role (backend apenas)
-DROP POLICY IF EXISTS service_insert_purchases ON public.purchases;
-CREATE POLICY service_insert_purchases ON public.purchases
-  FOR INSERT WITH CHECK (true);
+-- Policy para INSERT via service_role (backend apenas)
+drop policy if exists service_insert_purchases on public.purchases;
+create policy service_insert_purchases on public.purchases
+  for insert with check (true);
 
-DROP POLICY IF EXISTS service_update_purchases ON public.purchases;
-CREATE POLICY service_update_purchases ON public.purchases
-  FOR UPDATE USING (true) WITH CHECK (true);
+-- Policy para UPDATE via service_role (backend apenas)
+drop policy if exists service_update_purchases on public.purchases;
+create policy service_update_purchases on public.purchases
+  for update using (true) with check (true);
 
 -- =============================================
 -- TRIGGERS
@@ -84,4 +81,4 @@ create trigger purchases_updated_at
 comment on table public.purchases is 'Compras confirmadas de plataformas externas (Digistore24, etc)';
 comment on column public.purchases.source is 'Plataforma de origem: digistore24, hotmart, stripe, etc';
 comment on column public.purchases.source_data is 'Payload completo do webhook para auditoria';
-comment on column public.purchases.order_id is 'ID unico do pedido na plataforma de origem';
+comment on column public.purchases.order_id is 'ID do pedido na plataforma de origem';

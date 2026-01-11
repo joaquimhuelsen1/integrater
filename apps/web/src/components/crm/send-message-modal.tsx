@@ -4,6 +4,38 @@ import { useState, useEffect, useMemo, useRef } from "react"
 import { X, Send, Mail, MessageSquare, FileText, Eye } from "lucide-react"
 import { apiFetch } from "@/lib/api"
 
+/**
+ * Normaliza telefone para formato E.164
+ * Remove caracteres especiais e adiciona codigo de pais
+ */
+function normalizePhone(value: string | null | undefined): string {
+  if (!value) return ""
+
+  // Remove espacos, hifens, parenteses
+  let phone = value.replace(/[\s\-\(\)]/g, "")
+
+  // Se ja tem +, retorna como esta
+  if (phone.startsWith("+")) return phone
+
+  // Detecta pais
+  if (phone.startsWith("55") && (phone.length === 12 || phone.length === 13)) {
+    // Brasil: 55 + DDD(2) + numero(8-9)
+    return "+" + phone
+  } else if (phone.startsWith("1") && phone.length === 11) {
+    // EUA/Canada: 1 + area(3) + numero(7)
+    return "+" + phone
+  } else if (phone.length === 10) {
+    // EUA 10 digitos sem codigo de pais
+    return "+1" + phone
+  } else if (phone.length === 11 && phone.startsWith("55")) {
+    // Brasil sem DDD completo (improvavel)
+    return "+" + phone
+  }
+
+  // Fallback: adiciona + se nao tiver
+  return phone.startsWith("+") ? phone : "+" + phone
+}
+
 interface Template {
   id: string
   title: string
@@ -131,7 +163,7 @@ export function SendMessageModal({
               (i: ContactIdentity) => i.type === "phone"
             )
             if (phoneIdentity) {
-              phone = phoneIdentity.value
+              phone = normalizePhone(phoneIdentity.value)
             }
           }
           if (!phone && deal.info) {
@@ -162,7 +194,7 @@ export function SendMessageModal({
               loadedDealData = {
                 ...loadedDealData,
                 contact_email: emailId?.value || null,
-                contact_phone: phoneId?.value || loadedDealData.contact_phone || null,
+                contact_phone: phoneId?.value ? normalizePhone(phoneId.value) : loadedDealData.contact_phone || null,
               }
             }
           }

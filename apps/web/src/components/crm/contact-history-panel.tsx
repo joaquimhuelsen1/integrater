@@ -122,8 +122,8 @@ export function ContactHistoryPanel({
 
   const channelIcons: Record<string, string> = {
     telegram: "T",
-    email: "E",
-    sms: "S"
+    email: "@",
+    sms: "#"
   }
 
   return (
@@ -155,7 +155,7 @@ export function ContactHistoryPanel({
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-zinc-200 dark:border-zinc-700">
+      <div className="flex border-b dark:border-gray-700">
         <button
           onClick={() => setActiveTab("purchases")}
           className={`flex-1 border-b-2 px-3 py-2 text-sm font-medium ${
@@ -196,30 +196,30 @@ export function ContactHistoryPanel({
         {activeTab === "purchases" && (
           <div className="space-y-2">
             {history.purchases.length === 0 ? (
-              <div className="py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+              <div className="py-4 text-center text-sm text-gray-500">
                 Nenhuma compra registrada
               </div>
             ) : (
               history.purchases.map((purchase) => (
                 <div
                   key={purchase.id}
-                  className="flex items-center justify-between rounded-lg border border-zinc-200 p-3 dark:border-zinc-700"
+                  className="flex items-center justify-between rounded-lg border p-3 dark:border-gray-700"
                 >
                   <div>
-                    <div className="font-medium">{purchase.product_name}</div>
-                    <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                    <div className="font-medium dark:text-white">{purchase.product_name}</div>
+                    <div className="flex items-center gap-2 text-xs text-gray-500">
                       <Calendar className="h-3 w-3" />
                       {formatDate(purchase.purchased_at)}
-                      <span className="rounded bg-gray-100 px-1 dark:bg-zinc-700">
+                      <span className="rounded bg-gray-100 px-1 dark:bg-gray-800">
                         {purchase.source}
                       </span>
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="font-bold text-green-600 dark:text-green-400">
+                    <div className="font-bold text-green-600">
                       {formatCurrency(purchase.amount, purchase.currency)}
                     </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">{purchase.status}</div>
+                    <div className="text-xs text-gray-500">{purchase.status}</div>
                   </div>
                 </div>
               ))
@@ -230,25 +230,25 @@ export function ContactHistoryPanel({
         {activeTab === "deals" && (
           <div className="space-y-2">
             {history.deals.length === 0 ? (
-              <div className="py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+              <div className="py-4 text-center text-sm text-gray-500">
                 Nenhum deal vinculado
               </div>
             ) : (
               history.deals.map((deal) => (
                 <div
                   key={deal.id}
-                  className="flex items-center justify-between rounded-lg border border-zinc-200 p-3 dark:border-zinc-700"
+                  className="flex items-center justify-between rounded-lg border p-3 dark:border-gray-700"
                 >
                   <div>
-                    <div className="font-medium">{deal.title}</div>
-                    <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                    <div className="font-medium dark:text-white">{deal.title}</div>
+                    <div className="flex items-center gap-2 text-xs text-gray-500">
                       <span
                         className={`rounded px-1 ${
                           deal.status === "won"
-                            ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400"
+                            ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
                             : deal.status === "lost"
-                            ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-400"
-                            : "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-400"
+                            ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                            : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
                         }`}
                       >
                         {deal.stages?.name || deal.status}
@@ -257,7 +257,7 @@ export function ContactHistoryPanel({
                       {formatDate(deal.created_at)}
                     </div>
                   </div>
-                  <div className="text-right font-bold">
+                  <div className="text-right font-bold dark:text-white">
                     {formatCurrency(deal.value)}
                   </div>
                 </div>
@@ -269,7 +269,7 @@ export function ContactHistoryPanel({
         {activeTab === "conversations" && (
           <div className="space-y-2">
             {history.conversations.length === 0 ? (
-              <div className="py-4 text-center text-sm text-gray-500 dark:text-gray-400">
+              <div className="py-4 text-center text-sm text-gray-500">
                 Nenhuma conversa encontrada
               </div>
             ) : (
@@ -277,21 +277,21 @@ export function ContactHistoryPanel({
                 <button
                   key={conv.id}
                   onClick={() => onSelectConversation?.(conv.id)}
-                  className="flex w-full items-center justify-between rounded-lg border border-zinc-200 p-3 text-left hover:bg-gray-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                  className="flex w-full items-center justify-between rounded-lg border p-3 text-left hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
                 >
                   <div className="flex items-center gap-2">
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-100 text-sm font-medium dark:bg-zinc-700">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-sm font-bold dark:bg-gray-800">
                       {channelIcons[conv.channel] || "?"}
                     </span>
                     <div>
-                      <div className="font-medium capitalize">{conv.channel}</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                      <div className="font-medium capitalize dark:text-white">{conv.channel}</div>
+                      <div className="text-xs text-gray-500">
                         {conv.contact_identities?.value || ""}
                       </div>
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                    <div className="text-xs text-gray-500">
                       {formatDate(conv.last_message_at)}
                     </div>
                     <ExternalLink className="h-4 w-4 text-gray-400" />
