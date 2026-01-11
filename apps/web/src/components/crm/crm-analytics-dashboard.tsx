@@ -549,7 +549,7 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
         return (
           <div className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
             <h3 className="mb-4 font-semibold">Funil de Vendas</h3>
-            <div className="flex flex-col items-center space-y-1">
+            <div className="flex flex-col items-center space-y-1 mx-auto max-w-md">
               {filteredFunnel.map((stage, index, arr) => {
                 const width = Math.max(100 - index * 15, 25)
                 const nextStage = arr[index + 1]
@@ -561,7 +561,7 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
                 return (
                   <Fragment key={stage.stage_id}>
                     <div
-                      className="relative flex items-center justify-center py-3 text-white font-medium"
+                      className="relative flex items-center justify-center py-2 text-white font-medium"
                       style={{
                         width: `${width}%`,
                         backgroundColor: stage.stage_color,
