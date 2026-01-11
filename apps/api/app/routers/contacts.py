@@ -221,10 +221,21 @@ async def get_contact_history(
 
     # Buscar deals
     deals_result = db.table("deals").select(
-        "id, title, value, status, stage_id, stages(name), created_at, won_at, lost_at"
+        "id, title, value, stage_id, stages(name), created_at, won_at, lost_at"
     ).eq("contact_id", str(contact_id)).order(
         "created_at", desc=True
     ).execute()
+
+    # Inferir status dos deals
+    deals_with_status = []
+    for deal in (deals_result.data or []):
+        status = "open"
+        if deal.get("won_at"):
+            status = "won"
+        elif deal.get("lost_at"):
+            status = "lost"
+        deal["status"] = status
+        deals_with_status.append(deal)
 
     # Buscar conversas
     conversations_result = db.table("conversations").select(
@@ -236,13 +247,13 @@ async def get_contact_history(
     # Calcular estatisticas
     total_purchases = sum(p.get("amount", 0) for p in (purchases_result.data or []))
     total_deals_value = sum(
-        d.get("value", 0) for d in (deals_result.data or []) if d.get("status") == "won"
+        d.get("value", 0) for d in deals_with_status if d.get("status") == "won"
     )
 
     stats = {
         "total_purchases": len(purchases_result.data or []),
         "total_purchases_value": total_purchases,
-        "total_deals": len(deals_result.data or []),
+        "total_deals": len(deals_with_status),
         "total_deals_won_value": total_deals_value,
         "total_conversations": len(conversations_result.data or [])
     }
@@ -250,7 +261,7 @@ async def get_contact_history(
     return ContactHistoryResponse(
         contact=contact,
         purchases=purchases_result.data or [],
-        deals=deals_result.data or [],
+        deals=deals_with_status,
         conversations=conversations_result.data or [],
         stats=stats
     )

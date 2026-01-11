@@ -163,7 +163,7 @@ function SortableBlock({ id, children, size }: SortableBlockProps) {
     <div
       ref={setNodeRef}
       style={style}
-      className={`relative ${sizeClass} ${isDragging ? "z-50 opacity-75" : ""}`}
+      className={`relative ${sizeClass} ${isDragging ? "z-50 opacity-75" : "z-0"}`}
     >
       <div
         {...attributes}
@@ -250,14 +250,17 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
   // Carregar pipelines disponíveis
   useEffect(() => {
     const loadPipelines = async () => {
+      if (!currentWorkspace?.id) return  // Aguardar workspace
+
       try {
-        const res = await apiFetch("/crm/pipelines")
+        const res = await apiFetch(`/pipelines?workspace_id=${currentWorkspace.id}`)
         if (res.ok) {
           const data = await res.json()
-          setPipelines(data.pipelines || [])
-          // Selecionar primeiro por padrão se houver
-          if (data.pipelines?.length > 0 && !selectedPipelineId) {
-            setSelectedPipelineId(data.pipelines[0].id)
+          // API retorna array direto, não { pipelines: [...] }
+          const pipelinesList = Array.isArray(data) ? data : (data.pipelines || [])
+          setPipelines(pipelinesList)
+          if (pipelinesList.length > 0 && !selectedPipelineId) {
+            setSelectedPipelineId(pipelinesList[0].id)
           }
         }
       } catch (error) {
@@ -265,7 +268,7 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
       }
     }
     loadPipelines()
-  }, [])
+  }, [currentWorkspace?.id])  // Dependência do workspace
 
   // Load data function
   const loadData = useCallback(async () => {
