@@ -127,7 +127,7 @@ export function useRealtimeDeals({
       supabase.removeChannel(channelRef.current)
     }
 
-    // Cria novo canal com filtro por pipeline_id
+    // Cria novo canal sem filtro server-side (filtro no callback para evitar problemas com RLS)
     const channel = supabase
       .channel(channelName)
       .on(
@@ -136,10 +136,15 @@ export function useRealtimeDeals({
           event: "*", // INSERT, UPDATE, DELETE
           schema: "public",
           table: "deals",
-          filter: `pipeline_id=eq.${pipelineId}`,
         },
         (payload) => {
-          handleChange(payload as RealtimePostgresChangesPayload<RealtimeDeal>)
+          // Filtrar no client-side para evitar problemas com Supabase Realtime + RLS
+          const record = (payload.new || payload.old) as RealtimeDeal | undefined
+          if (record && record.pipeline_id === pipelineId) {
+            handleChange(payload as RealtimePostgresChangesPayload<RealtimeDeal>)
+          } else {
+            console.log(`[Realtime Deals] Ignorando deal de outro pipeline (${record?.pipeline_id})`)
+          }
         }
       )
       .subscribe((status) => {
