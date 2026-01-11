@@ -58,7 +58,7 @@ Se ocupada: **MATAR PROCESSO**. Nunca usar porta alternativa.
 | Backend | Python 3.11+ + FastAPI + Docker |
 | Workers | Telethon (Telegram) + imapclient (Email) |
 | DB | Supabase |
-| SMS | OpenPhone API |
+| SMS | OpenPhone API (foco US - formato +1XXXXXXXXXX) |
 | IA | Gemini Flash/Pro |
 
 ## Estrutura
