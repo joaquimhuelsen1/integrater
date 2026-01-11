@@ -768,7 +768,9 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
               <Calendar className="h-4 w-4 text-blue-500" />
               Tendencias
             </h3>
-            <TrendChart data={trendData} isLoading={isLoading} />
+            <div className="h-64">
+              <TrendChart data={trendData} isLoading={isLoading} />
+            </div>
           </div>
         )
 
