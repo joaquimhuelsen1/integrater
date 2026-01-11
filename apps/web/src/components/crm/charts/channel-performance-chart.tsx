@@ -199,27 +199,6 @@ export function ChannelPerformanceChart({ data, isLoading }: ChannelPerformanceC
           />
         </BarChart>
       </ResponsiveContainer>
-
-      {/* Cards resumo por canal */}
-      <div className="mt-4 grid grid-cols-3 gap-2 md:gap-4">
-        {chartData.map((item) => (
-          <div
-            key={item.channel}
-            className="rounded-lg border border-zinc-200 p-2 md:p-3 dark:border-zinc-700"
-          >
-            <div className="flex items-center gap-1.5 text-xs md:text-sm">
-              <ChannelIcon channel={item.channel} />
-              <span className="font-medium truncate">{item.name}</span>
-            </div>
-            <div className="mt-1 text-lg md:text-xl font-bold" style={{ color: item.fill }}>
-              {item.messages_count.toLocaleString("pt-BR")}
-            </div>
-            <div className="text-xs text-zinc-500 truncate">
-              {formatCurrency(item.won_value)}
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   )
 }
