@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from app.deps import get_supabase, get_current_user_id
-from app.models.crm import PipelineStats, StageStats, FunnelData, StageConversionResponse
+from app.models.crm import PipelineStats, StageStats, FunnelData, StageConversionResponse, StageConversionItem
 
 router = APIRouter(prefix="/crm", tags=["crm-analytics"])
 
@@ -399,89 +399,82 @@ async def get_stage_conversion(
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
-    """Retorna conversao entre stages (quantos deals passaram por cada etapa)."""
-    date_from = datetime.now(timezone.utc) - timedelta(days=days)
+    """Retorna conversao CUMULATIVA entre stages."""
 
-    # Buscar stages do pipeline ordenados por position
+    # Busca stages ordenados por position
     stages_result = db.table("stages").select("id, name, position, color").eq(
         "pipeline_id", str(pipeline_id)
     ).eq("owner_id", str(owner_id)).order("position").execute()
     stages = stages_result.data or []
 
     if not stages:
-        return {"stages": [], "period_days": days}
+        return StageConversionResponse(stages=[], period_days=days)
 
-    # Criar mapa de stage_id -> position para saber proxima stage
-    stage_positions = {s["id"]: s["position"] for s in stages}
-    position_to_stage = {s["position"]: s["id"] for s in stages}
-    max_position = max(s["position"] for s in stages)
+    # Busca TODOS os deals do pipeline (sem filtro de periodo)
+    deals_result = db.table("deals").select("id, stage_id").eq(
+        "pipeline_id", str(pipeline_id)
+    ).eq("owner_id", str(owner_id)).is_("archived_at", "null").execute()
+    deals = deals_result.data or []
 
-    # Buscar atividades de stage_change no periodo
+    total_deals = len(deals)
+    all_deal_ids = set(d["id"] for d in deals)
+
+    # Busca TODAS as atividades de stage_change (historico completo)
+    # Usar from_stage_id e to_stage_id (campos corretos)
     activities_result = db.table("deal_activities").select(
-        "deal_id, old_value, new_value, created_at"
+        "deal_id, from_stage_id, to_stage_id"
     ).eq("owner_id", str(owner_id)).eq(
         "activity_type", "stage_change"
-    ).gte("created_at", date_from.isoformat()).execute()
-
+    ).execute()
     activities = activities_result.data or []
 
-    # Buscar deals criados no periodo para contabilizar entrada inicial
-    deals_result = db.table("deals").select(
-        "id, stage_id, created_at"
-    ).eq("pipeline_id", str(pipeline_id)).eq("owner_id", str(owner_id)).gte(
-        "created_at", date_from.isoformat()
-    ).execute()
+    # Mapear positions
+    stage_positions = {s["id"]: s["position"] for s in stages}
 
-    deals_created = deals_result.data or []
-
-    # Inicializar stats por stage
-    stage_stats = {}
-    for stage in stages:
-        stage_stats[stage["id"]] = {
-            "stage_id": stage["id"],
-            "stage_name": stage["name"],
-            "stage_position": stage["position"],
-            "stage_color": stage["color"],
-            "deals_entered": 0,
-            "deals_progressed": 0,
-            "conversion_rate": 0.0,
-        }
-
-    # Contar deals criados diretamente em cada stage (entrada inicial)
-    for deal in deals_created:
-        stage_id = deal.get("stage_id")
-        if stage_id and stage_id in stage_stats:
-            stage_stats[stage_id]["deals_entered"] += 1
-
-    # Processar atividades de stage_change
-    for activity in activities:
-        new_stage = activity.get("new_value")
-        old_stage = activity.get("old_value")
-
-        # Contar entrada em stage via mudanca
-        if new_stage and new_stage in stage_stats:
-            stage_stats[new_stage]["deals_entered"] += 1
-
-        # Contar progressao: deal saiu de old_stage para proxima stage (position maior)
-        if old_stage and old_stage in stage_stats and new_stage and new_stage in stage_positions:
-            old_position = stage_positions.get(old_stage)
-            new_position = stage_positions.get(new_stage)
-            if old_position is not None and new_position is not None:
-                if new_position > old_position:
-                    # Deal avancou para proxima stage
-                    stage_stats[old_stage]["deals_progressed"] += 1
-
-    # Calcular conversion_rate por stage
+    # Calcular stats por stage
     result_stages = []
-    for stage in stages:
-        stats = stage_stats[stage["id"]]
-        if stats["deals_entered"] > 0:
-            stats["conversion_rate"] = round(
-                stats["deals_progressed"] / stats["deals_entered"] * 100, 1
-            )
-        result_stages.append(stats)
 
-    return {"stages": result_stages, "period_days": days}
+    for stage in stages:
+        stage_id = stage["id"]
+        position = stage["position"]
+
+        # Deals que ENTRARAM neste stage via atividades
+        entered_from_activities = set(
+            a["deal_id"] for a in activities
+            if a.get("to_stage_id") == stage_id
+        )
+
+        # Deals que ESTÃO atualmente neste stage
+        currently_in_stage = set(d["id"] for d in deals if d["stage_id"] == stage_id)
+
+        # União: deals que ESTÃO ou já PASSARAM por este stage
+        entered_deal_ids = entered_from_activities | currently_in_stage
+        deals_entered = len(entered_deal_ids)
+
+        # Deals que SAÍRAM deste stage para stage com position MAIOR
+        progressed_deal_ids = set(
+            a["deal_id"] for a in activities
+            if a.get("from_stage_id") == stage_id and
+               stage_positions.get(a.get("to_stage_id"), -1) > position
+        )
+        deals_progressed = len(progressed_deal_ids)
+
+        # Calcular conversion_rate
+        conversion_rate = round(
+            (deals_progressed / deals_entered * 100) if deals_entered > 0 else 0, 1
+        )
+
+        result_stages.append(StageConversionItem(
+            stage_id=stage_id,
+            stage_name=stage["name"],
+            stage_position=position,
+            stage_color=stage["color"],
+            deals_entered=deals_entered,
+            deals_progressed=deals_progressed,
+            conversion_rate=conversion_rate
+        ))
+
+    return StageConversionResponse(stages=result_stages, period_days=days)
 
 
 @router.get("/loss-reasons-stats")

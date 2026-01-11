@@ -466,7 +466,7 @@ export function CRMDashboard({ pipelineId, onClose }: CRMDashboardProps) {
                       <Calendar className="h-4 w-4 text-blue-500" />
                       Tendencias
                     </h3>
-                    <div className="flex-1 min-h-[300px]">
+                    <div className="flex-1 h-full">
                       <TrendChart data={trendData} />
                     </div>
                   </div>
