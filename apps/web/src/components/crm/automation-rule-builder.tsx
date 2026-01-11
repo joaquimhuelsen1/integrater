@@ -159,6 +159,21 @@ export function AutomationRuleBuilder({
     loadTemplates()
   }, [workspaceId, selectedPipelineId])
 
+  // Sincronizar subject quando regra existente e carregada com template_id
+  useEffect(() => {
+    if (templates.length > 0 && actionConfig.template_id && !actionConfig.subject) {
+      const template = templates.find(t => t.id === actionConfig.template_id)
+      if (template?.subject) {
+        setActionConfig(prev => ({
+          ...prev,
+          subject: template.subject,
+          // Tambem sincronizar message se estiver vazio
+          message: prev.message || template.content,
+        }))
+      }
+    }
+  }, [templates, actionConfig.template_id])
+
   // Carrega stages quando pipeline muda
   useEffect(() => {
     const loadStages = async () => {
