@@ -21,7 +21,7 @@ import os
 import re
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from supabase import Client
-from pydantic import BaseModel, field_validator, Field
+from pydantic import BaseModel, field_validator, Field, ConfigDict
 from uuid import UUID, uuid4
 from typing import Optional
 import httpx
@@ -486,9 +486,11 @@ async def send_sms(
 
 class InternalSendSMSRequest(BaseModel):
     """Request interno para n8n enviar SMS."""
-    conversation_id: str
+    conversation_id: Optional[str] = None
     text: str = Field(..., min_length=1, max_length=1600)
-    message_id: Optional[str] = None  # ID do frontend para evitar duplicata
+    message_id: Optional[str] = Field(None, alias="id")  # Aceita 'id' ou 'message_id'
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
 
 class InternalSendSMSResponse(BaseModel):
@@ -507,7 +509,7 @@ async def internal_send_sms(
 ):
     """
     Endpoint interno para n8n enviar SMS.
-    
+
     Descriptografa a API key do OpenPhone e envia a mensagem.
     Autenticado via X-API-KEY (mesmo do n8n webhook).
     """
@@ -515,6 +517,10 @@ async def internal_send_sms(
     expected_key = N8N_API_KEY
     if not expected_key or x_api_key != expected_key:
         raise HTTPException(status_code=401, detail="API key invalida")
+
+    # Validar conversation_id obrigatorio
+    if not request.conversation_id:
+        raise HTTPException(status_code=400, detail="conversation_id e obrigatorio")
     
     # Buscar conversa
     conv_result = db.table("conversations").select(
