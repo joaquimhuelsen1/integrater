@@ -328,33 +328,40 @@ export function SendMessageModal({
     }
   }
 
-  // Substituir placeholders no preview
+  // Substituir placeholders no preview e antes de enviar
   const replacePlaceholders = (text: string): string => {
-    if (!dealData) return text
+    if (!text || !fullDeal) return text
 
-    let result = text
-      // Placeholders basicos existentes
-      .replace(/\{nome\}/gi, dealData.contact_name || "[nome]")
-      .replace(/\{email\}/gi, dealData.contact_email || "[email]")
-      .replace(/\{valor\}/gi, formatCurrency(dealData.value))
-      .replace(/\{deal\}/gi, dealData.title || "[deal]")
+    const deal = fullDeal
+    const customFields = (deal.custom_fields || {}) as Record<string, unknown>
 
-    // Placeholders de custom_fields
-    if (fullDeal?.custom_fields && typeof fullDeal.custom_fields === "object") {
-      const cf = fullDeal.custom_fields as Record<string, unknown>
-
-      // Placeholders fixos de custom_fields
-      result = result
-        .replace(/\{email_compra\}/gi, cf.email_compra ? String(cf.email_compra) : "[email_compra]")
-        .replace(/\{telefone_contato\}/gi, cf.telefone_contato ? String(cf.telefone_contato) : "[telefone_contato]")
-        .replace(/\{nome_completo\}/gi, cf.nome_completo ? String(cf.nome_completo) : "[nome_completo]")
-
-      // Placeholder dinamico: {cf:qualquer_campo}
-      result = result.replace(/\{cf:(\w+)\}/gi, (_match, fieldName: string) => {
-        const value = cf[fieldName]
-        return value !== undefined && value !== null ? String(value) : `[${fieldName}]`
-      })
+    // Montar objeto de substituicoes
+    const replacements: Record<string, string> = {
+      // Placeholders basicos do deal
+      '{nome}': dealData?.contact_name?.split(' ')[0] || '',
+      '{nome_completo}': dealData?.contact_name || '',
+      '{valor}': deal.value ? String(deal.value) : '',
+      '{deal}': (deal.title as string) || '',
+      '{deal_title}': (deal.title as string) || '',
+      // Placeholders de contato
+      '{email}': dealData?.contact_email || '',
+      '{telefone}': dealData?.contact_phone || '',
     }
+
+    // Custom fields - suporte a {cf:campo} e {campo} direto
+    Object.entries(customFields).forEach(([key, value]) => {
+      const strValue = value !== undefined && value !== null ? String(value) : ''
+      replacements[`{cf:${key}}`] = strValue
+      replacements[`{${key}}`] = strValue
+    })
+
+    // Aplicar todas as substituicoes
+    let result = text
+    Object.entries(replacements).forEach(([placeholder, value]) => {
+      // Escapar caracteres especiais de regex: { e }
+      const escaped = placeholder.replace(/[{}]/g, '\\$&')
+      result = result.replace(new RegExp(escaped, 'gi'), value)
+    })
 
     return result
   }
@@ -638,7 +645,7 @@ export function SendMessageModal({
                   />
                 )}
                 <p className="mt-1 text-xs text-zinc-500">
-                  Placeholders: {"{nome}"}, {"{email}"}, {"{valor}"}, {"{deal}"}, {"{email_compra}"}, {"{telefone_contato}"}, {"{nome_completo}"}, {"{cf:campo}"}
+                  Placeholders: {"{nome}"}, {"{nome_completo}"}, {"{valor}"}, {"{deal}"}, {"{email}"}, {"{telefone}"}, {"{cf:campo}"} ou {"{campo}"} para custom fields
                 </p>
               </div>
             </>
