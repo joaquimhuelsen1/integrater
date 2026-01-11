@@ -484,6 +484,11 @@ async def get_stage_conversion(
             conversion_rate=conversion_rate
         ))
 
+    # Log do resultado final
+    logger.info(f"[stage-conversion] Retornando {len(result_stages)} stages")
+    for rs in result_stages:
+        logger.info(f"[stage-conversion]   - {rs.stage_name}: {rs.deals_entered} deals")
+
     return StageConversionResponse(stages=result_stages, period_days=days)
 
 
