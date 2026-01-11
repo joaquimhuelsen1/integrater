@@ -47,6 +47,9 @@ import {
   GripVertical,
   ArrowLeft,
   RotateCcw,
+  Send,
+  Mail,
+  MessageSquare,
 } from "lucide-react"
 
 // ============= Interfaces =============
@@ -131,6 +134,9 @@ const DEFAULT_BLOCKS: DashboardBlock[] = [
   { id: "total-pipeline", title: "Total Pipeline", size: "small" },
   { id: "ciclo-vendas", title: "Ciclo de Vendas", size: "small" },
   { id: "velocity", title: "Velocity", size: "small" },
+  { id: "channel-telegram", title: "Telegram", size: "small" },
+  { id: "channel-email", title: "Email", size: "small" },
+  { id: "channel-sms", title: "SMS", size: "small" },
   { id: "funil", title: "Funil de Vendas", size: "large" },
   { id: "tendencias", title: "Tendencias", size: "medium" },
   { id: "loss-reasons", title: "Motivos de Perda", size: "medium" },
@@ -606,6 +612,54 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
             <StageWinRateChart data={winRateByStage} isLoading={isLoading} />
           </div>
         )
+
+      case "channel-telegram": {
+        const telegramData = channelPerformance.find((c) => c.channel === "telegram")
+        return (
+          <div className="h-full rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+            <div className="mb-2 flex items-center gap-2 text-sm">
+              <Send className="h-4 w-4 text-blue-500" />
+              <span className="font-medium">Telegram</span>
+            </div>
+            <div className="text-2xl font-bold text-blue-500">
+              {telegramData?.messages_count?.toLocaleString("pt-BR") || 0}
+            </div>
+            <div className="text-xs text-zinc-500">{formatCurrency(telegramData?.won_value || 0)}</div>
+          </div>
+        )
+      }
+
+      case "channel-email": {
+        const emailData = channelPerformance.find((c) => c.channel === "email")
+        return (
+          <div className="h-full rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+            <div className="mb-2 flex items-center gap-2 text-sm">
+              <Mail className="h-4 w-4 text-purple-500" />
+              <span className="font-medium">Email</span>
+            </div>
+            <div className="text-2xl font-bold text-purple-500">
+              {emailData?.messages_count?.toLocaleString("pt-BR") || 0}
+            </div>
+            <div className="text-xs text-zinc-500">{formatCurrency(emailData?.won_value || 0)}</div>
+          </div>
+        )
+      }
+
+      case "channel-sms": {
+        const smsData = channelPerformance.find((c) => c.channel === "sms")
+        return (
+          <div className="h-full rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+            <div className="mb-2 flex items-center gap-2 text-sm">
+              <MessageSquare className="h-4 w-4 text-green-500" />
+              <span className="font-medium">SMS</span>
+            </div>
+            <div className="text-2xl font-bold text-green-500">
+              {smsData?.messages_count?.toLocaleString("pt-BR") || 0}
+            </div>
+            <div className="text-xs text-zinc-500">{formatCurrency(smsData?.won_value || 0)}</div>
+          </div>
+        )
+      }
 
       case "channel-performance":
         return (
