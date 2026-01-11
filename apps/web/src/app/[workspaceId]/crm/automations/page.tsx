@@ -4,10 +4,12 @@ import { AutomationsView } from "@/components/crm/automations-view"
 
 interface PageProps {
   params: Promise<{ workspaceId: string }>
+  searchParams: Promise<{ pipeline_id?: string }>
 }
 
-export default async function CRMAutomationsPage({ params }: PageProps) {
+export default async function CRMAutomationsPage({ params, searchParams }: PageProps) {
   const { workspaceId } = await params
+  const { pipeline_id } = await searchParams
   const supabase = await createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
 
@@ -15,5 +17,5 @@ export default async function CRMAutomationsPage({ params }: PageProps) {
     redirect("/login")
   }
 
-  return <AutomationsView workspaceId={workspaceId} />
+  return <AutomationsView workspaceId={workspaceId} pipelineId={pipeline_id} />
 }

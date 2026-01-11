@@ -8,9 +8,10 @@ import { AutomationLogs } from "./automation-logs"
 
 interface AutomationsViewProps {
   workspaceId: string
+  pipelineId?: string  // Se passado, filtra regras e logs por este pipeline
 }
 
-export function AutomationsView({ workspaceId }: AutomationsViewProps) {
+export function AutomationsView({ workspaceId, pipelineId }: AutomationsViewProps) {
   const [activeTab, setActiveTab] = useState<"rules" | "logs">("rules")
 
   return (
@@ -60,14 +61,14 @@ export function AutomationsView({ workspaceId }: AutomationsViewProps) {
 
       <div className="mx-auto max-w-3xl p-6">
         {activeTab === "rules" ? (
-          <AutomationRulesList workspaceId={workspaceId} />
+          <AutomationRulesList workspaceId={workspaceId} pipelineId={pipelineId} />
         ) : (
           <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
             <h2 className="text-lg font-semibold mb-4">Historico de Execucoes</h2>
             <p className="text-sm text-zinc-500 mb-4">
               Visualize o historico de execucoes das suas automacoes
             </p>
-            <AutomationLogs limit={50} />
+            <AutomationLogs pipelineId={pipelineId} limit={50} />
           </div>
         )}
       </div>

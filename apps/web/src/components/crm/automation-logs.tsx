@@ -6,6 +6,7 @@ import { apiFetch } from "@/lib/api"
 
 interface AutomationExecution {
   id: string
+  owner_id: string
   rule_id: string
   deal_id: string
   trigger_type: string
@@ -20,6 +21,7 @@ interface AutomationExecution {
 
 interface AutomationLogsProps {
   dealId?: string  // Se passado, filtra por deal
+  pipelineId?: string  // Se passado, filtra por pipeline
   limit?: number
   showRefresh?: boolean
 }
@@ -64,7 +66,7 @@ function formatRelativeTime(dateStr: string): string {
   })
 }
 
-export function AutomationLogs({ dealId, limit = 20, showRefresh = true }: AutomationLogsProps) {
+export function AutomationLogs({ dealId, pipelineId, limit = 20, showRefresh = true }: AutomationLogsProps) {
   const [executions, setExecutions] = useState<AutomationExecution[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -75,6 +77,7 @@ export function AutomationLogs({ dealId, limit = 20, showRefresh = true }: Autom
     try {
       const params = new URLSearchParams({ limit: String(limit) })
       if (dealId) params.append("deal_id", dealId)
+      if (pipelineId) params.append("pipeline_id", pipelineId)
 
       const res = await apiFetch(`/automations/executions?${params}`)
       if (!res.ok) throw new Error("Erro ao buscar logs")
@@ -85,7 +88,7 @@ export function AutomationLogs({ dealId, limit = 20, showRefresh = true }: Autom
     } finally {
       setLoading(false)
     }
-  }, [dealId, limit])
+  }, [dealId, pipelineId, limit])
 
   useEffect(() => {
     fetchLogs()
