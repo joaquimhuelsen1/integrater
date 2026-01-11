@@ -558,7 +558,7 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
             <div className="relative mx-auto max-w-lg">
               {/* Triangulo branco central (SVG de fundo) */}
               <svg
-                className="absolute left-1/2 -translate-x-1/2 top-0 h-full opacity-10 dark:opacity-5"
+                className="absolute left-1/2 -translate-x-1/2 top-0 h-full opacity-30 dark:opacity-20"
                 viewBox="0 0 100 100"
                 preserveAspectRatio="none"
                 style={{ width: '60%' }}
@@ -592,11 +592,13 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
 
                         {/* Tarja/Seta colorida */}
                         <div
-                          className="relative flex-1 flex items-center justify-center py-2 text-white font-medium rounded-sm"
+                          className="relative flex-1 flex items-center justify-center text-white font-medium rounded-sm"
                           style={{
                             width: `${widthPercent}%`,
                             backgroundColor: stage.stage_color,
                             clipPath: "polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%, 10px 50%)",
+                            paddingTop: `${Math.max(12 - index * 2, 6)}px`,
+                            paddingBottom: `${Math.max(12 - index * 2, 6)}px`,
                           }}
                         >
                           <span className="text-xs truncate px-4">{stage.stage_name}</span>
