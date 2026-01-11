@@ -319,6 +319,25 @@ export function TemplatesSettings() {
                         placeholder="Ex: Sua proposta comercial - {deal}"
                         className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800"
                       />
+                      {/* Placeholders para subject */}
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {PLACEHOLDERS.slice(0, 4).map(p => (
+                          <button
+                            key={`subject-create-${p.key}`}
+                            type="button"
+                            onClick={() => {
+                              setNewTemplate(prev => ({
+                                ...prev,
+                                subject: (prev.subject || "") + p.key
+                              }))
+                            }}
+                            className="rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-mono text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-300 dark:hover:bg-orange-900/50"
+                            title={p.desc}
+                          >
+                            {p.key}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
 
@@ -436,6 +455,25 @@ export function TemplatesSettings() {
                               onChange={(e) => setEditForm(prev => ({ ...prev, subject: e.target.value }))}
                               className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800"
                             />
+                            {/* Placeholders para subject */}
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {PLACEHOLDERS.slice(0, 4).map(p => (
+                                <button
+                                  key={`subject-edit-${p.key}`}
+                                  type="button"
+                                  onClick={() => {
+                                    setEditForm(prev => ({
+                                      ...prev,
+                                      subject: (prev.subject || "") + p.key
+                                    }))
+                                  }}
+                                  className="rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-mono text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-300 dark:hover:bg-orange-900/50"
+                                  title={p.desc}
+                                >
+                                  {p.key}
+                                </button>
+                              ))}
+                            </div>
                           </div>
                         )}
 
