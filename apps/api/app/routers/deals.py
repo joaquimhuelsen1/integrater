@@ -15,6 +15,7 @@ import httpx
 from app.deps import get_supabase, get_current_user_id
 from app.models.enums import AutomationTriggerType
 from app.services.automation_executor import AutomationExecutor
+from app.routers.openphone import create_openphone_contact
 from app.models.crm import (
     Deal,
     DealCreate,
@@ -1220,6 +1221,28 @@ async def send_message_from_deal(
                 }).execute()
 
                 conversation_id = conv_id
+
+        # Criar contato no OpenPhone antes de enviar SMS
+        try:
+            # Extrair primeiro nome do contact_data
+            first_name = "Lead"
+            if contact_data and contact_data.get("display_name"):
+                name_parts = contact_data["display_name"].split()
+                first_name = name_parts[0] if name_parts else "Lead"
+
+            openphone_contact = await create_openphone_contact(
+                db=db,
+                integration_account_id=data.integration_account_id,
+                first_name=first_name,
+                phone_number=to_address,
+                external_id=str(deal_id),
+            )
+            if openphone_contact:
+                logger.info(f"Contato OpenPhone criado: {openphone_contact.get('contact_id')}")
+            else:
+                logger.debug(f"Contato OpenPhone nao criado para {to_address}")
+        except Exception as e:
+            logger.warning(f"Erro ao criar contato OpenPhone (nao bloqueante): {e}")
 
         try:
             async with httpx.AsyncClient(timeout=30) as client:
