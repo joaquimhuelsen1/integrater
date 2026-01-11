@@ -546,44 +546,75 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
           )
         }
         const filteredFunnel = funnel.filter((s) => !s.is_win && !s.is_loss)
+
         return (
           <div className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
             <h3 className="mb-4 font-semibold">Funil de Vendas</h3>
-            <div className="flex flex-col items-center space-y-1 mx-auto max-w-md">
-              {filteredFunnel.map((stage, index, arr) => {
-                const width = Math.max(100 - index * 15, 25)
-                const nextStage = arr[index + 1]
-                const conversionRate = nextStage
-                  ? (stage.deals_count > 0
-                      ? ((nextStage.deals_count / stage.deals_count) * 100).toFixed(0)
-                      : "0")
-                  : null
+            <div className="relative mx-auto max-w-lg">
+              {/* Triangulo branco central (SVG de fundo) */}
+              <svg
+                className="absolute left-1/2 -translate-x-1/2 top-0 h-full opacity-10 dark:opacity-5"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                style={{ width: '60%' }}
+              >
+                <polygon points="50,0 100,100 0,100" fill="currentColor" className="text-zinc-400" />
+              </svg>
 
-                return (
-                  <Fragment key={stage.stage_id}>
-                    <div
-                      className="relative flex items-center justify-center py-2 text-white font-medium"
-                      style={{
-                        width: `${width}%`,
-                        backgroundColor: stage.stage_color,
-                        clipPath: "polygon(5% 0%, 95% 0%, 100% 100%, 0% 100%)",
-                      }}
-                    >
-                      <span className="text-sm truncate px-4">{stage.stage_name}</span>
-                      <span className="absolute right-3 text-xs opacity-80">
-                        {stage.deals_count} deals
-                      </span>
-                    </div>
+              {/* Etapas do funil */}
+              <div className="relative flex flex-col items-center space-y-2">
+                {filteredFunnel.map((stage, index, arr) => {
+                  const nextStage = arr[index + 1]
+                  const conversionRate = nextStage
+                    ? (stage.deals_count > 0
+                        ? ((nextStage.deals_count / stage.deals_count) * 100).toFixed(0)
+                        : "0")
+                    : null
 
-                    {conversionRate !== null && (
-                      <div className="flex items-center gap-1 text-xs text-zinc-500 py-1">
-                        <span>↓</span>
-                        <span className="font-medium">{conversionRate}%</span>
+                  // Largura decrescente para formar o funil
+                  const widthPercent = Math.max(100 - index * 12, 30)
+
+                  return (
+                    <Fragment key={stage.stage_id}>
+                      {/* Linha da etapa */}
+                      <div className="flex items-center w-full gap-3">
+                        {/* Numero a esquerda */}
+                        <div className="w-8 text-right">
+                          <span className="text-xs font-bold text-zinc-400">
+                            {String(index + 1).padStart(2, '0')}
+                          </span>
+                        </div>
+
+                        {/* Tarja/Seta colorida */}
+                        <div
+                          className="relative flex-1 flex items-center justify-center py-2 text-white font-medium rounded-sm"
+                          style={{
+                            width: `${widthPercent}%`,
+                            backgroundColor: stage.stage_color,
+                            clipPath: "polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%, 10px 50%)",
+                          }}
+                        >
+                          <span className="text-xs truncate px-4">{stage.stage_name}</span>
+                        </div>
+
+                        {/* Info a direita */}
+                        <div className="w-20 text-left">
+                          <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                            {stage.deals_count} deals
+                          </span>
+                        </div>
                       </div>
-                    )}
-                  </Fragment>
-                )
-              })}
+
+                      {/* % de conversao */}
+                      {conversionRate !== null && (
+                        <div className="flex items-center justify-center text-xs text-zinc-500">
+                          <span>↓ {conversionRate}%</span>
+                        </div>
+                      )}
+                    </Fragment>
+                  )
+                })}
+              </div>
             </div>
           </div>
         )
