@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { ArrowLeft, Plus, Settings, BarChart3, RefreshCw } from "lucide-react"
+import { ArrowLeft, Plus, Settings, BarChart3, RefreshCw, Zap } from "lucide-react"
 import Link from "next/link"
 import { PipelineBoard } from "./pipeline-board"
 import { DealCard } from "./deal-card"
@@ -479,6 +479,16 @@ export function CRMView() {
             >
               <BarChart3 className="h-4 w-4" />
               <span className="hidden md:inline">Dashboard</span>
+            </Link>
+
+            {/* Automações - esconde texto em mobile */}
+            <Link
+              href={currentWorkspace ? `/${currentWorkspace.id}/crm/automations` : "/crm/automations"}
+              className="flex items-center gap-1 md:gap-2 rounded-lg border border-yellow-200 bg-yellow-50 p-2 md:px-3 md:py-2 text-sm text-yellow-600 hover:bg-yellow-100 dark:border-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400"
+              title="Automações"
+            >
+              <Zap className="h-4 w-4" />
+              <span className="hidden md:inline">Automações</span>
             </Link>
 
             {/* Settings - sempre visível */}
