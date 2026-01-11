@@ -67,3 +67,19 @@ class LinkIdentityRequest(BaseModel):
 
 class UnlinkIdentityRequest(BaseModel):
     identity_id: UUID
+
+
+# ============================================
+# Link By Email
+# ============================================
+class LinkByEmailRequest(BaseModel):
+    email: str
+    conversation_id: str | None = None
+    display_name: str | None = None
+
+
+class LinkByEmailResponse(BaseModel):
+    contact: dict
+    identity: dict
+    is_new: bool
+    conversation_linked: bool = False

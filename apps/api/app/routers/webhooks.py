@@ -7,8 +7,12 @@ from supabase import Client
 from pydantic import BaseModel
 from typing import Any
 import random
+import logging
 
 from app.deps import get_supabase
+from app.services.contact_service import get_contact_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
@@ -230,11 +234,123 @@ async def create_deal_via_workspace_webhook(
         except Exception:
             pass  # Já existe
 
+    # Auto-vincular contato se email_compra estiver presente e deal nao tiver contact_id
+    contact_linked = None
+    if not data.contact_id:
+        email_compra = merged_custom_fields.get("email_compra")
+
+        if email_compra and isinstance(email_compra, str) and "@" in email_compra:
+            try:
+                service = get_contact_service(db, owner_id, workspace_id)
+
+                # Buscar nome do custom_fields se existir
+                nome_completo = merged_custom_fields.get("nome_completo")
+
+                contact_result = await service.get_or_create_by_email(
+                    email=email_compra,
+                    display_name=nome_completo,
+                    metadata={"source": "crm_webhook", "deal_title": data.title}
+                )
+
+                # Atualizar deal com contact_id
+                db.table("deals").update({
+                    "contact_id": contact_result["contact"]["id"]
+                }).eq("id", deal["id"]).execute()
+
+                contact_linked = contact_result["contact"]["id"]
+                logger.info(f"Deal {deal['id']} linked to contact {contact_linked}")
+            except Exception as e:
+                logger.warning(f"Failed to auto-link contact for deal {deal['id']}: {e}")
+
     return {
         "success": True,
         "deal_id": deal["id"],
         "pipeline_id": pipeline_id,
         "stage_id": stage_id,
         "tags_added": tags_added,
+        "contact_linked": contact_linked,
         "message": "Deal criado com sucesso"
+    }
+
+
+class Digistore24WebhookPayload(BaseModel):
+    """Payload do webhook Digistore24 - campos principais."""
+    event: str  # "completed", "refunded", etc
+    order_id: str
+    product_id: str
+    product_name: str
+    email: str
+    first_name: str | None = None
+    last_name: str | None = None
+    amount: float
+    currency: str = "EUR"
+
+    class Config:
+        extra = "allow"  # Permitir campos extras do payload
+
+
+@router.post("/{workspace_id}/digistore24")
+async def digistore24_webhook(
+    workspace_id: str,
+    payload: Digistore24WebhookPayload,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    db: Client = Depends(get_supabase)
+):
+    """
+    Webhook para receber compras do Digistore24.
+    Cria/vincula contato automaticamente pelo email.
+    Registra compra na tabela purchases.
+    """
+    # Validar API key do workspace
+    api_key_result = db.table("workspace_api_keys").select("owner_id").eq(
+        "workspace_id", workspace_id
+    ).eq("api_key", x_api_key).execute()
+
+    if not api_key_result.data:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    owner_id = api_key_result.data[0]["owner_id"]
+
+    # Usar ContactService para get_or_create contato
+    service = get_contact_service(db, owner_id, workspace_id)
+
+    display_name = None
+    if payload.first_name or payload.last_name:
+        display_name = f"{payload.first_name or ''} {payload.last_name or ''}".strip()
+
+    contact_result = await service.get_or_create_by_email(
+        email=payload.email,
+        display_name=display_name,
+        metadata={"source": "digistore24", "first_purchase": payload.product_name}
+    )
+
+    # Registrar compra na tabela purchases
+    purchase_data = {
+        "owner_id": owner_id,
+        "workspace_id": workspace_id,
+        "contact_id": contact_result["contact"]["id"],
+        "email": payload.email.lower(),
+        "product_name": payload.product_name,
+        "product_id": payload.product_id,
+        "order_id": payload.order_id,
+        "amount": payload.amount,
+        "currency": payload.currency,
+        "source": "digistore24",
+        "source_data": payload.model_dump(),
+        "status": payload.event
+    }
+
+    # Upsert por order_id (para evitar duplicatas)
+    db.table("purchases").upsert(
+        purchase_data,
+        on_conflict="order_id"
+    ).execute()
+
+    logger.info(f"Digistore24 webhook processed: order={payload.order_id}, contact={contact_result['contact']['id']}")
+
+    return {
+        "success": True,
+        "contact_id": contact_result["contact"]["id"],
+        "is_new_contact": contact_result["is_new"],
+        "order_id": payload.order_id
     }

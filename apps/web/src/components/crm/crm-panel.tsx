@@ -33,6 +33,7 @@ import { createClient } from "@/lib/supabase"
 import { DealTimeline } from "./deal-timeline"
 import { ProductSelector } from "./product-selector"
 import { ContactSelector } from "./contact-selector"
+import { ContactHistoryPanel } from "./contact-history-panel"
 
 // Types
 interface Contact {
@@ -103,7 +104,7 @@ interface CRMPanelProps {
 }
 
 type PanelState = "loading" | "no-contact" | "contact-only" | "with-deal"
-type TabType = "activity" | "notes" | "products" | "files"
+type TabType = "activity" | "notes" | "products" | "files" | "history"
 
 export function CRMPanel({
   conversationId,
@@ -830,6 +831,7 @@ export function CRMPanel({
                 { id: "activity" as const, label: "Activity", icon: History },
                 { id: "notes" as const, label: "Notes", icon: FileText },
                 { id: "products" as const, label: "Products", icon: Package },
+                { id: "history" as const, label: "Historico", icon: MessageSquare },
               ].map((tab) => (
                 <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                   className={`flex flex-1 items-center justify-center gap-1 py-2 text-xs font-medium ${activeTab === tab.id ? "border-b-2 border-blue-500 text-blue-600" : "text-zinc-500"}`}>
@@ -912,6 +914,15 @@ export function CRMPanel({
                     </div>
                   )}
                 </div>
+              )}
+
+              {activeTab === "history" && contactId && (
+                <ContactHistoryPanel
+                  contactId={contactId}
+                  onSelectConversation={(convId) => {
+                    window.location.href = `/${workspaceId}/inbox?conversation=${convId}`
+                  }}
+                />
               )}
             </div>
           </div>

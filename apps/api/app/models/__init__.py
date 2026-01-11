@@ -27,6 +27,8 @@ from .contacts import (
     ContactWithIdentities,
     LinkIdentityRequest,
     UnlinkIdentityRequest,
+    LinkByEmailRequest,
+    LinkByEmailResponse,
 )
 
 # Conversations
@@ -138,6 +140,8 @@ __all__ = [
     "ContactWithIdentities",
     "LinkIdentityRequest",
     "UnlinkIdentityRequest",
+    "LinkByEmailRequest",
+    "LinkByEmailResponse",
     # Conversations
     "Conversation",
     "ConversationUpdate",

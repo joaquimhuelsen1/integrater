@@ -107,8 +107,9 @@ interface DashboardBlock {
   size: "small" | "medium" | "large"
 }
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 interface CRMAnalyticsDashboardProps {
-  pipelineId?: string | null
+  // Props removidas - componente agora gerencia seu proprio estado de pipeline
 }
 
 // ============= Constants =============
@@ -189,13 +190,17 @@ function SkeletonCard({ size = "small" }: { size?: "small" | "medium" | "large" 
 }
 
 // ============= Main Component =============
-export function CRMAnalyticsDashboard({ pipelineId = null }: CRMAnalyticsDashboardProps) {
+export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
   // Workspace context para Link dinâmico
   const { currentWorkspace } = useWorkspace()
 
   // Blocks state - inicializa com DEFAULT para evitar hydration mismatch
   const [blocks, setBlocks] = useState<DashboardBlock[]>(DEFAULT_BLOCKS)
   const [isLayoutLoaded, setIsLayoutLoaded] = useState(false)
+
+  // Pipeline state
+  const [pipelines, setPipelines] = useState<Array<{id: string, name: string}>>([])
+  const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null)
 
   // Data states
   const [days, setDays] = useState(30)
@@ -242,13 +247,33 @@ export function CRMAnalyticsDashboard({ pipelineId = null }: CRMAnalyticsDashboa
     }
   }, [blocks, isLayoutLoaded])
 
+  // Carregar pipelines disponíveis
+  useEffect(() => {
+    const loadPipelines = async () => {
+      try {
+        const res = await apiFetch("/crm/pipelines")
+        if (res.ok) {
+          const data = await res.json()
+          setPipelines(data.pipelines || [])
+          // Selecionar primeiro por padrão se houver
+          if (data.pipelines?.length > 0 && !selectedPipelineId) {
+            setSelectedPipelineId(data.pipelines[0].id)
+          }
+        }
+      } catch (error) {
+        console.error("Erro ao carregar pipelines:", error)
+      }
+    }
+    loadPipelines()
+  }, [])
+
   // Load data function
   const loadData = useCallback(async () => {
     setIsLoading(true)
     try {
       const params = new URLSearchParams({ days: days.toString() })
-      if (pipelineId) {
-        params.set("pipeline_id", pipelineId)
+      if (selectedPipelineId) {
+        params.set("pipeline_id", selectedPipelineId)
       }
 
       const [
@@ -264,15 +289,15 @@ export function CRMAnalyticsDashboard({ pipelineId = null }: CRMAnalyticsDashboa
         performanceRes,
       ] = await Promise.all([
         apiFetch(`/crm/stats?${params}`),
-        pipelineId ? apiFetch(`/crm/funnel/${pipelineId}`) : Promise.resolve(null),
+        selectedPipelineId ? apiFetch(`/crm/funnel/${selectedPipelineId}`) : Promise.resolve(null),
         apiFetch(`/crm/top-deals?${params}&limit=5`),
         apiFetch(`/crm/overdue-deals?${params}&limit=5`),
         apiFetch(`/crm/sales-cycle?${params}`),
         apiFetch(`/crm/comparison?${params}`),
         apiFetch(`/crm/loss-reasons-stats?${params}`),
-        pipelineId ? apiFetch(`/crm/win-rate-by-stage/${pipelineId}?${params}`) : Promise.resolve(null),
+        selectedPipelineId ? apiFetch(`/crm/win-rate-by-stage/${selectedPipelineId}?${params}`) : Promise.resolve(null),
         apiFetch(`/crm/channel-performance?${params}`),
-        pipelineId ? apiFetch(`/crm/performance/${pipelineId}?${params}`) : Promise.resolve(null),
+        selectedPipelineId ? apiFetch(`/crm/performance/${selectedPipelineId}?${params}`) : Promise.resolve(null),
       ])
 
       if (statsRes.ok) {
@@ -326,7 +351,7 @@ export function CRMAnalyticsDashboard({ pipelineId = null }: CRMAnalyticsDashboa
     } finally {
       setIsLoading(false)
     }
-  }, [pipelineId, days])
+  }, [selectedPipelineId, days])
 
   useEffect(() => {
     loadData()
@@ -592,15 +617,15 @@ export function CRMAnalyticsDashboard({ pipelineId = null }: CRMAnalyticsDashboa
 
       case "top-deals":
         return (
-          <div className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
-            <h3 className="mb-3 flex items-center gap-2 font-semibold">
+          <div className="flex h-64 flex-col rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+            <h3 className="mb-3 flex flex-shrink-0 items-center gap-2 font-semibold">
               <TrendingUp className="h-4 w-4 text-green-500" />
               Maiores Deals
             </h3>
             {topDeals.length === 0 ? (
               <p className="py-4 text-center text-sm text-zinc-400">Nenhum deal aberto</p>
             ) : (
-              <div className="space-y-2">
+              <div className="flex-1 space-y-2 overflow-y-auto">
                 {topDeals.map((deal) => (
                   <div
                     key={deal.id}
@@ -637,15 +662,15 @@ export function CRMAnalyticsDashboard({ pipelineId = null }: CRMAnalyticsDashboa
 
       case "overdue-deals":
         return (
-          <div className="rounded-lg border border-red-200 bg-red-50/50 p-4 dark:border-red-800 dark:bg-red-950/20">
-            <h3 className="mb-3 flex items-center gap-2 font-semibold text-red-600 dark:text-red-400">
+          <div className="flex h-64 flex-col rounded-lg border border-red-200 bg-red-50/50 p-4 dark:border-red-800 dark:bg-red-950/20">
+            <h3 className="mb-3 flex flex-shrink-0 items-center gap-2 font-semibold text-red-600 dark:text-red-400">
               <AlertTriangle className="h-4 w-4" />
               Deals Atrasados
             </h3>
             {overdueDeals.length === 0 ? (
               <p className="py-4 text-center text-sm text-zinc-400">Nenhum deal atrasado</p>
             ) : (
-              <div className="space-y-2">
+              <div className="flex-1 space-y-2 overflow-y-auto">
                 {overdueDeals.map((deal) => (
                   <div
                     key={deal.id}
@@ -689,6 +714,18 @@ export function CRMAnalyticsDashboard({ pipelineId = null }: CRMAnalyticsDashboa
             <h1 className="text-xl font-semibold">Dashboard CRM</h1>
           </div>
           <div className="flex items-center gap-3">
+            {/* Seletor de Pipeline */}
+            <select
+              value={selectedPipelineId || ""}
+              onChange={(e) => setSelectedPipelineId(e.target.value || null)}
+              className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800"
+            >
+              <option value="">Todos os Pipelines</option>
+              {pipelines.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            {/* Seletor de Periodo */}
             <select
               value={days}
               onChange={(e) => setDays(parseInt(e.target.value))}

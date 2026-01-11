@@ -7,7 +7,6 @@ import { PipelineBoard } from "./pipeline-board"
 import { DealCard } from "./deal-card"
 import { DealModal } from "./deal-modal"
 import { PipelineSettings } from "./pipeline-settings"
-import { CRMDashboard } from "./crm-dashboard"
 import { LossReasonModal } from "./loss-reason-modal"
 import { SendMessageModal } from "./send-message-modal"
 import { DealFilters, defaultFilters, type DealFiltersState } from "./deal-filters"
@@ -71,7 +70,6 @@ export function CRMView() {
   // Modals
   const [showSettings, setShowSettings] = useState(false)
   const [showDealModal, setShowDealModal] = useState(false)
-  const [showDashboard, setShowDashboard] = useState(false)
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null)
   const [createDealStageId, setCreateDealStageId] = useState<string | null>(null)
 
@@ -474,14 +472,14 @@ export function CRMView() {
             </button>
 
             {/* Dashboard - esconde texto em mobile */}
-            <button
-              onClick={() => setShowDashboard(true)}
+            <Link
+              href={currentWorkspace ? `/${currentWorkspace.id}/crm/dashboard` : "/crm/dashboard"}
               className="flex items-center gap-1 md:gap-2 rounded-lg border border-blue-200 bg-blue-50 p-2 md:px-3 md:py-2 text-sm text-blue-600 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-400"
               title="Dashboard"
             >
               <BarChart3 className="h-4 w-4" />
               <span className="hidden md:inline">Dashboard</span>
-            </button>
+            </Link>
 
             {/* Settings - sempre visível */}
             <button
@@ -649,14 +647,6 @@ export function CRMView() {
           onPipelineCreated={handlePipelineCreated}
           onPipelineUpdated={loadPipelines}
           onStagesUpdated={loadStages}
-        />
-      )}
-
-      {/* Dashboard Modal */}
-      {showDashboard && (
-        <CRMDashboard
-          pipelineId={selectedPipelineId}
-          onClose={() => setShowDashboard(false)}
         />
       )}
 

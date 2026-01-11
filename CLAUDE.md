@@ -10,6 +10,29 @@ Carregar de `~/.claude/context-pills/` quando necessario:
 |------|---------|
 | `deploy-integrater.md` | Deploy API/Frontend (paramiko + credenciais) |
 
+## Regra de Finalizacao (OBRIGATORIO)
+
+**SEMPRE que finalizar TODAS as tarefas e tudo estiver resolvido:**
+
+1. **Commit** - Criar commit com mensagem descritiva
+2. **Push** - Enviar para o repositorio remoto
+3. **Deploy** - Fazer deploy na Digital Ocean
+
+```bash
+# Exemplo de fluxo
+git add .
+git commit -m "feat: descricao das mudancas"
+git push origin main
+
+# Deploy na Digital Ocean
+# Frontend: Push para main -> Vercel automatico
+# API: Carregar pill deploy-integrater.md e executar script paramiko
+```
+
+**Esta regra e OBRIGATORIA.** Nao considerar tarefa como completa sem commit, push e deploy.
+
+---
+
 ## Regras do Projeto
 
 ### Portas Fixas

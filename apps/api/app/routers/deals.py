@@ -853,18 +853,43 @@ class DealSendMessageRequest(BaseModel):
             return None
         # Remover espacos, hifens, parenteses
         phone = re.sub(r"[\s\-\(\)]", "", v)
-        # Adicionar + se nao tiver
-        if not phone.startswith("+"):
-            # Assumir EUA (+1) se nao tiver codigo de pais
-            if phone.startswith("1") and len(phone) == 11:
-                phone = "+" + phone
-            else:
-                phone = "+1" + phone
 
-        # Validar formato US: +1XXXXXXXXXX = 11 digitos (1 + 10 digitos do numero)
-        digits_only = re.sub(r"\D", "", phone)
-        if len(digits_only) != 11 or not phone.startswith("+1"):
-            raise ValueError("Telefone deve estar no formato US: +1XXXXXXXXXX (11 digitos)")
+        # Se ja tem +, validar formato E.164 e retornar
+        if phone.startswith("+"):
+            digits_only = phone[1:]  # Remover o +
+            if not digits_only.isdigit():
+                raise ValueError("Telefone deve conter apenas digitos apos o +")
+            if len(digits_only) < 8 or len(digits_only) > 15:
+                raise ValueError("Telefone deve ter entre 8 e 15 digitos (formato E.164)")
+            return phone
+
+        # Remover caracteres nao-numericos para deteccao
+        digits = re.sub(r"\D", "", phone)
+
+        # Detectar pais baseado no padrao
+        if digits.startswith("55") and len(digits) in (12, 13):
+            # Brasil: 55 + DDD(2) + numero(8-9) = 12-13 digitos
+            phone = "+" + digits
+        elif digits.startswith("1") and len(digits) == 11:
+            # EUA/Canada: 1 + area(3) + numero(7) = 11 digitos
+            phone = "+" + digits
+        elif len(digits) == 10:
+            # 10 digitos sem codigo de pais -> assumir EUA
+            phone = "+1" + digits
+        elif len(digits) == 11 and digits.startswith("55"):
+            # Brasil sem DDD completo? Improvavel, mas tratar
+            phone = "+" + digits
+        elif digits.startswith("55") and len(digits) == 11:
+            # Brasil: 55 + numero sem DDD (improvavel mas aceitar)
+            phone = "+" + digits
+        else:
+            # Caso generico: adicionar + e validar
+            phone = "+" + digits
+
+        # Validar formato E.164 final
+        digits_only = phone[1:]  # Remover o +
+        if len(digits_only) < 8 or len(digits_only) > 15:
+            raise ValueError("Telefone deve ter entre 8 e 15 digitos (formato E.164)")
 
         return phone
 

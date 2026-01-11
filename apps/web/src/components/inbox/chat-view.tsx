@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useState, useCallback, useMemo } from "react"
 import { ArrowLeft, Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical, Unlink, MessageSquare, Phone, Briefcase, Users, Copy } from "lucide-react"
+import { toast } from "sonner"
 import { createClient } from "@/lib/supabase"
 import { apiFetch } from "@/lib/api"
 import { MessageItem } from "./message-item"
@@ -220,6 +221,11 @@ const [isSuggesting, setIsSuggesting] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const [showAvatarModal, setShowAvatarModal] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+
+  // Estados para vincular email a contato
+  const [showEmailLink, setShowEmailLink] = useState(false)
+  const [emailToLink, setEmailToLink] = useState("")
+  const [isLinkingEmail, setIsLinkingEmail] = useState(false)
 
   // Reply/Pin states
   const [replyToMessage, setReplyToMessage] = useState<Message | null>(null)
@@ -813,6 +819,50 @@ const handleUnpin = useCallback(async (messageId: string) => {
     }
   }, [onSyncContacts, isSyncingContacts])
 
+  // Vincular email a contato
+  const handleLinkEmail = useCallback(async () => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailToLink || !emailRegex.test(emailToLink.trim())) {
+      toast.error("Email invalido")
+      return
+    }
+
+    setIsLinkingEmail(true)
+    try {
+      const response = await apiFetch(
+        `/contacts/link-by-email?workspace_id=${workspaceId}`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            email: emailToLink.trim(),
+            conversation_id: conversationId,
+            display_name: null
+          })
+        }
+      )
+
+      if (response.ok) {
+        const data = await response.json()
+        toast.success(
+          data.is_new
+            ? "Contato criado e vinculado!"
+            : "Vinculado a contato existente!"
+        )
+        setShowEmailLink(false)
+        setEmailToLink("")
+        // Recarregar conversa para atualizar contact_id
+        onContactLinked?.()
+      } else {
+        const error = await response.json()
+        toast.error(error.detail || "Erro ao vincular")
+      }
+    } catch {
+      toast.error("Erro de conexao")
+    } finally {
+      setIsLinkingEmail(false)
+    }
+  }, [emailToLink, workspaceId, conversationId, onContactLinked])
+
   // Copiar toda a conversa para clipboard
   const copyConversation = useCallback(() => {
     if (messages.length === 0) return
@@ -1024,6 +1074,49 @@ const handleUnpin = useCallback(async (messageId: string) => {
                 <Phone className="h-4 w-4 text-purple-500" />
               )}
             </span>
+          )}
+          {/* Botao de vincular email - aparece se conversa sem contato */}
+          {!contactId && (
+            <div className="flex items-center gap-2">
+              {showEmailLink ? (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="email"
+                    placeholder="email@exemplo.com"
+                    value={emailToLink}
+                    onChange={(e) => setEmailToLink(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleLinkEmail()}
+                    className="h-7 w-48 rounded border px-2 text-sm"
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleLinkEmail}
+                    disabled={isLinkingEmail}
+                    className="h-7 rounded bg-blue-600 px-2 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {isLinkingEmail ? "..." : "Vincular"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowEmailLink(false)
+                      setEmailToLink("")
+                    }}
+                    className="h-7 px-1 text-gray-500 hover:text-gray-700"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowEmailLink(true)}
+                  className="flex items-center gap-1 rounded border px-2 py-1 text-xs text-gray-600 hover:bg-gray-100"
+                  title="Vincular a contato por email"
+                >
+                  <Mail className="h-3 w-3" />
+                  Vincular
+                </button>
+              )}
+            </div>
           )}
         </div>
 <div className="flex items-center gap-1 md:gap-2">

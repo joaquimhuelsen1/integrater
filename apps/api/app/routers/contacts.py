@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from supabase import Client
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
+from pydantic import BaseModel
 
 from app.deps import get_supabase, get_current_user_id
 from app.models import (
@@ -11,7 +12,18 @@ from app.models import (
     ContactWithIdentities,
     LinkIdentityRequest,
     UnlinkIdentityRequest,
+    LinkByEmailRequest,
+    LinkByEmailResponse,
 )
+from app.services.contact_service import get_contact_service
+
+
+class ContactHistoryResponse(BaseModel):
+    contact: dict
+    purchases: list[dict] = []
+    deals: list[dict] = []
+    conversations: list[dict] = []
+    stats: dict = {}
 
 router = APIRouter(prefix="/contacts", tags=["contacts"])
 
@@ -94,7 +106,7 @@ async def delete_contact(
     owner_id: UUID = Depends(get_current_user_id),
 ):
     result = db.table("contacts").update(
-        {"deleted_at": datetime.utcnow().isoformat()}
+        {"deleted_at": datetime.now(timezone.utc).isoformat()}
     ).eq("id", str(contact_id)).eq("owner_id", str(owner_id)).execute()
 
     if not result.data:
@@ -138,3 +150,107 @@ async def unlink_identity(
     db.table("contact_identities").update(
         {"contact_id": None}
     ).eq("id", str(data.identity_id)).eq("owner_id", str(owner_id)).execute()
+
+
+@router.post("/link-by-email", response_model=LinkByEmailResponse)
+async def link_contact_by_email(
+    workspace_id: UUID = Query(..., description="ID do workspace"),
+    request: LinkByEmailRequest = ...,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """
+    Busca ou cria contato por email.
+    Se conversation_id fornecido, vincula conversa ao contato.
+    """
+    service = get_contact_service(db, str(owner_id), str(workspace_id))
+
+    result = await service.get_or_create_by_email(
+        email=request.email,
+        display_name=request.display_name
+    )
+
+    conversation_linked = False
+    if request.conversation_id:
+        await service.link_conversation_to_contact(
+            conversation_id=request.conversation_id,
+            contact_id=result["contact"]["id"]
+        )
+        conversation_linked = True
+
+    return LinkByEmailResponse(
+        contact=result["contact"],
+        identity=result["identity"],
+        is_new=result["is_new"],
+        conversation_linked=conversation_linked
+    )
+
+
+@router.get("/{contact_id}/history", response_model=ContactHistoryResponse)
+async def get_contact_history(
+    contact_id: UUID,
+    workspace_id: UUID = Query(..., description="ID do workspace"),
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """
+    Retorna historico completo do contato:
+    - Compras (tabela purchases)
+    - Deals vinculados
+    - Conversas em todos os canais
+    - Estatisticas agregadas
+    """
+    # Buscar contato
+    contact_result = db.table("contacts").select("*").eq(
+        "id", str(contact_id)
+    ).eq("workspace_id", str(workspace_id)).eq(
+        "owner_id", str(owner_id)
+    ).single().execute()
+
+    if not contact_result.data:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    contact = contact_result.data
+
+    # Buscar compras
+    purchases_result = db.table("purchases").select(
+        "id, product_name, amount, currency, status, purchased_at, source"
+    ).eq("contact_id", str(contact_id)).order(
+        "purchased_at", desc=True
+    ).execute()
+
+    # Buscar deals
+    deals_result = db.table("deals").select(
+        "id, title, value, status, stage_id, stages(name), created_at, won_at, lost_at"
+    ).eq("contact_id", str(contact_id)).order(
+        "created_at", desc=True
+    ).execute()
+
+    # Buscar conversas
+    conversations_result = db.table("conversations").select(
+        "id, channel, status, last_message_at, created_at, primary_identity_id, contact_identities(type, value)"
+    ).eq("contact_id", str(contact_id)).order(
+        "last_message_at", desc=True
+    ).execute()
+
+    # Calcular estatisticas
+    total_purchases = sum(p.get("amount", 0) for p in (purchases_result.data or []))
+    total_deals_value = sum(
+        d.get("value", 0) for d in (deals_result.data or []) if d.get("status") == "won"
+    )
+
+    stats = {
+        "total_purchases": len(purchases_result.data or []),
+        "total_purchases_value": total_purchases,
+        "total_deals": len(deals_result.data or []),
+        "total_deals_won_value": total_deals_value,
+        "total_conversations": len(conversations_result.data or [])
+    }
+
+    return ContactHistoryResponse(
+        contact=contact,
+        purchases=purchases_result.data or [],
+        deals=deals_result.data or [],
+        conversations=conversations_result.data or [],
+        stats=stats
+    )
