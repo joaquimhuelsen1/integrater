@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, ReactNode } from "react"
+import { useState, useEffect, useCallback, ReactNode, Fragment } from "react"
 import {
   DndContext,
   closestCenter,
@@ -545,37 +545,44 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
             </div>
           )
         }
+        const filteredFunnel = funnel.filter((s) => !s.is_win && !s.is_loss)
         return (
           <div className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
             <h3 className="mb-4 font-semibold">Funil de Vendas</h3>
-            <div className="space-y-3">
-              {funnel
-                .filter((s) => !s.is_win && !s.is_loss)
-                .map((stage) => (
-                  <div key={stage.stage_id} className="flex items-center gap-3">
+            <div className="flex flex-col items-center space-y-1">
+              {filteredFunnel.map((stage, index, arr) => {
+                const width = Math.max(100 - index * 15, 25)
+                const nextStage = arr[index + 1]
+                const conversionRate =
+                  nextStage && stage.deals_count > 0
+                    ? ((nextStage.deals_count / stage.deals_count) * 100).toFixed(0)
+                    : null
+
+                return (
+                  <Fragment key={stage.stage_id}>
                     <div
-                      className="w-24 flex-shrink-0 truncate text-sm font-medium"
-                      style={{ color: stage.stage_color }}
+                      className="relative flex items-center justify-center py-3 text-white font-medium"
+                      style={{
+                        width: `${width}%`,
+                        backgroundColor: stage.stage_color,
+                        clipPath: "polygon(5% 0%, 95% 0%, 100% 100%, 0% 100%)",
+                      }}
                     >
-                      {stage.stage_name}
+                      <span className="text-sm truncate px-4">{stage.stage_name}</span>
+                      <span className="absolute right-3 text-xs opacity-80">
+                        {stage.deals_count} deals
+                      </span>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <div className="h-6 flex-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-                          <div
-                            className="h-full rounded-full transition-all"
-                            style={{
-                              width: `${(stage.total_value / maxFunnelValue) * 100}%`,
-                              backgroundColor: stage.stage_color,
-                            }}
-                          />
-                        </div>
-                        <span className="w-20 text-right text-sm font-medium">{formatCurrency(stage.total_value)}</span>
+
+                    {conversionRate !== null && (
+                      <div className="flex items-center gap-1 text-xs text-zinc-500 py-1">
+                        <span>↓</span>
+                        <span className="font-medium">{conversionRate}%</span>
                       </div>
-                    </div>
-                    <div className="w-16 text-right text-sm text-zinc-500">{stage.deals_count} deals</div>
-                  </div>
-                ))}
+                    )}
+                  </Fragment>
+                )
+              })}
             </div>
           </div>
         )
