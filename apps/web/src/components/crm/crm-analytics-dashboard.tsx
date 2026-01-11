@@ -26,10 +26,12 @@ import {
   LossReasonsChart,
   StageWinRateChart,
   ChannelPerformanceChart,
+  StageConversionChart,
   type TrendData,
   type LossReasonData,
   type StageWinRateData,
   type ChannelData,
+  type StageConversionData,
 } from "./charts/index"
 import {
   TrendingUp,
@@ -144,6 +146,7 @@ const DEFAULT_BLOCKS: DashboardBlock[] = [
   { id: "loss-reasons", title: "Motivos de Perda", size: "medium" },
   { id: "win-rate", title: "Win Rate por Stage", size: "medium" },
   { id: "channel-performance", title: "Performance por Canal", size: "medium" },
+  { id: "stage-conversion", title: "Conversao por Etapa", size: "medium" },
   { id: "top-deals", title: "Maiores Deals", size: "medium" },
   { id: "overdue-deals", title: "Deals Atrasados", size: "medium" },
 ]
@@ -289,6 +292,7 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
   const [winRateByStage, setWinRateByStage] = useState<StageWinRateData[]>([])
   const [channelPerformance, setChannelPerformance] = useState<ChannelData[]>([])
   const [trendData, setTrendData] = useState<TrendData[]>([])
+  const [stageConversion, setStageConversion] = useState<StageConversionData[]>([])
 
   // DnD sensors
   const sensors = useSensors(
@@ -407,6 +411,7 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
         winRateRes,
         channelRes,
         performanceRes,
+        stageConversionRes,
       ] = await Promise.all([
         apiFetch(`/crm/stats?${params}`),
         selectedPipelineId ? apiFetch(`/crm/funnel/${selectedPipelineId}`) : Promise.resolve(null),
@@ -418,6 +423,7 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
         selectedPipelineId ? apiFetch(`/crm/win-rate-by-stage/${selectedPipelineId}?${params}`) : Promise.resolve(null),
         apiFetch(`/crm/channel-performance?${params}`),
         selectedPipelineId ? apiFetch(`/crm/performance/${selectedPipelineId}?${params}`) : Promise.resolve(null),
+        selectedPipelineId ? apiFetch(`/crm/stage-conversion/${selectedPipelineId}?days=${days}`) : Promise.resolve(null),
       ])
 
       if (statsRes.ok) {
@@ -465,6 +471,11 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
       if (performanceRes && performanceRes.ok) {
         const data = await performanceRes.json()
         setTrendData(data.trend || [])
+      }
+
+      if (stageConversionRes && stageConversionRes.ok) {
+        const data = await stageConversionRes.json()
+        setStageConversion(data.stages || [])
       }
     } catch (error) {
       console.error("Erro ao carregar dashboard:", error)
@@ -852,6 +863,23 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
               Performance por Canal
             </h3>
             <ChannelPerformanceChart data={channelPerformance} isLoading={isLoading} />
+          </div>
+        )
+
+      case "stage-conversion":
+        return (
+          <div className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+            <h3 className="mb-4 flex items-center gap-2 font-semibold">
+              <TrendingDown className="h-4 w-4 text-orange-500" />
+              Conversao por Etapa
+            </h3>
+            {selectedPipelineId ? (
+              <StageConversionChart data={stageConversion} isLoading={isLoading} />
+            ) : (
+              <p className="py-8 text-center text-sm text-zinc-400">
+                Selecione um pipeline para ver a conversao por etapa
+              </p>
+            )}
           </div>
         )
 

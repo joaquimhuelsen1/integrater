@@ -22,10 +22,12 @@ import {
   LossReasonsChart,
   StageWinRateChart,
   ChannelPerformanceChart,
+  StageConversionChart,
   type TrendData,
   type LossReasonData,
   type StageWinRateData,
   type ChannelData,
+  type StageConversionData,
 } from "./charts/index"
 
 // ============= Interfaces =============
@@ -111,6 +113,7 @@ export function CRMDashboard({ pipelineId, onClose }: CRMDashboardProps) {
   const [winRateByStage, setWinRateByStage] = useState<StageWinRateData[]>([])
   const [channelPerformance, setChannelPerformance] = useState<ChannelData[]>([])
   const [trendData, setTrendData] = useState<TrendData[]>([])
+  const [stageConversion, setStageConversion] = useState<StageConversionData[]>([])
 
   const loadData = useCallback(async () => {
     setIsLoading(true)
@@ -132,6 +135,7 @@ export function CRMDashboard({ pipelineId, onClose }: CRMDashboardProps) {
         winRateRes,
         channelRes,
         performanceRes,
+        stageConversionRes,
       ] = await Promise.all([
         apiFetch(`/crm/stats?${params}`),
         pipelineId ? apiFetch(`/crm/funnel/${pipelineId}`) : Promise.resolve(null),
@@ -143,6 +147,7 @@ export function CRMDashboard({ pipelineId, onClose }: CRMDashboardProps) {
         pipelineId ? apiFetch(`/crm/win-rate-by-stage/${pipelineId}?${params}`) : Promise.resolve(null),
         apiFetch(`/crm/channel-performance?${params}`),
         pipelineId ? apiFetch(`/crm/performance/${pipelineId}?${params}`) : Promise.resolve(null),
+        pipelineId ? apiFetch(`/crm/stage-conversion/${pipelineId}?${params}`) : Promise.resolve(null),
       ])
 
       // Process existing responses
@@ -192,6 +197,11 @@ export function CRMDashboard({ pipelineId, onClose }: CRMDashboardProps) {
       if (performanceRes && performanceRes.ok) {
         const data = await performanceRes.json()
         setTrendData(data.trend || [])
+      }
+
+      if (stageConversionRes && stageConversionRes.ok) {
+        const data = await stageConversionRes.json()
+        setStageConversion(data.stages || [])
       }
     } catch (error) {
       console.error("Erro ao carregar dashboard:", error)
@@ -404,59 +414,64 @@ export function CRMDashboard({ pipelineId, onClose }: CRMDashboardProps) {
                 </div>
               )}
 
-              {/* Funnel */}
-              {funnel.length > 0 && (
-                <div className="rounded-lg border border-zinc-200 p-3 md:p-4 dark:border-zinc-800">
-                  <h3 className="mb-3 md:mb-4 font-semibold text-sm md:text-base">Funil de Vendas</h3>
-                  <div className="space-y-2 md:space-y-3">
-                    {funnel
-                      .filter((s) => !s.is_win && !s.is_loss)
-                      .map((stage) => (
-                        <div key={stage.stage_id} className="flex items-center gap-2 md:gap-3">
-                          <div
-                            className="w-16 md:w-24 flex-shrink-0 truncate text-xs md:text-sm font-medium"
-                            style={{ color: stage.stage_color }}
-                          >
-                            {stage.stage_name}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1 md:gap-2">
-                              <div className="h-5 md:h-6 flex-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-                                <div
-                                  className="h-full rounded-full transition-all"
-                                  style={{
-                                    width: `${(stage.total_value / maxFunnelValue) * 100}%`,
-                                    backgroundColor: stage.stage_color,
-                                  }}
-                                />
+              {/* Funnel + Trends Grid */}
+              <div className="grid gap-4 md:grid-cols-2 items-stretch">
+                {/* Funnel */}
+                {funnel.length > 0 && (
+                  <div className="rounded-lg border border-zinc-200 p-3 md:p-4 dark:border-zinc-800 min-h-[400px] flex flex-col">
+                    <h3 className="mb-3 md:mb-4 font-semibold text-sm md:text-base flex-shrink-0">Funil de Vendas</h3>
+                    <div className="space-y-2 md:space-y-3 flex-1 flex flex-col justify-center">
+                      {funnel
+                        .filter((s) => !s.is_win && !s.is_loss)
+                        .map((stage) => (
+                          <div key={stage.stage_id} className="flex items-center gap-2 md:gap-3">
+                            <div
+                              className="w-16 md:w-24 flex-shrink-0 truncate text-xs md:text-sm font-medium"
+                              style={{ color: stage.stage_color }}
+                            >
+                              {stage.stage_name}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1 md:gap-2">
+                                <div className="h-5 md:h-6 flex-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                                  <div
+                                    className="h-full rounded-full transition-all"
+                                    style={{
+                                      width: `${(stage.total_value / maxFunnelValue) * 100}%`,
+                                      backgroundColor: stage.stage_color,
+                                    }}
+                                  />
+                                </div>
+                                <span className="w-16 md:w-20 text-right text-xs md:text-sm font-medium truncate">
+                                  {formatCurrency(stage.total_value)}
+                                </span>
                               </div>
-                              <span className="w-16 md:w-20 text-right text-xs md:text-sm font-medium truncate">
-                                {formatCurrency(stage.total_value)}
-                              </span>
+                            </div>
+                            <div className="hidden md:block w-16 text-right text-sm text-zinc-500">
+                              {stage.deals_count} deals
+                            </div>
+                            <div className="md:hidden w-8 text-right text-xs text-zinc-500">
+                              {stage.deals_count}
                             </div>
                           </div>
-                          <div className="hidden md:block w-16 text-right text-sm text-zinc-500">
-                            {stage.deals_count} deals
-                          </div>
-                          <div className="md:hidden w-8 text-right text-xs text-zinc-500">
-                            {stage.deals_count}
-                          </div>
-                        </div>
-                      ))}
+                        ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Trend Chart Section */}
-              {trendData.length > 0 && (
-                <div className="rounded-lg border border-zinc-200 p-3 md:p-4 dark:border-zinc-800">
-                  <h3 className="mb-3 md:mb-4 flex items-center gap-2 font-semibold text-sm md:text-base">
-                    <Calendar className="h-4 w-4 text-blue-500" />
-                    Tendencias
-                  </h3>
-                  <TrendChart data={trendData} />
-                </div>
-              )}
+                {/* Trend Chart Section */}
+                {trendData.length > 0 && (
+                  <div className="rounded-lg border border-zinc-200 p-3 md:p-4 dark:border-zinc-800 min-h-[400px] flex flex-col">
+                    <h3 className="mb-3 md:mb-4 flex items-center gap-2 font-semibold text-sm md:text-base flex-shrink-0">
+                      <Calendar className="h-4 w-4 text-blue-500" />
+                      Tendencias
+                    </h3>
+                    <div className="flex-1 min-h-[300px]">
+                      <TrendChart data={trendData} />
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {/* Two columns: Charts */}
               <div className="grid gap-4 md:grid-cols-2">
@@ -481,8 +496,9 @@ export function CRMDashboard({ pipelineId, onClose }: CRMDashboardProps) {
                 )}
               </div>
 
-              {/* Channel Performance */}
-              {channelPerformance.length > 0 && (
+              {/* Channel Performance + Stage Conversion Grid */}
+              <div className="grid gap-4 md:grid-cols-2">
+                {/* Channel Performance */}
                 <div className="rounded-lg border border-zinc-200 p-3 md:p-4 dark:border-zinc-800">
                   <h3 className="mb-3 md:mb-4 flex items-center gap-2 font-semibold text-sm md:text-base">
                     <BarChart3 className="h-4 w-4 text-indigo-500" />
@@ -490,7 +506,18 @@ export function CRMDashboard({ pipelineId, onClose }: CRMDashboardProps) {
                   </h3>
                   <ChannelPerformanceChart data={channelPerformance} />
                 </div>
-              )}
+
+                {/* Stage Conversion - so mostra se pipeline selecionado */}
+                {pipelineId && (
+                  <div className="rounded-lg border border-zinc-200 p-3 md:p-4 dark:border-zinc-800">
+                    <h3 className="mb-3 md:mb-4 flex items-center gap-2 font-semibold text-sm md:text-base">
+                      <TrendingDown className="h-4 w-4 text-orange-500" />
+                      Conversao por Etapa
+                    </h3>
+                    <StageConversionChart data={stageConversion} />
+                  </div>
+                )}
+              </div>
 
               {/* Two columns: Top Deals & Overdue */}
               <div className="grid gap-2 md:gap-4 md:grid-cols-2">

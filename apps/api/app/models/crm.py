@@ -439,6 +439,21 @@ class FunnelData(BaseModel):
     stages: list[StageStats]
 
 
+class StageConversionItem(BaseModel):
+    stage_id: str
+    stage_name: str
+    stage_position: int
+    stage_color: str
+    deals_entered: int
+    deals_progressed: int
+    conversion_rate: float
+
+
+class StageConversionResponse(BaseModel):
+    stages: list[StageConversionItem]
+    period_days: int
+
+
 # Rebuild forward refs
 PipelineWithStages.model_rebuild()
 DealWithDetails.model_rebuild()
