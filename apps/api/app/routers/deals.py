@@ -1066,6 +1066,13 @@ async def send_message_from_deal(
     # ============================================
     # Substituir placeholders no body e subject
     # ============================================
+    # DEBUG - remover depois
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"DEBUG deal keys: {deal.keys()}")
+    logger.info(f"DEBUG deal.contacts: {deal.get('contacts')}")
+    logger.info(f"DEBUG deal.contact_id: {deal.get('contact_id')}")
+
     contact_data = deal.get("contacts") if deal.get("contacts") else None
     message_body = replace_placeholders(data.body, deal, contact_data)
     message_subject = replace_placeholders(data.subject, deal, contact_data) if data.subject else None
