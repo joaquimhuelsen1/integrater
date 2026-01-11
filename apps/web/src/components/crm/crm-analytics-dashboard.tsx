@@ -50,6 +50,8 @@ import {
   Send,
   Mail,
   MessageSquare,
+  Minimize2,
+  Maximize2,
 } from "lucide-react"
 
 // ============= Interfaces =============
@@ -152,10 +154,11 @@ const STORAGE_KEY = "crm-dashboard-layout"
 interface SortableBlockProps {
   id: string
   children: ReactNode
-  size: string
+  size: "small" | "medium" | "large"
+  onResize?: (direction: "increase" | "decrease") => void
 }
 
-function SortableBlock({ id, children, size }: SortableBlockProps) {
+function SortableBlock({ id, children, size, onResize }: SortableBlockProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
 
   const style = {
@@ -165,18 +168,52 @@ function SortableBlock({ id, children, size }: SortableBlockProps) {
 
   const sizeClass = size === "large" ? "col-span-4" : size === "medium" ? "col-span-2" : "col-span-1"
 
+  const canDecrease = size !== "small"
+  const canIncrease = size !== "large"
+
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`relative ${sizeClass} ${isDragging ? "z-50 opacity-75" : "z-0"}`}
+      className={`group relative ${sizeClass} ${isDragging ? "z-50 opacity-75" : "z-0"}`}
     >
-      <div
-        {...attributes}
-        {...listeners}
-        className="absolute top-2 right-2 z-10 cursor-grab rounded p-1 hover:bg-zinc-200 active:cursor-grabbing dark:hover:bg-zinc-700"
-      >
-        <GripVertical className="h-4 w-4 text-zinc-400" />
+      <div className="absolute top-2 right-2 z-10 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        {/* Botao diminuir */}
+        <button
+          type="button"
+          onClick={() => onResize?.("decrease")}
+          disabled={!canDecrease}
+          className={`rounded p-1 ${
+            canDecrease
+              ? "cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700"
+              : "cursor-not-allowed opacity-30"
+          }`}
+          title="Diminuir"
+        >
+          <Minimize2 className="h-4 w-4 text-zinc-400" />
+        </button>
+        {/* Handle de drag */}
+        <div
+          {...attributes}
+          {...listeners}
+          className="cursor-grab rounded p-1 hover:bg-zinc-200 active:cursor-grabbing dark:hover:bg-zinc-700"
+        >
+          <GripVertical className="h-4 w-4 text-zinc-400" />
+        </div>
+        {/* Botao aumentar */}
+        <button
+          type="button"
+          onClick={() => onResize?.("increase")}
+          disabled={!canIncrease}
+          className={`rounded p-1 ${
+            canIncrease
+              ? "cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700"
+              : "cursor-not-allowed opacity-30"
+          }`}
+          title="Aumentar"
+        >
+          <Maximize2 className="h-4 w-4 text-zinc-400" />
+        </button>
       </div>
       {children}
     </div>
@@ -387,6 +424,26 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
   const resetLayout = () => {
     setBlocks(DEFAULT_BLOCKS)
     localStorage.removeItem(STORAGE_KEY)
+  }
+
+  // Handle resize
+  const handleResize = (blockId: string, direction: "increase" | "decrease") => {
+    setBlocks((prev) =>
+      prev.map((block) => {
+        if (block.id !== blockId) return block
+
+        let newSize: "small" | "medium" | "large" = block.size
+        if (direction === "increase") {
+          if (block.size === "small") newSize = "medium"
+          else if (block.size === "medium") newSize = "large"
+        } else {
+          if (block.size === "large") newSize = "medium"
+          else if (block.size === "medium") newSize = "small"
+        }
+
+        return { ...block, size: newSize }
+      })
+    )
   }
 
   // ============= Formatters =============
@@ -868,7 +925,12 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
           <SortableContext items={blocks.map((b) => b.id)} strategy={rectSortingStrategy}>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
               {blocks.map((block) => (
-                <SortableBlock key={block.id} id={block.id} size={block.size}>
+                <SortableBlock
+                  key={block.id}
+                  id={block.id}
+                  size={block.size}
+                  onResize={(direction) => handleResize(block.id, direction)}
+                >
                   {renderBlockContent(block.id)}
                 </SortableBlock>
               ))}
