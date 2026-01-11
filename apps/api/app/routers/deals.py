@@ -1044,6 +1044,32 @@ async def send_message_from_deal(
             ).eq("primary_identity_id", identity_id_for_conversation).limit(1).execute()
             conversation_id = conv_result.data[0]["id"] if conv_result.data else None
 
+        # Se nao existe conversation, criar uma nova
+        if not conversation_id and identity_id_for_conversation:
+            conv_id = str(uuid4())
+
+            # Buscar workspace_id do integration_account
+            account_result = db.table("integration_accounts").select("workspace_id").eq(
+                "id", str(data.integration_account_id)
+            ).single().execute()
+
+            if account_result.data:
+                conv_workspace_id = account_result.data["workspace_id"]
+
+                # Criar conversa
+                db.table("conversations").insert({
+                    "id": conv_id,
+                    "owner_id": str(owner_id),
+                    "workspace_id": conv_workspace_id,
+                    "primary_identity_id": identity_id_for_conversation,
+                    "contact_id": str(deal["contact_id"]) if deal.get("contact_id") else None,
+                    "status": "open",
+                    "last_channel": data.channel,
+                    "last_message_at": datetime.now(timezone.utc).isoformat(),
+                }).execute()
+
+                conversation_id = conv_id
+
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(
@@ -1118,6 +1144,32 @@ async def send_message_from_deal(
                 "owner_id", str(owner_id)
             ).eq("primary_identity_id", identity_id_for_conversation).limit(1).execute()
             conversation_id = conv_result.data[0]["id"] if conv_result.data else None
+
+        # Se nao existe conversation, criar uma nova
+        if not conversation_id and identity_id_for_conversation:
+            conv_id = str(uuid4())
+
+            # Buscar workspace_id do integration_account
+            account_result = db.table("integration_accounts").select("workspace_id").eq(
+                "id", str(data.integration_account_id)
+            ).single().execute()
+
+            if account_result.data:
+                conv_workspace_id = account_result.data["workspace_id"]
+
+                # Criar conversa
+                db.table("conversations").insert({
+                    "id": conv_id,
+                    "owner_id": str(owner_id),
+                    "workspace_id": conv_workspace_id,
+                    "primary_identity_id": identity_id_for_conversation,
+                    "contact_id": str(deal["contact_id"]) if deal.get("contact_id") else None,
+                    "status": "open",
+                    "last_channel": data.channel,
+                    "last_message_at": datetime.now(timezone.utc).isoformat(),
+                }).execute()
+
+                conversation_id = conv_id
 
         try:
             async with httpx.AsyncClient(timeout=30) as client:
