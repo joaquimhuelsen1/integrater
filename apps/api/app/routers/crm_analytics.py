@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from supabase import Client
 from uuid import UUID
 from decimal import Decimal
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from app.deps import get_supabase, get_current_user_id
@@ -22,7 +22,7 @@ async def get_crm_stats(
     owner_id: UUID = Depends(get_current_user_id),
 ):
     """Retorna estatísticas gerais do CRM."""
-    date_from = datetime.utcnow() - timedelta(days=days)
+    date_from = datetime.now(timezone.utc) - timedelta(days=days)
 
     # Base query for deals
     query = db.table("deals").select("*").eq("owner_id", str(owner_id))
@@ -67,14 +67,14 @@ async def get_crm_stats(
     # Deals created in period
     deals_in_period = [
         d for d in deals
-        if datetime.fromisoformat(d["created_at"].replace("Z", "+00:00")) >= date_from.replace(tzinfo=None)
+        if datetime.fromisoformat(d["created_at"].replace("Z", "+00:00")) >= date_from
     ]
     new_deals_count = len(deals_in_period)
 
     # Won in period
     won_in_period = [
         d for d in won_deals
-        if d.get("won_at") and datetime.fromisoformat(d["won_at"].replace("Z", "+00:00")) >= date_from.replace(tzinfo=None)
+        if d.get("won_at") and datetime.fromisoformat(d["won_at"].replace("Z", "+00:00")) >= date_from
     ]
     won_in_period_count = len(won_in_period)
     won_in_period_value = sum(Decimal(str(d["value"])) for d in won_in_period)
@@ -156,7 +156,7 @@ async def get_performance_data(
     owner_id: UUID = Depends(get_current_user_id),
 ):
     """Retorna dados de performance ao longo do tempo."""
-    date_from = datetime.utcnow() - timedelta(days=days)
+    date_from = datetime.now(timezone.utc) - timedelta(days=days)
 
     # Get all deals from pipeline
     result = db.table("deals").select("*").eq(
@@ -245,7 +245,7 @@ async def get_overdue_deals(
     owner_id: UUID = Depends(get_current_user_id),
 ):
     """Retorna deals com data de fechamento vencida."""
-    today = datetime.utcnow().date().isoformat()
+    today = datetime.now(timezone.utc).date().isoformat()
 
     query = db.table("deals").select(
         "id, title, value, expected_close_date, stage:stages(name, color), contact:contacts(display_name)"
@@ -271,7 +271,7 @@ async def get_sales_cycle(
     owner_id: UUID = Depends(get_current_user_id),
 ):
     """Retorna métricas do ciclo de vendas (tempo médio entre criação e won)."""
-    date_from = datetime.utcnow() - timedelta(days=days)
+    date_from = datetime.now(timezone.utc) - timedelta(days=days)
 
     # Buscar deals ganhos no período
     query = db.table("deals").select("created_at, won_at").eq(
@@ -288,7 +288,7 @@ async def get_sales_cycle(
     won_in_period = []
     for deal in deals:
         won_at = datetime.fromisoformat(deal["won_at"].replace("Z", "+00:00"))
-        if won_at.replace(tzinfo=None) >= date_from:
+        if won_at >= date_from:
             created_at = datetime.fromisoformat(deal["created_at"].replace("Z", "+00:00"))
             cycle_days = (won_at - created_at).days
             won_in_period.append(cycle_days)
@@ -321,7 +321,7 @@ async def get_win_rate_by_stage(
     owner_id: UUID = Depends(get_current_user_id),
 ):
     """Retorna win rate por stage (conversão entre stages)."""
-    date_from = datetime.utcnow() - timedelta(days=days)
+    date_from = datetime.now(timezone.utc) - timedelta(days=days)
 
     # Buscar stages do pipeline
     stages_result = db.table("stages").select("id, name, position, color").eq(
@@ -400,7 +400,7 @@ async def get_loss_reasons_stats(
     owner_id: UUID = Depends(get_current_user_id),
 ):
     """Retorna estatísticas de motivos de perda."""
-    date_from = datetime.utcnow() - timedelta(days=days)
+    date_from = datetime.now(timezone.utc) - timedelta(days=days)
 
     # Buscar deals perdidos no período
     query = db.table("deals").select(
@@ -417,7 +417,7 @@ async def get_loss_reasons_stats(
     lost_deals = []
     for deal in deals:
         lost_at = datetime.fromisoformat(deal["lost_at"].replace("Z", "+00:00"))
-        if lost_at.replace(tzinfo=None) >= date_from:
+        if lost_at >= date_from:
             lost_deals.append(deal)
 
     if not lost_deals:
@@ -465,7 +465,7 @@ async def get_channel_performance(
     owner_id: UUID = Depends(get_current_user_id),
 ):
     """Retorna performance por canal de comunicação."""
-    date_from = datetime.utcnow() - timedelta(days=days)
+    date_from = datetime.now(timezone.utc) - timedelta(days=days)
 
     # Buscar conversations por canal
     conversations_result = db.table("conversations").select(
@@ -500,7 +500,7 @@ async def get_channel_performance(
     contact_won_value: dict[str, Decimal] = {}
     for deal in deals:
         won_at = datetime.fromisoformat(deal["won_at"].replace("Z", "+00:00"))
-        if won_at.replace(tzinfo=None) >= date_from:
+        if won_at >= date_from:
             contact_id = deal.get("contact_id")
             if contact_id:
                 if contact_id not in contact_won_value:
@@ -557,7 +557,7 @@ async def get_comparison(
     owner_id: UUID = Depends(get_current_user_id),
 ):
     """Retorna comparativo entre período atual e anterior."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     current_start = now - timedelta(days=days)
     previous_start = current_start - timedelta(days=days)
 
@@ -587,7 +587,7 @@ async def get_comparison(
     }
 
     for deal in deals:
-        created_at = datetime.fromisoformat(deal["created_at"].replace("Z", "+00:00")).replace(tzinfo=None)
+        created_at = datetime.fromisoformat(deal["created_at"].replace("Z", "+00:00"))
         value = Decimal(str(deal["value"]))
 
         # Novos deals
@@ -598,7 +598,7 @@ async def get_comparison(
 
         # Won deals
         if deal.get("won_at"):
-            won_at = datetime.fromisoformat(deal["won_at"].replace("Z", "+00:00")).replace(tzinfo=None)
+            won_at = datetime.fromisoformat(deal["won_at"].replace("Z", "+00:00"))
             if won_at >= current_start:
                 current_period["won_deals"] += 1
                 current_period["won_value"] += value
@@ -608,7 +608,7 @@ async def get_comparison(
 
         # Lost deals
         if deal.get("lost_at"):
-            lost_at = datetime.fromisoformat(deal["lost_at"].replace("Z", "+00:00")).replace(tzinfo=None)
+            lost_at = datetime.fromisoformat(deal["lost_at"].replace("Z", "+00:00"))
             if lost_at >= current_start:
                 current_period["lost_deals"] += 1
             elif lost_at >= previous_start:

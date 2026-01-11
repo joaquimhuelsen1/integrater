@@ -347,12 +347,12 @@ export function TemplatesSettings() {
                     </p>
                   </div>
 
-                  {/* Placeholders */}
+                  {/* Placeholders disponiveis */}
                   <div className="rounded-lg bg-zinc-100 p-3 dark:bg-zinc-800">
                     <p className="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">
-                      Placeholders disponiveis:
+                      Variaveis disponiveis (clique para inserir):
                     </p>
-                    <div className="flex flex-wrap gap-1">
+                    <div className="flex flex-wrap gap-1.5">
                       {PLACEHOLDERS.map(p => (
                         <button
                           key={p.key}
@@ -361,7 +361,7 @@ export function TemplatesSettings() {
                             ...prev,
                             content: prev.content + p.key
                           }))}
-                          className="rounded bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
+                          className="rounded bg-violet-100 px-2 py-1 text-xs font-mono text-violet-700 hover:bg-violet-200 dark:bg-violet-900/30 dark:text-violet-300 dark:hover:bg-violet-900/50"
                           title={p.desc}
                         >
                           {p.key}
@@ -457,6 +457,29 @@ export function TemplatesSettings() {
                             onChange={(e) => setEditForm(prev => ({ ...prev, shortcut: e.target.value }))}
                             className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800"
                           />
+                        </div>
+
+                        {/* Placeholders disponiveis */}
+                        <div className="rounded-lg bg-zinc-100 p-3 dark:bg-zinc-800">
+                          <p className="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                            Variaveis disponiveis (clique para inserir):
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {PLACEHOLDERS.map(p => (
+                              <button
+                                key={p.key}
+                                type="button"
+                                onClick={() => setEditForm(prev => ({
+                                  ...prev,
+                                  content: prev.content + p.key
+                                }))}
+                                className="rounded bg-violet-100 px-2 py-1 text-xs font-mono text-violet-700 hover:bg-violet-200 dark:bg-violet-900/30 dark:text-violet-300 dark:hover:bg-violet-900/50"
+                                title={p.desc}
+                              >
+                                {p.key}
+                              </button>
+                            ))}
+                          </div>
                         </div>
 
                         <div className="flex justify-end gap-2">
