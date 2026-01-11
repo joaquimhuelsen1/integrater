@@ -582,15 +582,15 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
                   return (
                     <Fragment key={stage.stage_id}>
                       {/* Linha da etapa */}
-                      <div className="flex items-center w-full gap-3">
+                      <div className="flex items-center w-full justify-center gap-3">
                         {/* Numero a esquerda */}
-                        <div className="w-8 text-right">
+                        <div className="w-8 text-right flex-shrink-0">
                           <span className="text-xs font-bold text-zinc-400">
                             {String(index + 1).padStart(2, '0')}
                           </span>
                         </div>
 
-                        {/* Container para largura decrescente */}
+                        {/* Container para largura decrescente - centralizado */}
                         <div
                           className="flex justify-center"
                           style={{ width: `${widthPercent}%` }}
@@ -608,7 +608,7 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
                         </div>
 
                         {/* Info a direita */}
-                        <div className="w-20 text-left">
+                        <div className="w-20 text-left flex-shrink-0">
                           <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
                             {stage.deals_count} deals
                           </span>
