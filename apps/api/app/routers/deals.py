@@ -52,7 +52,7 @@ def replace_placeholders(text: str, deal: dict, contact: dict | None = None) -> 
     # Placeholders do contato (email/telefone removidos - estao em contact_identities)
     if contact:
         replacements.update({
-            "{nome}": contact.get("display_name", "").split()[0] if contact.get("display_name") else "",
+            "{nome}": contact.get("display_name", "").strip().split()[0] if contact.get("display_name", "").strip() else "",
             "{nome_completo}": contact.get("display_name", ""),
         })
 
@@ -1224,11 +1224,21 @@ async def send_message_from_deal(
 
         # Criar contato no OpenPhone antes de enviar SMS
         try:
-            # Extrair primeiro nome do contact_data
+            # Extrair nome completo para o contato OpenPhone
             first_name = "Lead"
-            if contact_data and contact_data.get("display_name"):
-                name_parts = contact_data["display_name"].split()
-                first_name = name_parts[0] if name_parts else "Lead"
+
+            # Prioridade 1: nome completo do contato (validando dict e string nao vazia)
+            if contact_data and isinstance(contact_data, dict):
+                display_name = contact_data.get("display_name", "").strip()
+                if display_name:
+                    first_name = display_name
+
+            # Prioridade 2: titulo do deal (limitado a 50 chars)
+            elif deal.get("title"):
+                title = deal["title"].strip()
+                first_name = title[:50] if title else "Lead"
+
+            # Prioridade 3: "Lead" como ultimo fallback (ja definido acima)
 
             openphone_contact = await create_openphone_contact(
                 db=db,
