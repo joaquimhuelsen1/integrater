@@ -400,6 +400,8 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
         params.set("pipeline_id", selectedPipelineId)
       }
 
+      console.log('[DEBUG] loadData chamado - selectedPipelineId:', selectedPipelineId, 'days:', days)
+
       const [
         statsRes,
         funnelRes,
@@ -471,6 +473,12 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
       if (performanceRes && performanceRes.ok) {
         const data = await performanceRes.json()
         setTrendData(data.trend || [])
+      }
+
+      console.log('[DEBUG] stageConversionRes:', stageConversionRes)
+      if (stageConversionRes) {
+        const cloned = stageConversionRes.clone()
+        console.log('[DEBUG] stageConversion data:', await cloned.json())
       }
 
       if (stageConversionRes && stageConversionRes.ok) {
