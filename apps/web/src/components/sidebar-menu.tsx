@@ -10,7 +10,8 @@ import {
   ChevronRight,
   LogOut,
   Bookmark,
-  ShoppingBag
+  ShoppingBag,
+  Zap
 } from "lucide-react"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase"
@@ -223,6 +224,16 @@ export function SidebarMenu({ userEmail, filterTags, onFilterTagsChange, filterM
             >
               <LayoutGrid className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
               <span className="text-sm">CRM</span>
+            </Link>
+
+            {/* Automacoes */}
+            <Link
+              href={`${basePath}/crm/automations`}
+              onClick={() => setIsOpen(false)}
+              className="flex items-center gap-3 px-3 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            >
+              <Zap className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
+              <span className="text-sm">Automacoes</span>
             </Link>
 
             {/* Compradores */}

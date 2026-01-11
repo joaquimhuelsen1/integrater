@@ -61,6 +61,7 @@ export interface AutomationRule {
 interface AutomationRuleBuilderProps {
   rule: AutomationRule | null // null = nova regra
   pipelineId?: string
+  workspaceId: string // OBRIGATORIO - correcao do bug
   onClose: () => void
   onSave: () => void
 }
@@ -68,6 +69,7 @@ interface AutomationRuleBuilderProps {
 export function AutomationRuleBuilder({
   rule,
   pipelineId,
+  workspaceId,
   onClose,
   onSave,
 }: AutomationRuleBuilderProps) {
@@ -91,13 +93,13 @@ export function AutomationRuleBuilder({
 
   const isNew = !rule
 
-  // Carrega pipelines e stages
+  // Carrega pipelines e stages - CORRIGIDO: agora usa workspace_id
   useEffect(() => {
     const loadData = async () => {
       setIsLoading(true)
       try {
-        // Carregar pipelines
-        const pipelinesRes = await apiFetch("/pipelines")
+        // CORRECAO: Carregar pipelines COM workspace_id
+        const pipelinesRes = await apiFetch(`/pipelines?workspace_id=${workspaceId}`)
         if (pipelinesRes.ok) {
           const data = await pipelinesRes.json()
           setPipelines(data)
@@ -112,7 +114,7 @@ export function AutomationRuleBuilder({
       }
     }
     loadData()
-  }, [selectedPipelineId])
+  }, [workspaceId, selectedPipelineId])
 
   // Carrega stages quando pipeline muda
   useEffect(() => {

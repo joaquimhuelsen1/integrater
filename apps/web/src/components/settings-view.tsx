@@ -676,21 +676,6 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
               </div>
               <ChevronRight className="h-5 w-5 text-zinc-400" />
             </Link>
-            <Link
-              href="/settings/automations"
-              className="flex items-center justify-between p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <div className="rounded-full bg-violet-100 p-2 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400">
-                  <Zap className="h-5 w-5" />
-                </div>
-                <div>
-                  <p className="font-medium">Automacoes</p>
-                  <p className="text-sm text-zinc-500">Regras automaticas para conversas</p>
-                </div>
-              </div>
-              <ChevronRight className="h-5 w-5 text-zinc-400" />
-            </Link>
           </div>
         </section>
 

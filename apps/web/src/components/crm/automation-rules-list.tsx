@@ -31,10 +31,11 @@ interface AutomationRule extends BuilderRule {
 }
 
 interface AutomationRulesListProps {
+  workspaceId: string
   pipelineId?: string
 }
 
-export function AutomationRulesList({ pipelineId }: AutomationRulesListProps) {
+export function AutomationRulesList({ workspaceId, pipelineId }: AutomationRulesListProps) {
   const [rules, setRules] = useState<AutomationRule[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -231,7 +232,7 @@ export function AutomationRulesList({ pipelineId }: AutomationRulesListProps) {
                     <span className="inline-flex items-center rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/30 dark:text-violet-400">
                       {TRIGGER_LABELS[rule.trigger_type] || rule.trigger_type}
                     </span>
-                    <span className="text-zinc-400">→</span>
+                    <span className="text-zinc-400">-&gt;</span>
                     <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
                       {ACTION_LABELS[rule.action_type] || rule.action_type}
                     </span>
@@ -303,6 +304,7 @@ export function AutomationRulesList({ pipelineId }: AutomationRulesListProps) {
         <AutomationRuleBuilder
           rule={editingRule}
           pipelineId={pipelineId}
+          workspaceId={workspaceId}
           onClose={handleBuilderClose}
           onSave={handleBuilderSave}
         />
