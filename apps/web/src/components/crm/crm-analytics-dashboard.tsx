@@ -563,7 +563,7 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
                 preserveAspectRatio="none"
                 style={{ width: '60%' }}
               >
-                <polygon points="50,0 100,100 0,100" fill="currentColor" className="text-zinc-400" />
+                <polygon points="0,0 100,0 50,100" fill="currentColor" className="text-zinc-400" />
               </svg>
 
               {/* Etapas do funil */}
@@ -590,18 +590,21 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
                           </span>
                         </div>
 
-                        {/* Tarja/Seta colorida */}
+                        {/* Container para largura decrescente */}
                         <div
-                          className="relative flex-1 flex items-center justify-center text-white font-medium rounded-sm"
-                          style={{
-                            width: `${widthPercent}%`,
-                            backgroundColor: stage.stage_color,
-                            clipPath: "polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%, 10px 50%)",
-                            paddingTop: `${Math.max(12 - index * 2, 6)}px`,
-                            paddingBottom: `${Math.max(12 - index * 2, 6)}px`,
-                          }}
+                          className="flex justify-center"
+                          style={{ width: `${widthPercent}%` }}
                         >
-                          <span className="text-xs truncate px-4">{stage.stage_name}</span>
+                          {/* Tarja/Seta colorida */}
+                          <div
+                            className="w-full flex items-center justify-center text-white font-medium rounded-sm py-2"
+                            style={{
+                              backgroundColor: stage.stage_color,
+                              clipPath: "polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%, 10px 50%)",
+                            }}
+                          >
+                            <span className="text-xs truncate px-4">{stage.stage_name}</span>
+                          </div>
                         </div>
 
                         {/* Info a direita */}
