@@ -113,17 +113,20 @@ export function DealCard({ deal, onClick, isDragging, onArchive, onDelete, onSen
   const isLost = !!deal.lost_at
   const isClosed = isWon || isLost
 
-  const handleArchive = () => {
+  const handleArchive = (e: React.MouseEvent) => {
+    e.stopPropagation()
     onArchive?.(deal.id)
   }
 
-  const handleDelete = () => {
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation()
     if (confirm("Tem certeza que deseja excluir este deal permanentemente?")) {
       onDelete?.(deal.id)
     }
   }
 
-  const handleSendMessage = () => {
+  const handleSendMessage = (e: React.MouseEvent) => {
+    e.stopPropagation()
     onSendMessage?.(deal.id)
   }
 
