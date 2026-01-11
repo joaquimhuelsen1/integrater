@@ -11,13 +11,16 @@ import { apiFetch } from "@/lib/api"
 function normalizePhone(value: string | null | undefined): string {
   if (!value) return ""
 
-  // Remove espacos, hifens, parenteses
-  let phone = value.replace(/[\s\-\(\)]/g, "")
+  // Remove espacos, hifens, parenteses, pontos
+  let phone = value.replace(/[\s\-\(\)\.]/g, "")
 
-  // Se ja tem +, retorna como esta
-  if (phone.startsWith("+")) return phone
+  // Se tem +, extrair apenas digitos apos o +
+  const hadPlus = phone.startsWith("+")
+  if (hadPlus) {
+    phone = phone.slice(1) // Remove o + para processar
+  }
 
-  // Detecta pais
+  // Detecta pais e normaliza
   if (phone.startsWith("55") && (phone.length === 12 || phone.length === 13)) {
     // Brasil: 55 + DDD(2) + numero(8-9)
     return "+" + phone
@@ -25,7 +28,7 @@ function normalizePhone(value: string | null | undefined): string {
     // EUA/Canada: 1 + area(3) + numero(7)
     return "+" + phone
   } else if (phone.length === 10) {
-    // EUA 10 digitos sem codigo de pais
+    // EUA 10 digitos sem codigo de pais (ex: 9546557182)
     return "+1" + phone
   } else if (phone.length === 11 && phone.startsWith("55")) {
     // Brasil sem DDD completo (improvavel)
@@ -33,7 +36,7 @@ function normalizePhone(value: string | null | undefined): string {
   }
 
   // Fallback: adiciona + se nao tiver
-  return phone.startsWith("+") ? phone : "+" + phone
+  return "+" + phone
 }
 
 interface Template {
