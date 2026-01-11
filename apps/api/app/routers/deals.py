@@ -854,6 +854,9 @@ class DealSendMessageRequest(BaseModel):
         # Remover espacos, hifens, parenteses
         phone = re.sub(r"[\s\-\(\)]", "", v)
 
+        if not phone:
+            raise ValueError("Telefone nao pode ser vazio")
+
         # Se ja tem +, validar formato E.164 e retornar
         if phone.startswith("+"):
             digits_only = phone[1:]  # Remover o +
@@ -878,9 +881,6 @@ class DealSendMessageRequest(BaseModel):
             phone = "+1" + digits
         elif len(digits) == 11 and digits.startswith("55"):
             # Brasil sem DDD completo? Improvavel, mas tratar
-            phone = "+" + digits
-        elif digits.startswith("55") and len(digits) == 11:
-            # Brasil: 55 + numero sem DDD (improvavel mas aceitar)
             phone = "+" + digits
         else:
             # Caso generico: adicionar + e validar
