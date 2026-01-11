@@ -1,8 +1,8 @@
 "use client"
 
 import {
-  LineChart,
-  Line,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -113,9 +113,9 @@ export function TrendChart({ data, isLoading }: TrendChartProps) {
   return (
     <div className="h-64 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart
+        <BarChart
           data={data}
-          margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
+          margin={{ top: 20, right: 20, left: 0, bottom: 5 }}
         >
           <CartesianGrid
             strokeDasharray="3 3"
@@ -147,34 +147,25 @@ export function TrendChart({ data, isLoading }: TrendChartProps) {
               return labels[value] || value
             }}
           />
-          <Line
-            type="monotone"
+          <Bar
             dataKey="created"
-            stroke="#3b82f6"
-            strokeWidth={2}
-            dot={{ r: 3 }}
-            activeDot={{ r: 5 }}
+            fill="#3b82f6"
             name="created"
+            label={{ position: 'top', fill: '#3b82f6', fontSize: 11 }}
           />
-          <Line
-            type="monotone"
+          <Bar
             dataKey="won"
-            stroke="#22c55e"
-            strokeWidth={2}
-            dot={{ r: 3 }}
-            activeDot={{ r: 5 }}
+            fill="#22c55e"
             name="won"
+            label={{ position: 'top', fill: '#22c55e', fontSize: 11 }}
           />
-          <Line
-            type="monotone"
+          <Bar
             dataKey="lost"
-            stroke="#ef4444"
-            strokeWidth={2}
-            dot={{ r: 3 }}
-            activeDot={{ r: 5 }}
+            fill="#ef4444"
             name="lost"
+            label={{ position: 'top', fill: '#ef4444', fontSize: 11 }}
           />
-        </LineChart>
+        </BarChart>
       </ResponsiveContainer>
     </div>
   )
