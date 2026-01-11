@@ -48,14 +48,11 @@ def replace_placeholders(text: str, deal: dict, contact: dict | None = None) -> 
         "{deal_value}": str(deal.get("value", 0)) if deal.get("value") else "",
     }
 
-    # Placeholders do contato
+    # Placeholders do contato (email/telefone removidos - estao em contact_identities)
     if contact:
         replacements.update({
             "{nome}": contact.get("display_name", "").split()[0] if contact.get("display_name") else "",
             "{nome_completo}": contact.get("display_name", ""),
-            "{email}": contact.get("email", ""),
-            "{telefone}": contact.get("phone", ""),
-            "{telefone_contato}": contact.get("phone", ""),
         })
 
     # Custom fields do deal (ex: {cf:campo})
@@ -970,7 +967,7 @@ async def send_message_from_deal(
     """
     # Buscar deal para obter contact_id e workspace_id
     deal_result = db.table("deals").select(
-        "id, contact_id, title, value, pipeline_id, stage_id, custom_fields, pipelines(workspace_id), contacts(id, display_name, email, phone, metadata)"
+        "id, contact_id, title, value, pipeline_id, stage_id, custom_fields, pipelines(workspace_id), contacts(id, display_name, metadata)"
     ).eq("id", str(deal_id)).eq("owner_id", str(owner_id)).single().execute()
 
     if not deal_result.data:
