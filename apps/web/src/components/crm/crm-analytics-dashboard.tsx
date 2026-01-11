@@ -363,8 +363,13 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
   }, [selectedPipelineId, days])
 
   useEffect(() => {
-    loadData()
-  }, [loadData])
+    // Só carregar dados quando:
+    // - Tiver pipeline selecionado, OU
+    // - Não houver pipelines (para mostrar estado vazio)
+    if (selectedPipelineId || pipelines.length === 0) {
+      loadData()
+    }
+  }, [loadData, selectedPipelineId, pipelines.length])
 
   // Handle drag end
   const handleDragEnd = (event: DragEndEvent) => {
