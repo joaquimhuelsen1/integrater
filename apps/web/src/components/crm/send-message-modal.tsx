@@ -385,6 +385,8 @@ export function SendMessageModal({
       })
 
       if (res.ok) {
+        alert("Mensagem enviada com sucesso!")
+        onClose()
         onSent()
       } else {
         const error = await res.json().catch(() => ({ detail: "Erro ao enviar" }))

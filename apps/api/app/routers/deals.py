@@ -1150,3 +1150,9 @@ async def send_message_from_deal(
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
+    # Canal nao suportado
+    raise HTTPException(
+        status_code=400,
+        detail=f"Canal '{data.channel}' nao suportado. Use 'email' ou 'openphone_sms'."
+    )
+
