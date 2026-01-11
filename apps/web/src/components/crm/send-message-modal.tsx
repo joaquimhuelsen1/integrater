@@ -264,13 +264,13 @@ export function SendMessageModal({
   }, [channel, fullDeal, manualEmail, manualPhone, selectedIdentity])
 
   // Auto-selecionar primeira conta quando disponivel E nao tem selecao
-  // Usar length para evitar loops
+  // Depende de integrationAccountId para re-disparar apos reset do canal
   useEffect(() => {
     const firstAccount = filteredAccounts[0]
     if (filteredAccounts.length > 0 && !integrationAccountId && firstAccount) {
       setIntegrationAccountId(firstAccount.id)
     }
-  }, [filteredAccounts.length]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filteredAccounts.length, integrationAccountId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-selecionar primeira identity quando disponivel E nao tem selecao
   useEffect(() => {
