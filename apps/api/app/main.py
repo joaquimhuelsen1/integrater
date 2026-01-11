@@ -37,6 +37,7 @@ from app.routers import (
     automations_router,
     integrations_router,
     purchases_router,
+    preferences_router,
 )
 
 settings = get_settings()
@@ -120,3 +121,4 @@ app.include_router(webhooks_router)
 app.include_router(automations_router)
 app.include_router(integrations_router)
 app.include_router(purchases_router)
+app.include_router(preferences_router)

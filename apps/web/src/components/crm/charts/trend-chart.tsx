@@ -96,7 +96,7 @@ function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
 export function TrendChart({ data, isLoading }: TrendChartProps) {
   if (isLoading) {
     return (
-      <div className="flex h-64 items-center justify-center">
+      <div className="flex h-full min-h-[200px] items-center justify-center">
         <RefreshCw className="h-6 w-6 animate-spin text-zinc-400" />
       </div>
     )
@@ -104,14 +104,14 @@ export function TrendChart({ data, isLoading }: TrendChartProps) {
 
   if (!data || data.length === 0) {
     return (
-      <div className="flex h-64 items-center justify-center text-zinc-400">
+      <div className="flex h-full min-h-[200px] items-center justify-center text-zinc-400">
         Sem dados para o periodo selecionado
       </div>
     )
   }
 
   return (
-    <div className="h-64 w-full">
+    <div className="h-full min-h-[200px] w-full">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart
           data={data}

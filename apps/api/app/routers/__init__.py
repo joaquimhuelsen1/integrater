@@ -27,6 +27,7 @@ from .webhooks import router as webhooks_router
 from .automations import router as automations_router
 from .integrations import router as integrations_router
 from .purchases import router as purchases_router
+from .preferences import router as preferences_router
 
 __all__ = [
     "health_router",
@@ -58,4 +59,5 @@ __all__ = [
     "automations_router",
     "integrations_router",
     "purchases_router",
+    "preferences_router",
 ]

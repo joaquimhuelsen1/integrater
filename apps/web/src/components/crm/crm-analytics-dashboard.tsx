@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, ReactNode, Fragment } from "react"
+import { useState, useEffect, useCallback, useRef, ReactNode, Fragment } from "react"
 import {
   DndContext,
   closestCenter,
@@ -149,6 +149,7 @@ const DEFAULT_BLOCKS: DashboardBlock[] = [
 ]
 
 const STORAGE_KEY = "crm-dashboard-layout"
+const DEBOUNCE_DELAY = 1500 // 1.5 segundos para debounce do save
 
 // ============= Sortable Block Component =============
 interface SortableBlockProps {
@@ -220,6 +221,36 @@ function SortableBlock({ id, children, size, onResize }: SortableBlockProps) {
   )
 }
 
+// ============= API Functions for Layout Persistence =============
+async function loadLayoutFromAPI(): Promise<DashboardBlock[] | null> {
+  try {
+    const res = await apiFetch("/preferences/dashboard/crm_analytics")
+    if (res.ok) {
+      const data = await res.json()
+      if (data.layout && Array.isArray(data.layout) && data.layout.length > 0) {
+        return data.layout as DashboardBlock[]
+      }
+    }
+    return null
+  } catch (error) {
+    console.error("Erro ao carregar layout do servidor:", error)
+    return null
+  }
+}
+
+async function saveLayoutToAPI(blocks: DashboardBlock[]): Promise<boolean> {
+  try {
+    const res = await apiFetch("/preferences/dashboard/crm_analytics", {
+      method: "PUT",
+      body: JSON.stringify({ layout: blocks }),
+    })
+    return res.ok
+  } catch (error) {
+    console.error("Erro ao salvar layout no servidor:", error)
+    return false
+  }
+}
+
 // ============= Skeleton Components =============
 function SkeletonCard({ size = "small" }: { size?: "small" | "medium" | "large" }) {
   const heightClass = size === "small" ? "h-28" : size === "medium" ? "h-64" : "h-80"
@@ -269,24 +300,67 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
 
-  // Carregar layout do localStorage após montagem (evita hydration mismatch)
+  // Ref para debounce do save
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Carregar layout: servidor primeiro, localStorage como fallback
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY)
-      if (saved) {
-        setBlocks(JSON.parse(saved))
+    const loadLayout = async () => {
+      try {
+        // Tentar carregar do servidor primeiro
+        const serverLayout = await loadLayoutFromAPI()
+
+        if (serverLayout) {
+          // Servidor retornou layout valido
+          setBlocks(serverLayout)
+          // Atualizar localStorage para sincronizar
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(serverLayout))
+        } else {
+          // Fallback para localStorage
+          const saved = localStorage.getItem(STORAGE_KEY)
+          if (saved) {
+            setBlocks(JSON.parse(saved))
+          }
+        }
+      } catch (error) {
+        console.error("Erro ao carregar layout do dashboard:", error)
+        // Fallback para localStorage em caso de erro
+        try {
+          const saved = localStorage.getItem(STORAGE_KEY)
+          if (saved) {
+            setBlocks(JSON.parse(saved))
+          }
+        } catch {
+          localStorage.removeItem(STORAGE_KEY)
+        }
       }
-    } catch (error) {
-      console.error("Erro ao carregar layout do dashboard:", error)
-      localStorage.removeItem(STORAGE_KEY)
+      setIsLayoutLoaded(true)
     }
-    setIsLayoutLoaded(true)
+
+    loadLayout()
   }, [])
 
-  // Persist blocks order to localStorage (só após carregamento inicial)
+  // Persist blocks: dual write (localStorage imediato + servidor com debounce)
   useEffect(() => {
-    if (isLayoutLoaded) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(blocks))
+    if (!isLayoutLoaded) return
+
+    // Salvar imediatamente no localStorage (offline-first)
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(blocks))
+
+    // Debounce para salvar no servidor
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+    }
+
+    saveTimeoutRef.current = setTimeout(() => {
+      saveLayoutToAPI(blocks)
+    }, DEBOUNCE_DELAY)
+
+    // Cleanup
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
     }
   }, [blocks, isLayoutLoaded])
 
@@ -420,10 +494,11 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
     }
   }
 
-  // Reset layout
+  // Reset layout (setBlocks ativa o useEffect que salva no servidor via debounce)
   const resetLayout = () => {
     setBlocks(DEFAULT_BLOCKS)
-    localStorage.removeItem(STORAGE_KEY)
+    // localStorage sera atualizado pelo useEffect de persistencia
+    // O servidor tambem sera atualizado via debounce
   }
 
   // Handle resize
