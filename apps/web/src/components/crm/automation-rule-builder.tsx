@@ -66,6 +66,28 @@ interface AutomationRuleBuilderProps {
   onSave: () => void
 }
 
+// Funcao para resolver placeholders com dados de exemplo
+const resolvePreviewPlaceholders = (text: string): string => {
+  const examples: Record<string, string> = {
+    '{nome}': 'Joao',
+    '{primeiro_nome}': 'Joao',
+    '{nome_completo}': 'Joao Silva',
+    '{deal}': 'Proposta Comercial',
+    '{deal_title}': 'Proposta Comercial',
+    '{valor}': 'R$ 5.000,00',
+    '{deal_value}': 'R$ 5.000,00',
+    '{canal}': 'SMS',
+    '{email}': 'joao@exemplo.com',
+    '{telefone}': '+55 11 99999-0000',
+  }
+
+  let result = text
+  for (const [placeholder, value] of Object.entries(examples)) {
+    result = result.replace(new RegExp(placeholder.replace(/[{}]/g, '\\$&'), 'gi'), value)
+  }
+  return result
+}
+
 export function AutomationRuleBuilder({
   rule,
   pipelineId,
@@ -90,6 +112,13 @@ export function AutomationRuleBuilder({
   const [stages, setStages] = useState<Stage[]>([])
   const [pipelines, setPipelines] = useState<Pipeline[]>([])
   const [selectedPipelineId, setSelectedPipelineId] = useState<string>(pipelineId || rule?.pipeline_id || "")
+  const [templates, setTemplates] = useState<Array<{
+    id: string
+    title: string
+    content: string
+    channel_hint: string | null
+    subject: string | null
+  }>>([])
 
   const isNew = !rule
 
@@ -114,6 +143,20 @@ export function AutomationRuleBuilder({
       }
     }
     loadData()
+
+    // Carregar templates
+    const loadTemplates = async () => {
+      try {
+        const response = await apiFetch("/templates")
+        if (response.ok) {
+          const data = await response.json()
+          setTemplates(data)
+        }
+      } catch (error) {
+        console.error("Erro ao carregar templates:", error)
+      }
+    }
+    loadTemplates()
   }, [workspaceId, selectedPipelineId])
 
   // Carrega stages quando pipeline muda
@@ -493,6 +536,7 @@ export function AutomationRuleBuilder({
       case "send_message":
         return (
           <div className="space-y-3">
+            {/* Canal */}
             <div>
               <label className="block text-sm font-medium mb-1">Canal</label>
               <select
@@ -508,21 +552,101 @@ export function AutomationRuleBuilder({
                 <option value="sms">SMS</option>
               </select>
             </div>
+
+            {/* Template (opcional) */}
             <div>
-              <label className="block text-sm font-medium mb-1">Mensagem</label>
-              <textarea
-                value={(actionConfig.message as string) || ""}
-                onChange={(e) =>
-                  setActionConfig({ ...actionConfig, message: e.target.value })
-                }
-                placeholder="Digite a mensagem automatica..."
-                rows={3}
+              <label className="block text-sm font-medium mb-1">Template (opcional)</label>
+              <select
+                value={(actionConfig.template_id as string) || ""}
+                onChange={(e) => {
+                  const templateId = e.target.value || null
+                  const selectedTemplate = templates.find(t => t.id === templateId)
+                  setActionConfig({
+                    ...actionConfig,
+                    template_id: templateId,
+                    // Se template selecionado, preencher mensagem
+                    message: selectedTemplate?.content || actionConfig.message,
+                  })
+                }}
                 className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800"
-              />
-              <p className="mt-1 text-xs text-zinc-500">
-                Variaveis: {"{nome}"}, {"{primeiro_nome}"}, {"{canal}"}
-              </p>
+              >
+                <option value="">Sem template (mensagem manual)</option>
+                {templates
+                  .filter(t => {
+                    // Se não tem canal definido, mostra todos os templates
+                    if (!actionConfig.channel) return true
+                    // Se canal definido, mostra apenas templates:
+                    // 1. Com mesmo channel_hint
+                    // 2. OU templates sem channel_hint (universais)
+                    return t.channel_hint === actionConfig.channel || t.channel_hint === null
+                  })
+                  .map(template => (
+                    <option key={template.id} value={template.id}>
+                      {template.title} {template.channel_hint ? `(${template.channel_hint})` : '(universal)'}
+                    </option>
+                  ))}
+              </select>
             </div>
+
+            {/* Destinatario */}
+            <div>
+              <label className="block text-sm font-medium mb-1">Enviar para</label>
+              <select
+                value={(actionConfig.recipient as string) || "auto"}
+                onChange={(e) => setActionConfig({ ...actionConfig, recipient: e.target.value })}
+                className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800"
+              >
+                <option value="auto">Email do contato (automatico)</option>
+                <option value="custom">Email especifico</option>
+              </select>
+            </div>
+
+            {actionConfig.recipient === "custom" && (
+              <div>
+                <label className="block text-sm font-medium mb-1">Email</label>
+                <input
+                  type="email"
+                  value={(actionConfig.recipient_email as string) || ""}
+                  onChange={(e) => setActionConfig({ ...actionConfig, recipient_email: e.target.value })}
+                  placeholder="email@exemplo.com"
+                  className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800"
+                />
+              </div>
+            )}
+
+            {/* Mensagem - condicional baseado em template */}
+            {actionConfig.template_id ? (
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Preview do template
+                  <span className="ml-2 inline-flex items-center rounded bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/30 dark:text-violet-400">
+                    Dados de exemplo
+                  </span>
+                </label>
+                <div className="rounded-lg border border-zinc-300 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900 whitespace-pre-wrap italic">
+                  {resolvePreviewPlaceholders((actionConfig.message as string) || "Template sem conteudo")}
+                </div>
+                <p className="text-xs text-zinc-500 mt-1">
+                  <span className="italic">Preview com dados de exemplo.</span> Variaveis disponiveis: {"{nome}"}, {"{deal}"}, {"{valor}"}
+                </p>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-medium mb-1">Mensagem</label>
+                <textarea
+                  value={(actionConfig.message as string) || ""}
+                  onChange={(e) =>
+                    setActionConfig({ ...actionConfig, message: e.target.value })
+                  }
+                  placeholder="Digite a mensagem automatica..."
+                  rows={3}
+                  className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800"
+                />
+                <p className="mt-1 text-xs text-zinc-500">
+                  Variaveis: {"{nome}"}, {"{primeiro_nome}"}, {"{canal}"}
+                </p>
+              </div>
+            )}
           </div>
         )
 

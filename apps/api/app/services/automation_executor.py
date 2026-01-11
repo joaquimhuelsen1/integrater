@@ -21,6 +21,51 @@ from app.models.enums import AutomationTriggerType, AutomationActionType
 logger = logging.getLogger(__name__)
 
 
+def _apply_placeholders(text: str, deal: dict, contact: dict | None = None) -> str:
+    """
+    Substitui placeholders na mensagem pelos valores reais.
+
+    Placeholders suportados:
+    - {deal}, {deal_title}: titulo do deal
+    - {valor}, {deal_value}: valor do deal
+    - {nome}: primeiro nome do contato
+    - {nome_completo}: nome completo do contato
+    - {cf:campo} ou {campo}: custom fields do deal
+    """
+    if not text:
+        return text
+
+    # Placeholders do deal
+    replacements = {
+        "{deal}": deal.get("title", ""),
+        "{deal_title}": deal.get("title", ""),
+        "{valor}": str(deal.get("value", 0)) if deal.get("value") else "",
+        "{deal_value}": str(deal.get("value", 0)) if deal.get("value") else "",
+    }
+
+    # Placeholders do contato
+    if contact:
+        replacements.update({
+            "{nome}": contact.get("display_name", "").strip().split()[0] if contact.get("display_name", "").strip() else "",
+            "{nome_completo}": contact.get("display_name", ""),
+        })
+
+    # Custom fields do deal (ex: {cf:campo})
+    custom_fields = deal.get("custom_fields") or {}
+    if isinstance(custom_fields, dict):
+        for key, value in custom_fields.items():
+            replacements[f"{{cf:{key}}}"] = str(value) if value else ""
+            # Tambem aceita sem prefixo cf:
+            replacements[f"{{{key}}}"] = str(value) if value else ""
+
+    # Aplicar substituicoes
+    result = text
+    for placeholder, value in replacements.items():
+        result = result.replace(placeholder, value)
+
+    return result
+
+
 class AutomationExecutor:
     """Executor de automacoes."""
 
@@ -431,6 +476,35 @@ class AutomationExecutor:
             }
         }
 
+    async def _send_via_n8n(
+        self,
+        webhook_env_var: str,
+        payload: dict,
+        channel: str,
+    ) -> dict:
+        """Envia mensagem via n8n webhook."""
+        n8n_webhook_url = os.environ.get(webhook_env_var)
+        if not n8n_webhook_url:
+            raise ValueError(f"Webhook {webhook_env_var} nao configurado")
+
+        n8n_api_key = os.environ.get("N8N_API_KEY", "")
+        headers = {
+            "Content-Type": "application/json",
+            "X-API-KEY": n8n_api_key,
+        }
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                n8n_webhook_url,
+                json=payload,
+                headers=headers,
+            )
+
+            if response.status_code >= 400:
+                raise ValueError(f"Erro ao enviar {channel} via n8n: {response.text}")
+
+            return response.json() if response.text else {}
+
     async def _action_send_message(
         self,
         deal_id: str,
@@ -442,27 +516,52 @@ class AutomationExecutor:
         Config esperado: {
             "channel": "email" | "openphone_sms",
             "integration_account_id": "uuid",
-            "body": "texto da mensagem",
-            "subject": "assunto (apenas email, opcional)"
+            "template_id": "uuid" (opcional - se fornecido, busca template),
+            "body": "texto da mensagem" (fallback se nao tiver template),
+            "subject": "assunto (apenas email, opcional)",
+            "recipient": "auto" | "email@fixo.com" (opcional - "auto" busca do contato)
         }
+
+        Placeholders suportados no body/subject:
+        - {deal}, {deal_title}: titulo do deal
+        - {valor}, {deal_value}: valor do deal
+        - {nome}: primeiro nome do contato
+        - {nome_completo}: nome completo do contato
+        - {cf:campo} ou {campo}: custom fields do deal
         """
         channel = config.get("channel")
         integration_account_id = config.get("integration_account_id")
+        template_id = config.get("template_id")
         body = config.get("body")
         subject = config.get("subject")
+        recipient = config.get("recipient", "auto")
 
         if not channel:
             raise ValueError("channel nao especificado na action_config")
         if not integration_account_id:
             raise ValueError("integration_account_id nao especificado na action_config")
-        if not body:
-            raise ValueError("body nao especificado na action_config")
         if channel not in ("email", "openphone_sms"):
             raise ValueError(f"Canal invalido: {channel}. Use 'email' ou 'openphone_sms'")
 
-        # Busca deal para obter contact_id e titulo
+        # Se template_id fornecido, busca template
+        if template_id:
+            template_result = self.db.table("templates").select(
+                "id, name, content, subject, channel"
+            ).eq("id", str(template_id)).eq("owner_id", self.owner_id).single().execute()
+
+            if template_result.data:
+                body = template_result.data.get("content", body)
+                subject = template_result.data.get("subject", subject)
+                logger.info(f"Template carregado: {template_result.data.get('name')}")
+            else:
+                logger.warning(f"Template {template_id} nao encontrado, usando body/subject do config")
+
+        if not body:
+            raise ValueError("body nao especificado e template nao encontrado")
+
+        # Busca deal para obter contact_id, titulo e custom_fields
         deal_result = self.db.table("deals").select(
-            "id, contact_id, title"
+            "id, contact_id, title, value, custom_fields"
         ).eq("id", deal_id).eq("owner_id", self.owner_id).single().execute()
 
         if not deal_result.data:
@@ -474,18 +573,45 @@ class AutomationExecutor:
         if not contact_id:
             raise ValueError(f"Deal {deal_id} nao tem contact_id associado")
 
-        # Busca identity do contato baseado no canal
-        identity_type = "email" if channel == "email" else "phone"
-        identity_result = self.db.table("contact_identities").select(
-            "id, type, value"
-        ).eq("contact_id", contact_id).eq("type", identity_type).limit(1).execute()
+        # Busca dados do contato para placeholders
+        contact_result = self.db.table("contacts").select(
+            "id, display_name"
+        ).eq("id", contact_id).single().execute()
 
-        if not identity_result.data:
-            raise ValueError(f"Contato nao tem identity do tipo {identity_type}")
+        contact = contact_result.data if contact_result.data else None
 
-        identity = identity_result.data[0]
-        to_address = identity.get("value")
-        to_identity_id = identity.get("id")
+        # Determina endereco de destino
+        if recipient == "auto":
+            # Busca identity do contato baseado no canal
+            identity_type = "email" if channel == "email" else "phone"
+            identity_result = self.db.table("contact_identities").select(
+                "id, type, value"
+            ).eq("contact_id", contact_id).eq("type", identity_type).limit(1).execute()
+
+            if not identity_result.data:
+                error_msg = (
+                    f"Contato {contact_id} nao possui {identity_type} cadastrado. "
+                    f"Adicione um {identity_type} ao contato para que a automacao funcione."
+                )
+                print(f"[AutomationExecutor] WARNING: {error_msg}")
+                raise ValueError(error_msg)
+
+            identity = identity_result.data[0]
+            to_address = identity.get("value")
+            to_identity_id = identity.get("id")
+        else:
+            # Usa recipient fixo
+            to_address = recipient
+            # Tenta encontrar identity correspondente
+            identity_result = self.db.table("contact_identities").select(
+                "id"
+            ).eq("contact_id", contact_id).eq("value", recipient).limit(1).execute()
+            to_identity_id = identity_result.data[0]["id"] if identity_result.data else None
+
+        # Aplica placeholders no body e subject
+        body = _apply_placeholders(body, deal, contact)
+        if subject:
+            subject = _apply_placeholders(subject, deal, contact)
 
         # Validar integration_account
         int_account_result = self.db.table("integration_accounts").select(
@@ -498,22 +624,18 @@ class AutomationExecutor:
             raise ValueError(f"Integration account {integration_account_id} nao encontrada ou inativa")
 
         # Buscar conversation existente
-        conv_result = self.db.table("conversations").select("id").eq(
-            "owner_id", self.owner_id
-        ).eq("primary_identity_id", to_identity_id).limit(1).execute()
+        conversation_id = None
+        if to_identity_id:
+            conv_result = self.db.table("conversations").select("id").eq(
+                "owner_id", self.owner_id
+            ).eq("primary_identity_id", to_identity_id).limit(1).execute()
+            conversation_id = conv_result.data[0]["id"] if conv_result.data else None
 
-        conversation_id = conv_result.data[0]["id"] if conv_result.data else None
-
-        n8n_api_key = os.environ.get("N8N_API_KEY", "")
         message_id = str(uuid4())
         now = datetime.now(timezone.utc).isoformat()
 
         # Envia via n8n webhook
         if channel == "email":
-            n8n_webhook_url = os.environ.get(
-                "N8N_WEBHOOK_EMAIL_SEND",
-                "https://n8nwebhook.thereconquestmap.com/webhook/email/send"
-            )
             payload = {
                 "id": message_id,
                 "conversation_id": conversation_id,
@@ -523,11 +645,8 @@ class AutomationExecutor:
                 "text": body,
                 "attachments": [],
             }
+            resp_data = await self._send_via_n8n("N8N_WEBHOOK_EMAIL_SEND", payload, "email")
         else:  # openphone_sms
-            n8n_webhook_url = os.environ.get(
-                "N8N_WEBHOOK_OPENPHONE_SEND",
-                "https://n8nwebhook.thereconquestmap.com/webhook/openphone/send"
-            )
             payload = {
                 "id": message_id,
                 "conversation_id": conversation_id,
@@ -535,27 +654,14 @@ class AutomationExecutor:
                 "to": to_address,
                 "text": body,
             }
+            resp_data = await self._send_via_n8n("N8N_WEBHOOK_OPENPHONE_SEND", payload, "sms")
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(
-                n8n_webhook_url,
-                headers={
-                    "X-API-KEY": n8n_api_key,
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-
-        if response.status_code != 200:
-            raise ValueError(f"Erro n8n: status {response.status_code}")
-
-        resp_data = response.json()
         if resp_data.get("status") != "ok":
             raise ValueError(resp_data.get("error", "Erro ao enviar mensagem"))
 
         logger.info(
             f"[SEND_MESSAGE] deal={deal_id}, channel={channel}, "
-            f"to={to_address}, message_id={message_id}"
+            f"to={to_address}, message_id={message_id}, template_id={template_id}"
         )
 
         return {
@@ -564,6 +670,7 @@ class AutomationExecutor:
                 "channel": channel,
                 "to": to_address,
                 "sent_at": now,
+                "template_id": str(template_id) if template_id else None,
             }
         }
 

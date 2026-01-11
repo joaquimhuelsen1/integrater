@@ -11,6 +11,8 @@ from app.models import (
     MessageWithAttachments,
     MessageDirection,
 )
+from app.models.enums import AutomationTriggerType
+from app.services.automation_executor import AutomationExecutor
 from app.utils.crypto import decrypt
 
 router = APIRouter(prefix="/messages", tags=["messages"])
@@ -256,6 +258,32 @@ async def send_message(
                 resp_data = response.json()
                 if resp_data.get("status") == "ok":
                     print(f"[OpenPhone] Enviado via n8n com sucesso: {resp_data.get('external_id')}")
+
+                    # Disparar automacoes (non-blocking)
+                    try:
+                        # Buscar deal_id via conversation
+                        deal_result = db.table("deals").select("id").eq(
+                            "conversation_id", str(data.conversation_id)
+                        ).limit(1).execute()
+
+                        if deal_result.data:
+                            deal_id = deal_result.data[0]["id"]
+                            executor = AutomationExecutor(db=db, owner_id=str(owner_id))
+                            await executor.dispatch_trigger(
+                                trigger_type=AutomationTriggerType.message_sent,
+                                deal_id=UUID(deal_id),
+                                trigger_data={
+                                    "channel": "openphone_sms",
+                                    "conversation_id": str(data.conversation_id),
+                                    "message_text": data.text,
+                                    "message_id": message_id,
+                                },
+                            )
+                        else:
+                            print(f"[OpenPhone] SMS enviado fora de deal - automacoes nao disparadas")
+                    except Exception as e:
+                        print(f"[OpenPhone] Erro ao disparar automacao (ignorado): {e}")
+
                     return {
                         "id": message_id,
                         "conversation_id": str(data.conversation_id),
