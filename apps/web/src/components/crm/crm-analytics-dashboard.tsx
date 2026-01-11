@@ -553,10 +553,11 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
               {filteredFunnel.map((stage, index, arr) => {
                 const width = Math.max(100 - index * 15, 25)
                 const nextStage = arr[index + 1]
-                const conversionRate =
-                  nextStage && stage.deals_count > 0
-                    ? ((nextStage.deals_count / stage.deals_count) * 100).toFixed(0)
-                    : null
+                const conversionRate = nextStage
+                  ? (stage.deals_count > 0
+                      ? ((nextStage.deals_count / stage.deals_count) * 100).toFixed(0)
+                      : "0")
+                  : null
 
                 return (
                   <Fragment key={stage.stage_id}>
