@@ -1,6 +1,7 @@
 """
 Router CRM Analytics - Métricas e estatísticas do CRM.
 """
+import logging
 from fastapi import APIRouter, Depends, Query
 from supabase import Client
 from uuid import UUID
@@ -9,7 +10,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from app.deps import get_supabase, get_current_user_id
+
 from app.models.crm import PipelineStats, StageStats, FunnelData, StageConversionResponse, StageConversionItem
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/crm", tags=["crm-analytics"])
 
@@ -415,18 +419,22 @@ async def get_stage_conversion(
         "pipeline_id", str(pipeline_id)
     ).eq("owner_id", str(owner_id)).is_("archived_at", "null").execute()
     deals = deals_result.data or []
-
-    total_deals = len(deals)
     all_deal_ids = set(d["id"] for d in deals)
 
-    # Busca TODAS as atividades de stage_change (historico completo)
-    # Usar from_stage_id e to_stage_id (campos corretos)
+    # DEBUG LOG
+    logger.info(f"[stage-conversion] Pipeline {pipeline_id}: {len(deals)} deals encontrados")
+
+    # Buscar activities APENAS dos deals deste pipeline
     activities_result = db.table("deal_activities").select(
         "deal_id, from_stage_id, to_stage_id"
     ).eq("owner_id", str(owner_id)).eq(
         "activity_type", "stage_change"
     ).execute()
-    activities = activities_result.data or []
+    # Filtrar apenas activities dos deals deste pipeline
+    all_activities = activities_result.data or []
+    activities = [a for a in all_activities if a["deal_id"] in all_deal_ids]
+
+    logger.info(f"[stage-conversion] {len(all_activities)} activities totais, {len(activities)} do pipeline")
 
     # Mapear positions
     stage_positions = {s["id"]: s["position"] for s in stages}
@@ -450,6 +458,8 @@ async def get_stage_conversion(
         # União: deals que ESTÃO ou já PASSARAM por este stage
         entered_deal_ids = entered_from_activities | currently_in_stage
         deals_entered = len(entered_deal_ids)
+
+        logger.info(f"[stage-conversion] Stage '{stage['name']}': entered_from_activities={len(entered_from_activities)}, currently_in_stage={len(currently_in_stage)}, total={deals_entered}")
 
         # Deals que SAÍRAM deste stage para stage com position MAIOR
         progressed_deal_ids = set(
