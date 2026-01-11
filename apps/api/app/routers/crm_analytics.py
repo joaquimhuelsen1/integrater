@@ -199,6 +199,7 @@ async def get_performance_data(
 
     # Convert to sorted list
     sorted_dates = sorted(daily_data.keys())
+    date_from_str = date_from.date().isoformat()
     performance = [
         {
             "date": date,
@@ -208,7 +209,7 @@ async def get_performance_data(
             "won_value": float(daily_data[date]["won_value"])
         }
         for date in sorted_dates
-        if datetime.fromisoformat(date) >= date_from.date()
+        if date >= date_from_str
     ]
 
     return {"trend": performance}
@@ -468,12 +469,12 @@ async def get_channel_performance(
 
     # Buscar conversations por canal
     conversations_result = db.table("conversations").select(
-        "id, channel, contact_id"
+        "id, last_channel, contact_id"
     ).eq("owner_id", str(owner_id)).execute()
     conversations = conversations_result.data or []
 
     # Mapear conversation -> channel
-    conv_channel_map = {c["id"]: c["channel"] for c in conversations}
+    conv_channel_map = {c["id"]: c["last_channel"] for c in conversations}
     conv_contact_map = {c["id"]: c["contact_id"] for c in conversations}
 
     # Buscar mensagens no período
