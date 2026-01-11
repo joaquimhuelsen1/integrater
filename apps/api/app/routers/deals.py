@@ -1153,6 +1153,8 @@ async def send_message_from_deal(
                             "integration_account_id": str(data.integration_account_id),
                             "contact_id": contact_id,
                             "message_id": message_id,
+                            "template_id": str(data.template_id) if data.template_id else None,
+                            "message_text": message_body[:200],
                         },
                     )
 
@@ -1284,6 +1286,8 @@ async def send_message_from_deal(
                             "integration_account_id": str(data.integration_account_id),
                             "contact_id": contact_id,
                             "message_id": message_id,
+                            "template_id": str(data.template_id) if data.template_id else None,
+                            "message_text": message_body[:200],
                         },
                     )
 

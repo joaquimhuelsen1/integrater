@@ -326,7 +326,6 @@ export function AutomationRuleBuilder({
         )
 
       case "message_received":
-      case "message_sent":
         return (
           <div className="space-y-3">
             <div>
@@ -354,6 +353,55 @@ export function AutomationRuleBuilder({
                 <option value="telegram">Telegram</option>
                 <option value="email">Email</option>
                 <option value="sms">SMS</option>
+              </select>
+            </div>
+          </div>
+        )
+
+      case "message_sent":
+        return (
+          <div className="space-y-3 mt-3 p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg">
+            <p className="text-sm font-medium">Filtros do Trigger</p>
+
+            {/* Dropdown de Template */}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Quando template especifico for usado (opcional)
+              </label>
+              <select
+                value={(triggerConfig.template_id as string) || ""}
+                onChange={(e) => setTriggerConfig({
+                  ...triggerConfig,
+                  template_id: e.target.value || null
+                })}
+                className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800"
+              >
+                <option value="">Qualquer mensagem (sem filtro)</option>
+                {templates.map(template => (
+                  <option key={template.id} value={template.id}>
+                    {template.title} {template.channel_hint ? `(${template.channel_hint})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Dropdown de Canal */}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Via canal (opcional)
+              </label>
+              <select
+                value={(triggerConfig.channel as string) || ""}
+                onChange={(e) => setTriggerConfig({
+                  ...triggerConfig,
+                  channel: e.target.value || null
+                })}
+                className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800"
+              >
+                <option value="">Qualquer canal</option>
+                <option value="email">Email</option>
+                <option value="openphone_sms">SMS (OpenPhone)</option>
+                <option value="telegram">Telegram</option>
               </select>
             </div>
           </div>

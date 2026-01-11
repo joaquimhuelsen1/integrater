@@ -172,8 +172,35 @@ class AutomationExecutor:
         """
         Valida as condicoes da regra contra os dados do deal.
 
-        Operadores suportados: eq, neq, gt, gte, lt, lte, contains
+        Primeiro verifica trigger_config (template_id, channel).
+        Depois avalia conditions com operadores: eq, neq, gt, gte, lt, lte, contains
         """
+        # Verificar trigger_config (filtros do trigger)
+        trigger_config = rule.get("trigger_config", {}) or {}
+
+        # Verificar template_id se configurado
+        config_template_id = trigger_config.get("template_id")
+        if config_template_id:
+            trigger_template_id = trigger_data.get("template_id")
+            if trigger_template_id != config_template_id:
+                logger.debug(
+                    f"Template nao corresponde: esperado={config_template_id}, "
+                    f"recebido={trigger_template_id}"
+                )
+                return False
+
+        # Verificar channel se configurado
+        config_channel = trigger_config.get("channel")
+        if config_channel:
+            trigger_channel = trigger_data.get("channel")
+            if trigger_channel != config_channel:
+                logger.debug(
+                    f"Channel nao corresponde: esperado={config_channel}, "
+                    f"recebido={trigger_channel}"
+                )
+                return False
+
+        # Verificar conditions (regras de campo)
         conditions = rule.get("conditions", [])
 
         if not conditions:
