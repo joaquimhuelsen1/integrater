@@ -10,6 +10,7 @@ interface Template {
   content: string
   channel_hint: string | null
   shortcut: string | null
+  subject: string | null
 }
 
 interface IntegrationAccount {
@@ -42,7 +43,7 @@ interface SendMessageModalProps {
   onSent: () => void
 }
 
-type ChannelType = "email" | "openphone_sms"
+type ChannelType = "email" | "openphone_sms" | "telegram"
 
 /**
  * Extrai telefone do campo info do deal
@@ -206,6 +207,7 @@ export function SendMessageModal({
       if (!t.channel_hint) return true
       if (channel === "email") return t.channel_hint === "email"
       if (channel === "openphone_sms") return t.channel_hint === "openphone_sms"
+      if (channel === "telegram") return t.channel_hint === "telegram"
       return true
     })
   }, [templates, channel])
@@ -278,12 +280,16 @@ export function SendMessageModal({
     }
   }, [filteredIdentities.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Quando seleciona um template, preencher o body
+  // Quando seleciona um template, preencher o body e subject (se email)
   const handleTemplateSelect = (tplId: string) => {
     setTemplateId(tplId)
     const tpl = templates.find((t) => t.id === tplId)
     if (tpl) {
       setBody(tpl.content)
+      // Preencher subject automaticamente para templates de email
+      if (channel === "email" && tpl.subject) {
+        setSubject(tpl.subject)
+      }
     }
   }
 

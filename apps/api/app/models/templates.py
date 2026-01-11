@@ -13,6 +13,7 @@ class TemplateBase(BaseModel):
     content: str
     channel_hint: ChannelType | None = None
     shortcut: str | None = None
+    subject: str | None = None
 
 
 class TemplateCreate(TemplateBase):
@@ -24,6 +25,7 @@ class TemplateUpdate(BaseModel):
     content: str | None = None
     channel_hint: ChannelType | None = None
     shortcut: str | None = None
+    subject: str | None = None
 
 
 class Template(TemplateBase, TimestampMixin, BaseSchema):
