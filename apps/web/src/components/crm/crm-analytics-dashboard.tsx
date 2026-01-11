@@ -876,15 +876,17 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
 
       case "stage-conversion":
         return (
-          <div className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+          <div className="min-h-[400px] flex flex-col rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
             <h3 className="mb-4 flex items-center gap-2 font-semibold">
               <TrendingDown className="h-4 w-4 text-orange-500" />
               Conversao por Etapa
             </h3>
             {selectedPipelineId ? (
-              <StageConversionChart data={stageConversion} isLoading={isLoading} />
+              <div className="flex-1">
+                <StageConversionChart data={stageConversion} isLoading={isLoading} />
+              </div>
             ) : (
-              <p className="py-8 text-center text-sm text-zinc-400">
+              <p className="flex-1 flex items-center justify-center text-sm text-zinc-400">
                 Selecione um pipeline para ver a conversao por etapa
               </p>
             )}

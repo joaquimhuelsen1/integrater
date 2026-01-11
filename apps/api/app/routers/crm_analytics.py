@@ -439,6 +439,30 @@ async def get_stage_conversion(
     # Mapear positions
     stage_positions = {s["id"]: s["position"] for s in stages}
 
+    # Construir historico de stages por deal (evita duplicacao)
+    deal_stage_history: dict[str, set[str]] = {}
+
+    # 1. Incluir stage atual de cada deal
+    for deal in deals:
+        deal_id = deal["id"]
+        if deal_id not in deal_stage_history:
+            deal_stage_history[deal_id] = set()
+        deal_stage_history[deal_id].add(deal["stage_id"])
+
+    # 2. Incluir historico de activities (from_stage e to_stage)
+    for activity in activities:
+        deal_id = activity["deal_id"]
+        # Skip activities de deals que não estão na lista de ativos
+        if deal_id not in deal_stage_history:
+            continue
+
+        if activity.get("from_stage_id"):
+            deal_stage_history[deal_id].add(activity["from_stage_id"])
+        if activity.get("to_stage_id"):
+            deal_stage_history[deal_id].add(activity["to_stage_id"])
+
+    logger.info(f"[stage-conversion] Historico construido para {len(deal_stage_history)} deals")
+
     # Calcular stats por stage
     result_stages = []
 
@@ -446,20 +470,13 @@ async def get_stage_conversion(
         stage_id = stage["id"]
         position = stage["position"]
 
-        # Deals que ENTRARAM neste stage via atividades
-        entered_from_activities = set(
-            a["deal_id"] for a in activities
-            if a.get("to_stage_id") == stage_id
+        # Contar deals que PASSARAM por este stage (sem duplicacao)
+        deals_entered = sum(
+            1 for stages_passed in deal_stage_history.values()
+            if stage_id in stages_passed
         )
 
-        # Deals que ESTÃO atualmente neste stage
-        currently_in_stage = set(d["id"] for d in deals if d["stage_id"] == stage_id)
-
-        # União: deals que ESTÃO ou já PASSARAM por este stage
-        entered_deal_ids = entered_from_activities | currently_in_stage
-        deals_entered = len(entered_deal_ids)
-
-        logger.info(f"[stage-conversion] Stage '{stage['name']}': entered_from_activities={len(entered_from_activities)}, currently_in_stage={len(currently_in_stage)}, total={deals_entered}")
+        logger.info(f"[stage-conversion] Stage '{stage['name']}': deals_entered={deals_entered}")
 
         # Deals que SAÍRAM deste stage para stage com position MAIOR
         progressed_deal_ids = set(
