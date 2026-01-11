@@ -290,7 +290,7 @@ export function SendMessageModal({
       const cf = fullDeal.custom_fields as Record<string, unknown> | undefined
       const phoneValue = cf?.telefone_contato || fullDeal.telefone_contato
       if (phoneValue) {
-        setManualPhone(String(phoneValue))
+        setManualPhone(normalizePhone(String(phoneValue)))
       }
     }
   }, [channel, fullDeal, manualEmail, manualPhone, selectedIdentity])
