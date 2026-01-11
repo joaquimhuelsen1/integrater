@@ -120,24 +120,49 @@ async def link_identity(
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
-    # 1. Atualiza identity com contact_id
-    db.table("contact_identities").update(
-        {"contact_id": str(contact_id)}
-    ).eq("id", str(data.identity_id)).eq("owner_id", str(owner_id)).execute()
-
-    # 2. Atualiza conversas que usam essa identity
+    identity_updated = False
     try:
+        # 1. Atualiza identity com contact_id
+        db.table("contact_identities").update(
+            {"contact_id": str(contact_id)}
+        ).eq("id", str(data.identity_id)).eq("owner_id", str(owner_id)).execute()
+        identity_updated = True
+
+        # 2. Atualiza conversas que usam essa identity
         db.table("conversations").update(
             {"contact_id": str(contact_id)}
         ).eq("primary_identity_id", str(data.identity_id)).eq("owner_id", str(owner_id)).execute()
+
     except Exception as e:
+        # Rollback manual se identity foi atualizada mas conversations falhou
+        if identity_updated:
+            try:
+                db.table("contact_identities").update(
+                    {"contact_id": None}
+                ).eq("id", str(data.identity_id)).eq("owner_id", str(owner_id)).execute()
+            except Exception:
+                pass  # Best effort rollback
+
         error_msg = str(e)
-        if "conversations_owner_contact_channel_uniq" in error_msg or "23505" in error_msg:
+        # Erro de duplicata no indice de identities
+        if "contact_identities_contact_type_value_idx" in error_msg:
             raise HTTPException(
                 status_code=409,
-                detail="Este contato já está vinculado a outra conversa neste canal"
+                detail="Esta identity ja esta vinculada a este contato"
             )
-        raise
+        # Erro de duplicata na constraint de conversations
+        if "conversations_owner_contact_channel_uniq" in error_msg:
+            raise HTTPException(
+                status_code=409,
+                detail="Este contato ja esta vinculado a outra conversa neste canal"
+            )
+        # Qualquer outro erro de unique constraint (23505)
+        if "23505" in error_msg:
+            raise HTTPException(
+                status_code=409,
+                detail="Conflito: registro duplicado detectado"
+            )
+        raise  # Re-raise erros nao tratados
 
 
 @router.post("/{contact_id}/unlink-identity", status_code=204)
