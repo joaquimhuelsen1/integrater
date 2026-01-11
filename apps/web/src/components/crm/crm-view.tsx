@@ -14,6 +14,7 @@ import { WorkspaceSelector } from "@/components/workspace-selector"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { useWorkspace } from "@/contexts/workspace-context"
 import { apiFetch } from "@/lib/api"
+import { useRealtimeDeals, RealtimeDeal } from "@/hooks/use-realtime-deals"
 
 interface Pipeline {
   id: string
@@ -87,6 +88,99 @@ export function CRMView() {
   } | null>(null)
 
   const { currentWorkspace } = useWorkspace()
+
+  // Converte RealtimeDeal para Deal local
+  const realtimeDealToDeal = useCallback((rtDeal: RealtimeDeal): Deal => ({
+    id: rtDeal.id,
+    title: rtDeal.title,
+    value: rtDeal.value ?? 0,
+    probability: rtDeal.probability ?? 0,
+    expected_close_date: rtDeal.expected_close_date,
+    stage_id: rtDeal.stage_id,
+    contact_id: rtDeal.contact_id,
+    won_at: rtDeal.won_at,
+    lost_at: rtDeal.lost_at,
+    created_at: rtDeal.created_at,
+    updated_at: rtDeal.updated_at,
+  }), [])
+
+  // Hook de realtime para atualizar deals em tempo real
+  const { isConnected: dealsRealtimeConnected } = useRealtimeDeals({
+    pipelineId: selectedPipelineId,
+    enabled: !!selectedPipelineId,
+    onUpdate: (rtDeal: RealtimeDeal) => {
+      const deal = realtimeDealToDeal(rtDeal)
+      setStages(prevStages => {
+        // Primeiro, encontrar deal antigo ANTES de remover para preservar campos extras
+        let oldDeal: Deal | undefined
+        for (const stage of prevStages) {
+          oldDeal = stage.deals.find(d => d.id === deal.id)
+          if (oldDeal) break
+        }
+
+        return prevStages.map(stage => {
+          // Remover deal de todos os stages
+          const filteredDeals = stage.deals.filter(d => d.id !== deal.id)
+
+          // Se este é o stage destino do deal
+          if (stage.id === deal.stage_id) {
+            // Merge preservando campos extras do deal antigo (tags, contact, custom_fields)
+            const mergedDeal = oldDeal ? {
+              ...oldDeal,  // Preserva TUDO do deal antigo
+              // Sobrescreve apenas campos que vêm do realtime
+              id: deal.id,
+              title: deal.title,
+              value: deal.value,
+              probability: deal.probability,
+              stage_id: deal.stage_id,
+              contact_id: deal.contact_id,
+              expected_close_date: deal.expected_close_date,
+              won_at: deal.won_at,
+              lost_at: deal.lost_at,
+              created_at: deal.created_at,
+              updated_at: deal.updated_at,
+            } : deal
+
+            return {
+              ...stage,
+              deals: [...filteredDeals, mergedDeal]
+            }
+          }
+
+          // Stage não é o destino, apenas retorna sem o deal
+          return { ...stage, deals: filteredDeals }
+        })
+      })
+      console.log(`[Realtime] Deal ${rtDeal.id} atualizado`)
+    },
+    onInsert: (rtDeal: RealtimeDeal) => {
+      // Novo deal criado, adicionar ao stage correto
+      const deal = realtimeDealToDeal(rtDeal)
+      setStages(prevStages => {
+        return prevStages.map(stage => {
+          if (stage.id === deal.stage_id) {
+            // Verificar se deal já existe (evitar duplicatas)
+            const exists = stage.deals.some(d => d.id === deal.id)
+            if (exists) return stage
+            return {
+              ...stage,
+              deals: [...stage.deals, deal]
+            }
+          }
+          return stage
+        })
+      })
+    },
+    onDelete: (rtDeal: RealtimeDeal) => {
+      // Deal deletado, remover do estado
+      setStages(prevStages => {
+        return prevStages.map(stage => ({
+          ...stage,
+          deals: stage.deals.filter(d => d.id !== rtDeal.id)
+        }))
+      })
+    }
+  })
 
   const loadPipelines = useCallback(async () => {
     if (!currentWorkspace) return []
