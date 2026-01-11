@@ -335,11 +335,20 @@ export function SendMessageModal({
     const deal = fullDeal
     const customFields = (deal.custom_fields || {}) as Record<string, unknown>
 
+    // Resolver nome do contato com fallbacks multiplos:
+    // 1. deal.contact.display_name (via dealData.contact_name)
+    // 2. deal.title (geralmente é o nome do lead)
+    // 3. custom_field nome_completo
+    const contactName = dealData?.contact_name
+      || (deal.title as string)
+      || (customFields.nome_completo as string)
+      || ''
+
     // Montar objeto de substituicoes
     const replacements: Record<string, string> = {
       // Placeholders basicos do deal
-      '{nome}': dealData?.contact_name?.split(' ')[0] || '',
-      '{nome_completo}': dealData?.contact_name || '',
+      '{nome}': contactName.split(' ')[0] || '',
+      '{nome_completo}': contactName,
       '{valor}': deal.value ? String(deal.value) : '',
       '{deal}': (deal.title as string) || '',
       '{deal_title}': (deal.title as string) || '',
