@@ -136,6 +136,30 @@ class ContactSyncResponse(BaseModel):
     errors: int
 
 
+class CreateOpenPhoneContactRequest(BaseModel):
+    """Request para criar contato no OpenPhone."""
+    integration_account_id: UUID
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: Optional[str] = Field(None, max_length=100)
+    phone_number: str
+    company: Optional[str] = Field(None, max_length=200)
+    external_id: Optional[str] = Field(None, max_length=100, description="Para vincular com deal_id")
+
+    @field_validator('phone_number')
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        return normalize_phone_e164(v)
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class CreateOpenPhoneContactResponse(BaseModel):
+    """Response da criacao de contato no OpenPhone."""
+    id: str
+    phone_number: str
+    created: bool
+
+
 # --- Helper Functions ---
 
 def _verify_webhook_signature(payload: bytes, signature: str | None, webhook_type: str) -> bool:
@@ -173,7 +197,7 @@ def _verify_webhook_signature(payload: bytes, signature: str | None, webhook_typ
     return is_valid
 
 
-async def _get_openphone_account(db: Client, phone_number_id: str = None, phone_number: str = None):
+async def _get_openphone_account(db: Client, phone_number_id: str | None = None, phone_number: str | None = None):
     """Busca conta OpenPhone pelo phoneNumberId ou phone_number."""
     result = db.table("integration_accounts").select("*").eq(
         "type", "openphone"
@@ -222,6 +246,100 @@ async def _send_to_n8n(payload: dict) -> dict | None:
         return None
     except Exception as e:
         logger.error(f"[WEBHOOK] Erro ao chamar n8n: {e}")
+        return None
+
+
+async def create_openphone_contact(
+    db: Client,
+    integration_account_id: UUID,
+    first_name: str,
+    phone_number: str,
+    last_name: Optional[str] = None,
+    company: Optional[str] = None,
+    external_id: Optional[str] = None,
+) -> Optional[dict]:
+    """
+    Cria contato no OpenPhone.
+
+    Funcao auxiliar para ser reutilizada em outros modulos (ex: deals.py).
+
+    Args:
+        db: Cliente Supabase
+        integration_account_id: ID da conta OpenPhone
+        first_name: Nome (obrigatorio)
+        phone_number: Telefone em formato E.164
+        last_name: Sobrenome (opcional)
+        company: Empresa (opcional)
+        external_id: ID externo para vincular com deal_id (opcional)
+
+    Returns:
+        dict com contact_id ou None se falhar
+    """
+    # Buscar integration_account
+    result = db.table("integration_accounts").select(
+        "id, secrets_encrypted, type"
+    ).eq("id", str(integration_account_id)).eq("type", "openphone").single().execute()
+
+    if not result.data:
+        logger.error(f"Conta OpenPhone {integration_account_id} nao encontrada")
+        return None
+
+    account = result.data
+    api_key = decrypt(account["secrets_encrypted"])
+
+    # Normalizar telefone
+    try:
+        phone_normalized = normalize_phone_e164(phone_number)
+    except ValueError as e:
+        logger.error(f"Telefone invalido: {e}")
+        return None
+
+    # Montar payload OpenPhone
+    default_fields: dict = {
+        "firstName": first_name,
+        "phoneNumbers": [{"name": "primary", "value": phone_normalized}]
+    }
+
+    if last_name:
+        default_fields["lastName"] = last_name
+    if company:
+        default_fields["company"] = company
+
+    payload: dict = {"defaultFields": default_fields}
+
+    if external_id:
+        payload["externalId"] = external_id
+
+    # Chamar API OpenPhone
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                "https://api.openphone.com/v1/contacts",
+                headers={
+                    "Authorization": api_key,
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+
+        if response.status_code in (200, 201):
+            data = response.json().get("data", {})
+            contact_id = data.get("id")
+            logger.info(f"Contato criado no OpenPhone: {contact_id}")
+            return {
+                "contact_id": contact_id,
+                "phone_number": phone_normalized,
+                "created": True,
+            }
+        else:
+            logger.error(f"Erro OpenPhone API: {response.status_code} - {response.text}")
+            return None
+
+    except httpx.TimeoutException:
+        logger.error("Timeout ao criar contato no OpenPhone")
+        return None
+    except Exception as e:
+        logger.error(f"Erro ao criar contato no OpenPhone: {e}")
         return None
 
 
@@ -302,6 +420,49 @@ async def delete_account(
     ).eq("owner_id", str(owner_id)).execute()
 
     return {"success": True}
+
+
+# --- Contacts Create ---
+
+@router.post("/contacts", response_model=CreateOpenPhoneContactResponse)
+async def create_contact(
+    request: CreateOpenPhoneContactRequest,
+    owner_id: UUID = Depends(get_current_user_id),
+    db: Client = Depends(get_supabase),
+):
+    """
+    Cria contato no OpenPhone.
+
+    Endpoint para criar um contato na conta OpenPhone especificada.
+    O telefone e validado e normalizado para formato E.164.
+    """
+    # Validar ownership da integration_account
+    result = db.table("integration_accounts").select("id").eq(
+        "id", str(request.integration_account_id)
+    ).eq("owner_id", str(owner_id)).eq("type", "openphone").single().execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Conta OpenPhone nao encontrada")
+
+    # Chamar funcao auxiliar
+    contact_result = await create_openphone_contact(
+        db=db,
+        integration_account_id=request.integration_account_id,
+        first_name=request.first_name,
+        phone_number=request.phone_number,
+        last_name=request.last_name,
+        company=request.company,
+        external_id=request.external_id,
+    )
+
+    if not contact_result:
+        raise HTTPException(status_code=500, detail="Erro ao criar contato no OpenPhone")
+
+    return CreateOpenPhoneContactResponse(
+        id=contact_result["contact_id"],
+        phone_number=contact_result["phone_number"],
+        created=contact_result["created"],
+    )
 
 
 # --- Contacts Sync ---
@@ -556,8 +717,7 @@ async def internal_send_sms(
     account = account_result.data[0]
     from_phone = account["config"]["phone_number"]
     secrets_encrypted = account["secrets_encrypted"]
-    account_id = account["id"]
-    
+
     # Descriptografar API key
     api_key = decrypt(secrets_encrypted)
     
