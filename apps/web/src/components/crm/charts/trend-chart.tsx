@@ -134,6 +134,7 @@ export function TrendChart({ data, isLoading }: TrendChartProps) {
             stroke="currentColor"
             className="text-zinc-500"
             allowDecimals={false}
+            domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.1) || 5]}
           />
           <Tooltip content={<CustomTooltip />} />
           <Legend
