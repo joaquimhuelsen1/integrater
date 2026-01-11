@@ -234,25 +234,26 @@ export function BuyersView() {
 
         {/* Filters */}
         <div className="mb-6 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
-            {/* Search */}
-            <div className="relative sm:col-span-2">
+          <div className="flex flex-col gap-4">
+            {/* Row 1: Search */}
+            <div className="relative">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
               <input
                 type="text"
                 placeholder="Buscar por email ou produto..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full rounded-lg border border-zinc-300 bg-white py-2 pl-10 pr-4 text-sm dark:border-zinc-700 dark:bg-zinc-800"
+                className="w-full rounded-lg border border-zinc-300 bg-white py-2 pl-10 pr-4 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-800"
               />
             </div>
 
-            {/* Source Filter */}
-            <div>
+            {/* Row 2: Source + Dates */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {/* Source Filter */}
               <select
                 value={sourceFilter}
                 onChange={(e) => setSourceFilter(e.target.value)}
-                className="w-full rounded-lg border border-zinc-300 bg-white py-2 px-3 text-sm dark:border-zinc-700 dark:bg-zinc-800"
+                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-800"
               >
                 <option value="">Todas as sources</option>
                 <option value="digistore24">Digistore24</option>
@@ -261,29 +262,28 @@ export function BuyersView() {
                 <option value="kiwify">Kiwify</option>
                 <option value="manual">Manual</option>
               </select>
-            </div>
 
-            {/* Date Filters */}
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <div className="relative">
-                  <Calendar className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                  <input
-                    type="date"
-                    value={dateFrom}
-                    onChange={(e) => setDateFrom(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-300 bg-white py-2 pl-10 pr-2 text-sm dark:border-zinc-700 dark:bg-zinc-800"
-                    placeholder="De"
-                  />
-                </div>
+              {/* Date From */}
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-300 bg-white py-2 pl-10 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-800"
+                  title="Data inicial"
+                />
               </div>
-              <div className="flex-1">
+
+              {/* Date To */}
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 pointer-events-none" />
                 <input
                   type="date"
                   value={dateTo}
                   onChange={(e) => setDateTo(e.target.value)}
-                  className="w-full rounded-lg border border-zinc-300 bg-white py-2 px-3 text-sm dark:border-zinc-700 dark:bg-zinc-800"
-                  placeholder="Ate"
+                  className="w-full rounded-lg border border-zinc-300 bg-white py-2 pl-10 pr-3 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-800"
+                  title="Data final"
                 />
               </div>
             </div>
