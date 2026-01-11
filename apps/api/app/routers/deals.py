@@ -35,6 +35,45 @@ from app.models.crm import (
 router = APIRouter(prefix="/deals", tags=["deals"])
 
 
+def replace_placeholders(text: str, deal: dict, contact: dict | None = None) -> str:
+    """Substitui placeholders na mensagem pelos valores reais."""
+    if not text:
+        return text
+
+    # Placeholders do deal
+    replacements = {
+        "{deal}": deal.get("title", ""),
+        "{deal_title}": deal.get("title", ""),
+        "{valor}": str(deal.get("value", 0)) if deal.get("value") else "",
+        "{deal_value}": str(deal.get("value", 0)) if deal.get("value") else "",
+    }
+
+    # Placeholders do contato
+    if contact:
+        replacements.update({
+            "{nome}": contact.get("display_name", "").split()[0] if contact.get("display_name") else "",
+            "{nome_completo}": contact.get("display_name", ""),
+            "{email}": contact.get("email", ""),
+            "{telefone}": contact.get("phone", ""),
+            "{telefone_contato}": contact.get("phone", ""),
+        })
+
+    # Custom fields do deal (ex: {cf:campo})
+    custom_fields = deal.get("custom_fields") or {}
+    if isinstance(custom_fields, dict):
+        for key, value in custom_fields.items():
+            replacements[f"{{cf:{key}}}"] = str(value) if value else ""
+            # Tambem aceita sem prefixo cf:
+            replacements[f"{{{key}}}"] = str(value) if value else ""
+
+    # Aplicar substituicoes
+    result = text
+    for placeholder, value in replacements.items():
+        result = result.replace(placeholder, value)
+
+    return result
+
+
 # ============================================
 # Deals
 # ============================================
@@ -931,7 +970,7 @@ async def send_message_from_deal(
     """
     # Buscar deal para obter contact_id e workspace_id
     deal_result = db.table("deals").select(
-        "id, contact_id, title, value, pipeline_id, stage_id, pipelines(workspace_id)"
+        "id, contact_id, title, value, pipeline_id, stage_id, custom_fields, pipelines(workspace_id), contacts(id, display_name, email, phone, metadata)"
     ).eq("id", str(deal_id)).eq("owner_id", str(owner_id)).single().execute()
 
     if not deal_result.data:
@@ -1028,6 +1067,13 @@ async def send_message_from_deal(
     now = datetime.now(timezone.utc).isoformat()
 
     # ============================================
+    # Substituir placeholders no body e subject
+    # ============================================
+    contact_data = deal.get("contacts") if deal.get("contacts") else None
+    message_body = replace_placeholders(data.body, deal, contact_data)
+    message_subject = replace_placeholders(data.subject, deal, contact_data) if data.subject else None
+
+    # ============================================
     # EMAIL
     # ============================================
     if data.channel == "email":
@@ -1083,8 +1129,8 @@ async def send_message_from_deal(
                         "conversation_id": conversation_id,
                         "integration_account_id": str(data.integration_account_id),
                         "to": to_address,
-                        "subject": data.subject or f"Re: {deal.get('title', 'Deal')}",
-                        "text": data.body,
+                        "subject": message_subject or f"Re: {deal.get('title', 'Deal')}",
+                        "text": message_body,
                         "attachments": [],
                     },
                 )
@@ -1184,7 +1230,7 @@ async def send_message_from_deal(
                         "conversation_id": conversation_id,
                         "integration_account_id": str(data.integration_account_id),
                         "to": to_address,
-                        "text": data.body,
+                        "text": message_body,
                     },
                 )
 
