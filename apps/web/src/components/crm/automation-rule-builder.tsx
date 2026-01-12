@@ -45,6 +45,12 @@ interface Pipeline {
   name: string
 }
 
+interface IntegrationAccount {
+  id: string
+  type: string
+  account_name: string | null
+}
+
 export interface AutomationRule {
   id: string
   name: string
@@ -119,6 +125,7 @@ export function AutomationRuleBuilder({
     channel_hint: string | null
     subject: string | null
   }>>([])
+  const [integrationAccounts, setIntegrationAccounts] = useState<IntegrationAccount[]>([])
 
   const isNew = !rule
 
@@ -157,6 +164,20 @@ export function AutomationRuleBuilder({
       }
     }
     loadTemplates()
+
+    // Carregar integration accounts (email, openphone, telegram) - CORRIGIDO: filtra por workspace_id
+    const loadIntegrationAccounts = async () => {
+      try {
+        const res = await apiFetch(`/integrations?workspace_id=${workspaceId}`)
+        if (res.ok) {
+          const data = await res.json()
+          setIntegrationAccounts(data)
+        }
+      } catch (error) {
+        console.error("Erro ao carregar integration accounts:", error)
+      }
+    }
+    loadIntegrationAccounts()
   }, [workspaceId, selectedPipelineId])
 
   // Sincronizar subject quando regra existente e carregada com template_id
@@ -605,7 +626,12 @@ export function AutomationRuleBuilder({
               <select
                 value={(actionConfig.channel as string) || ""}
                 onChange={(e) =>
-                  setActionConfig({ ...actionConfig, channel: e.target.value })
+                  setActionConfig({
+                    ...actionConfig,
+                    channel: e.target.value,
+                    // Limpar conta quando canal muda
+                    integration_account_id: undefined
+                  })
                 }
                 className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800"
               >
@@ -615,6 +641,37 @@ export function AutomationRuleBuilder({
                 <option value="sms">SMS</option>
               </select>
             </div>
+
+            {/* Conta de Envio - apenas se canal definido */}
+            {(actionConfig.channel as string) ? (
+              <div>
+                <label className="block text-sm font-medium mb-1">Conta de Envio</label>
+                <select
+                  value={(actionConfig.integration_account_id as string) || ""}
+                  onChange={(e) => setActionConfig({
+                    ...actionConfig,
+                    integration_account_id: e.target.value || undefined
+                  })}
+                  className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800"
+                >
+                  <option value="">Selecione uma conta...</option>
+                  {integrationAccounts
+                    .filter(acc => {
+                      // Filtrar por tipo baseado no canal selecionado
+                      const channel = actionConfig.channel as string
+                      if (channel === "telegram") return acc.type === "telegram_user"
+                      if (channel === "email") return acc.type === "email_imap_smtp"
+                      if (channel === "sms") return acc.type === "openphone"
+                      return false
+                    })
+                    .map((acc) => (
+                      <option key={acc.id} value={acc.id}>
+                        {acc.account_name || acc.type}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            ) : null}
 
             {/* Template (opcional) */}
             <div>

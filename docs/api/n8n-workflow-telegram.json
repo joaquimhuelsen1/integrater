@@ -318,7 +318,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT ia.id as account_id\nFROM integration_accounts ia\nWHERE ia.owner_id = '{{ $('Get Conversation').item.json.owner_id }}'\n  AND ia.type = 'telegram_user'\n  AND ia.is_active = true\nLIMIT 1;",
+        "query": "SELECT ia.id as account_id\nFROM integration_accounts ia\nWHERE ia.owner_id = '{{ $('Get Conversation').item.json.owner_id }}'\n  AND ia.workspace_id = '{{ $('Get Conversation').item.json.workspace_id }}'\n  AND ia.type = 'telegram_user'\n  AND ia.is_active = true\nLIMIT 1;",
         "options": {}
       },
       "id": "get-account",

@@ -586,9 +586,9 @@ class AutomationExecutor:
         if not body:
             raise ValueError("body nao especificado e template nao encontrado")
 
-        # Busca deal para obter contact_id, titulo e custom_fields
+        # Busca deal para obter contact_id, titulo, custom_fields e workspace_id (via pipeline)
         deal_result = self.db.table("deals").select(
-            "id, contact_id, title, value, custom_fields"
+            "id, contact_id, title, value, custom_fields, pipelines(workspace_id)"
         ).eq("id", deal_id).eq("owner_id", self.owner_id).single().execute()
 
         if not deal_result.data:
@@ -596,6 +596,8 @@ class AutomationExecutor:
 
         deal = deal_result.data
         contact_id = deal.get("contact_id")
+        # Extrair workspace_id do pipeline relacionado
+        deal_workspace_id = deal.get("pipelines", {}).get("workspace_id") if deal.get("pipelines") else None
 
         if not contact_id:
             raise ValueError(f"Deal {deal_id} nao tem contact_id associado")
@@ -641,13 +643,26 @@ class AutomationExecutor:
             subject = _apply_placeholders(subject, deal, contact)
 
         # Validar integration_account
-        int_account_result = self.db.table("integration_accounts").select(
+        # Monta query base
+        int_account_query = self.db.table("integration_accounts").select(
             "id, type, is_active"
         ).eq("id", integration_account_id).eq(
             "owner_id", self.owner_id
-        ).eq("is_active", True).single().execute()
+        ).eq("is_active", True)
+
+        # Se deal tem workspace_id, validar que integration_account pertence ao mesmo workspace
+        # Isso previne uso de contas de outros workspaces
+        if deal_workspace_id:
+            int_account_query = int_account_query.eq("workspace_id", str(deal_workspace_id))
+
+        int_account_result = int_account_query.single().execute()
 
         if not int_account_result.data:
+            if deal_workspace_id:
+                raise ValueError(
+                    f"Integration account {integration_account_id} nao encontrada, inativa "
+                    f"ou nao pertence ao workspace do deal"
+                )
             raise ValueError(f"Integration account {integration_account_id} nao encontrada ou inativa")
 
         # Buscar conversation existente

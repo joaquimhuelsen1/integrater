@@ -21,6 +21,10 @@ async def list_integrations(
         default=None,
         description="Filtrar por tipo: email_imap_smtp, openphone, telegram_user"
     ),
+    workspace_id: UUID | None = Query(
+        default=None,
+        description="Filtrar por workspace"
+    ),
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
@@ -29,6 +33,7 @@ async def list_integrations(
 
     Query params:
     - type: Filtra por tipo de integracao (email_imap_smtp, openphone, telegram_user)
+    - workspace_id: Filtra por workspace (opcional)
     """
     query = db.table("integration_accounts").select(
         "id, type, label, is_active"
@@ -36,6 +41,9 @@ async def list_integrations(
 
     if type:
         query = query.eq("type", type)
+
+    if workspace_id:
+        query = query.eq("workspace_id", str(workspace_id))
 
     result = query.execute()
 
