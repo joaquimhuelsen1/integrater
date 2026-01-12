@@ -179,7 +179,7 @@ function SortableBlock({ id, children, size, onResize }: SortableBlockProps) {
     <div
       ref={setNodeRef}
       style={style}
-      className={`group relative ${sizeClass} ${isDragging ? "z-50 opacity-75" : "z-0"}`}
+      className={`group relative h-full ${sizeClass} ${isDragging ? "z-50 opacity-75" : "z-0"}`}
     >
       <div className="absolute top-2 right-2 z-10 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
         {/* Botao diminuir */}
@@ -704,7 +704,7 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
         const filteredFunnel = funnel.filter((s) => !s.is_win && !s.is_loss)
 
         return (
-          <div className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+          <div className="h-full rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
             <h3 className="mb-4 font-semibold">Funil de Vendas</h3>
             <div className="relative mx-auto max-w-lg">
               {/* Triangulo branco central (SVG de fundo) */}
@@ -876,7 +876,7 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
 
       case "stage-conversion":
         return (
-          <div className="min-h-[400px] flex flex-col rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+          <div className="h-full flex flex-col rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
             <h3 className="mb-4 flex items-center gap-2 font-semibold">
               <TrendingDown className="h-4 w-4 text-orange-500" />
               Conversao por Etapa
@@ -1038,7 +1038,7 @@ export function CRMAnalyticsDashboard(_props: CRMAnalyticsDashboardProps) {
       <div className="p-6">
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={blocks.map((b) => b.id)} strategy={rectSortingStrategy}>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4 items-stretch">
               {blocks.map((block) => (
                 <SortableBlock
                   key={block.id}
