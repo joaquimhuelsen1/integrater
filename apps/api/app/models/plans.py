@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from datetime import datetime
 from uuid import UUID
 from enum import Enum
@@ -84,6 +84,33 @@ class PlanResponse(TimestampMixin, BaseSchema):
     generation_duration_seconds: int | None = None
     tokens_estimated: int | None = None
     error_message: str | None = None
+
+    # Validadores para compatibilidade com formato antigo
+    @field_validator('deepened_blocks', mode='before')
+    @classmethod
+    def convert_deepened_blocks(cls, v):
+        """Converte formato antigo (lista) para novo (dict)."""
+        if isinstance(v, list):
+            # Formato antigo: [{'numero': 1, 'conteudo': '...'}, ...]
+            new_dict = {}
+            for bloco in v:
+                if isinstance(bloco, dict) and 'numero' in bloco:
+                    block_id = f"phase_{bloco['numero'] - 1}"
+                    new_dict[block_id] = {
+                        "phase": {"title": f"Bloco {bloco['numero']}", "numero": bloco['numero']},
+                        "details": {"conteudo": bloco.get('conteudo', '')}
+                    }
+            return new_dict
+        return v or {}
+
+    @field_validator('faq', mode='before')
+    @classmethod
+    def convert_faq(cls, v):
+        """Converte formato antigo (string) para novo (lista)."""
+        if isinstance(v, str):
+            # Formato antigo: string markdown
+            return [{"pergunta": "Perguntas Frequentes", "resposta": v[:1000]}]
+        return v or []
 
 
 class PlanListResponse(BaseModel):
