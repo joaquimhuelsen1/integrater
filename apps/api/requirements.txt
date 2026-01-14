@@ -26,3 +26,6 @@ slowapi>=0.1.9
 # Channels (opcional - usado em alguns endpoints)
 telethon>=1.38.0
 imapclient>=3.0.0
+
+# AI - Zhipu
+zhipuai>=2.0.0
