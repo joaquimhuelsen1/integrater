@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
+import { usePathname } from "next/navigation"
 import {
   Menu,
   LayoutGrid,
@@ -14,6 +15,7 @@ import {
   Zap
 } from "lucide-react"
 import Link from "next/link"
+import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase"
 import { useWorkspace } from "@/contexts/workspace-context"
 
@@ -36,6 +38,7 @@ interface SidebarMenuProps {
 }
 
 export function SidebarMenu({ userEmail, filterTags, onFilterTagsChange, filterMode, onFilterModeChange, onLogout }: SidebarMenuProps) {
+  const pathname = usePathname()
   const [isOpen, setIsOpen] = useState(false)
   const [showTagsSubmenu, setShowTagsSubmenu] = useState(false)
   const [allTags, setAllTags] = useState<Tag[]>([])
@@ -240,10 +243,30 @@ export function SidebarMenu({ userEmail, filterTags, onFilterTagsChange, filterM
             <Link
               href={`${basePath}/buyers`}
               onClick={() => setIsOpen(false)}
-              className="flex items-center gap-3 px-3 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              className={cn(
+                "flex items-center gap-3 px-3 py-2 text-sm transition-colors",
+                pathname === `${basePath}/buyers`
+                  ? "bg-zinc-200 dark:bg-zinc-800"
+                  : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              )}
             >
-              <ShoppingBag className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
-              <span className="text-sm">Compradores</span>
+              <ShoppingBag className="h-4 w-4" />
+              <span>Compradores</span>
+            </Link>
+
+            {/* Planos de Relacionamento */}
+            <Link
+              href={`${basePath}/plans`}
+              onClick={() => setIsOpen(false)}
+              className={cn(
+                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                pathname === `${basePath}/plans`
+                  ? "bg-zinc-200 dark:bg-zinc-800"
+                  : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              )}
+            >
+              <FileText className="h-4 w-4" />
+              <span>Planos de Relacionamento</span>
             </Link>
 
             {/* Settings */}
