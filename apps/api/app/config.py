@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     # DeepL
     deepl_api_key: str = ""  # Opcional - se vazio, usa Google Translate
 
+    # Zhipu AI (GLM)
+    zhipu_api_key: str = ""
+    zhipu_model: str = "glm-4.7"
+    zhipu_timeout: float = 60.0
+    zhipu_max_retries: int = 3
+
     # OpenPhone (secrets diferentes por webhook)
     openphone_webhook_secret_inbound: str = ""  # Secret do webhook /inbound
     openphone_webhook_secret_status: str = ""   # Secret do webhook /status

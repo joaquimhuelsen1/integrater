@@ -28,6 +28,8 @@ from .automations import router as automations_router
 from .integrations import router as integrations_router
 from .purchases import router as purchases_router
 from .preferences import router as preferences_router
+from .plans import router as plans_router
+from .plan_prompts import router as plan_prompts_router
 
 __all__ = [
     "health_router",
@@ -60,4 +62,6 @@ __all__ = [
     "integrations_router",
     "purchases_router",
     "preferences_router",
+    "plans_router",
+    "plan_prompts_router",
 ]
