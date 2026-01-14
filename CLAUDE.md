@@ -12,24 +12,29 @@ Carregar de `~/.claude/context-pills/` quando necessario:
 
 ## Regra de Finalizacao (OBRIGATORIO)
 
-**SEMPRE que finalizar TODAS as tarefas e tudo estiver resolvido:**
+**SEMPRE que finalizar TODAS as tarefas e tudo estiver resolvido, executar NESTA ORDEM:**
 
-1. **Commit** - Criar commit com mensagem descritiva
-2. **Push** - Enviar para o repositorio remoto
-3. **Deploy** - Fazer deploy na Digital Ocean
+```
+1. COMMIT  -->  2. PUSH  -->  3. DEPLOY
+```
+
+| Passo | Acao | Comando |
+|-------|------|---------|
+| 1 | **COMMIT** | `git add . && git commit -m "feat: descricao"` |
+| 2 | **PUSH** | `git push origin main` |
+| 3 | **DEPLOY** | Carregar pill `deploy-integrater.md` e executar |
+
+**SEQUENCIA OBRIGATORIA:** Commit -> Push -> Deploy (NESTA ORDEM)
 
 ```bash
-# Exemplo de fluxo
+# Fluxo completo
 git add .
 git commit -m "feat: descricao das mudancas"
 git push origin main
-
-# Deploy na Digital Ocean
-# Frontend: Push para main -> Vercel automatico
-# API: Carregar pill deploy-integrater.md e executar script paramiko
+# Depois: carregar pill deploy-integrater.md para deploy
 ```
 
-**Esta regra e OBRIGATORIA.** Nao considerar tarefa como completa sem commit, push e deploy.
+Tarefa so e considerada COMPLETA apos os 3 passos executados em sequencia.
 
 ---
 

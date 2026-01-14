@@ -104,7 +104,7 @@ export function PlansView() {
 
       if (updatedPlans.length > 0) {
         setPlans((prev) =>
-          prev.map((p) => {
+          (prev || []).map((p) => {
             const updated = updatedPlans.find((u) => u.id === p.id)
             return updated || p
           })
@@ -130,7 +130,7 @@ export function PlansView() {
         conversation_context: conversationContext || null,
       })
 
-      setPlans((prev) => [data, ...prev])
+      setPlans((prev) => [data, ...(prev || [])])
       setIsCreating(false)
       startPolling(data.id)
       return data

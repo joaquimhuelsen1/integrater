@@ -1,0 +1,205 @@
+"""
+Router Automations - CRUD de regras de automacao e historico de execucoes.
+"""
+from fastapi import APIRouter, Depends, HTTPException, Query
+from supabase import Client
+from uuid import UUID
+from typing import Optional
+
+from app.deps import get_supabase, get_current_user_id
+from app.models.crm import (
+    AutomationRule,
+    AutomationRuleCreate,
+    AutomationRuleUpdate,
+    AutomationExecution,
+)
+
+router = APIRouter(prefix="/automations", tags=["automations"])
+
+
+# ============================================
+# Automation Rules CRUD
+# ============================================
+@router.get("", response_model=list[AutomationRule])
+async def list_automation_rules(
+    pipeline_id: Optional[UUID] = Query(default=None, description="Filtrar por pipeline"),
+    is_active: Optional[bool] = Query(default=None, description="Filtrar por status ativo"),
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Lista regras de automacao com filtros opcionais."""
+    query = db.table("automation_rules").select("*").eq("owner_id", str(owner_id))
+
+    if pipeline_id:
+        query = query.eq("pipeline_id", str(pipeline_id))
+
+    if is_active is not None:
+        query = query.eq("is_active", is_active)
+
+    result = query.order("created_at", desc=True).execute()
+    return result.data
+
+
+@router.post("", response_model=AutomationRule, status_code=201)
+async def create_automation_rule(
+    data: AutomationRuleCreate,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Cria nova regra de automacao."""
+    # Verifica se pipeline existe e pertence ao usuario
+    pipeline = db.table("pipelines").select("id").eq(
+        "id", str(data.pipeline_id)
+    ).eq("owner_id", str(owner_id)).single().execute()
+
+    if not pipeline.data:
+        raise HTTPException(status_code=404, detail="Pipeline nao encontrado")
+
+    payload = data.model_dump(mode="json")
+    payload["owner_id"] = str(owner_id)
+
+    result = db.table("automation_rules").insert(payload).execute()
+    return result.data[0]
+
+
+@router.get("/{rule_id}", response_model=AutomationRule)
+async def get_automation_rule(
+    rule_id: UUID,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Retorna detalhes de uma regra de automacao."""
+    result = db.table("automation_rules").select("*").eq(
+        "id", str(rule_id)
+    ).eq("owner_id", str(owner_id)).single().execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Regra de automacao nao encontrada")
+
+    return result.data
+
+
+@router.patch("/{rule_id}", response_model=AutomationRule)
+async def update_automation_rule(
+    rule_id: UUID,
+    data: AutomationRuleUpdate,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Atualiza regra de automacao."""
+    payload = data.model_dump(exclude_unset=True, mode="json")
+
+    if not payload:
+        raise HTTPException(status_code=400, detail="Nenhum campo para atualizar")
+
+    result = db.table("automation_rules").update(payload).eq(
+        "id", str(rule_id)
+    ).eq("owner_id", str(owner_id)).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Regra de automacao nao encontrada")
+
+    return result.data[0]
+
+
+@router.delete("/{rule_id}", status_code=204)
+async def delete_automation_rule(
+    rule_id: UUID,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Remove regra de automacao."""
+    result = db.table("automation_rules").delete().eq(
+        "id", str(rule_id)
+    ).eq("owner_id", str(owner_id)).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Regra de automacao nao encontrada")
+
+
+@router.patch("/{rule_id}/toggle", response_model=AutomationRule)
+async def toggle_automation_rule(
+    rule_id: UUID,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Ativa/desativa regra de automacao."""
+    # Busca estado atual
+    current = db.table("automation_rules").select("is_active").eq(
+        "id", str(rule_id)
+    ).eq("owner_id", str(owner_id)).single().execute()
+
+    if not current.data:
+        raise HTTPException(status_code=404, detail="Regra de automacao nao encontrada")
+
+    # Inverte o estado
+    new_state = not current.data["is_active"]
+
+    result = db.table("automation_rules").update(
+        {"is_active": new_state}
+    ).eq("id", str(rule_id)).eq("owner_id", str(owner_id)).execute()
+
+    return result.data[0]
+
+
+# ============================================
+# Automation Executions (Historico)
+# ============================================
+@router.get("/executions", response_model=list[AutomationExecution])
+async def list_all_executions(
+    deal_id: Optional[UUID] = Query(default=None, description="Filtrar por deal"),
+    pipeline_id: Optional[UUID] = Query(default=None, description="Filtrar por pipeline"),
+    limit: int = Query(default=20, le=200),
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Lista execucoes de automacoes globalmente ou filtradas por deal/pipeline."""
+    # Se pipeline_id fornecido, buscar regras desse pipeline primeiro
+    if pipeline_id:
+        rules = db.table("automation_rules").select("id").eq(
+            "pipeline_id", str(pipeline_id)
+        ).eq("owner_id", str(owner_id)).execute()
+
+        rule_ids = [r["id"] for r in rules.data]
+        if not rule_ids:
+            return []
+
+        query = db.table("automation_executions").select("*").eq(
+            "owner_id", str(owner_id)
+        ).in_("rule_id", rule_ids)
+    else:
+        query = db.table("automation_executions").select("*").eq("owner_id", str(owner_id))
+
+    if deal_id:
+        query = query.eq("deal_id", str(deal_id))
+
+    result = query.order("executed_at", desc=True).limit(limit).execute()
+    return result.data
+
+
+@router.get("/{rule_id}/executions", response_model=list[AutomationExecution])
+async def list_rule_executions(
+    rule_id: UUID,
+    status: Optional[str] = Query(default=None, description="Filtrar por status: success ou failed"),
+    limit: int = Query(default=50, le=200),
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Lista historico de execucoes de uma regra."""
+    # Verifica se regra existe
+    rule = db.table("automation_rules").select("id").eq(
+        "id", str(rule_id)
+    ).eq("owner_id", str(owner_id)).single().execute()
+
+    if not rule.data:
+        raise HTTPException(status_code=404, detail="Regra de automacao nao encontrada")
+
+    query = db.table("automation_executions").select("*").eq(
+        "rule_id", str(rule_id)
+    ).eq("owner_id", str(owner_id))
+
+    if status:
+        query = query.eq("status", status)
+
+    result = query.order("executed_at", desc=True).limit(limit).execute()
+    return result.data
