@@ -59,9 +59,10 @@ export function PlansView() {
     setIsLoading(true)
     try {
       const data = await apiGet<Plan[]>("/plans")
-      setPlans(data)
+      setPlans(data || [])
     } catch {
       console.error("Erro ao carregar planos")
+      setPlans([])
     } finally {
       setIsLoading(false)
     }
@@ -246,7 +247,7 @@ export function PlansView() {
                   <p className="text-sm">Crie seu primeiro plano para começar</p>
                 </div>
               ) : (
-                plans.map((plan) => {
+                (plans || []).map((plan) => {
                   const title = plan.form_data?.situacao as string || "Plano sem título"
                   const objetivos = plan.form_data?.objetivos as string || ""
 
