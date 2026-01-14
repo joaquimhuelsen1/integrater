@@ -106,14 +106,36 @@ async def _run_generation_async(
             conversation_context=conversation_context or ""
         )
 
+        # Converter dados para o formato esperado pelo schema
+        # 1. Converter lista de blocos para dict deepened_blocks
+        blocos_list = results.get("blocos", [])
+        deepened_blocks_dict = {}
+        for bloco in blocos_list:
+            block_id = f"phase_{bloco['numero'] - 1}"  # phase_0, phase_1, etc.
+            deepened_blocks_dict[block_id] = {
+                "phase": {"title": f"Bloco {bloco['numero']}", "numero": bloco['numero']},
+                "details": {"conteudo": bloco['conteudo']}
+            }
+
+        # 2. Converter FAQ (markdown) para lista de objetos
+        faq_markdown = results.get("faq", "")
+        faq_list = []
+        if faq_markdown:
+            # Criar entrada única com o markdown completo
+            # TODO: futuramente parsear markdown para extrair perguntas individuais
+            faq_list.append({
+                "pergunta": "Perguntas Frequentes",
+                "resposta": faq_markdown[:1000]  # Primeiros 1000 chars
+            })
+
         # Salvar resultado
         db.table("relationship_plans").update({
             "status": "completed",
             "generation_completed_at": datetime.now(timezone.utc).isoformat(),
             "introduction": results.get("introducao", ""),
-            "deepened_blocks": results.get("blocos", []),
+            "deepened_blocks": deepened_blocks_dict,
             "summary": results.get("conclusao", ""),
-            "faq": results.get("faq", ""),
+            "faq": faq_list,
             "structure": {
                 "markdown_content": results.get("plano_completo_markdown", ""),
                 "response_prompt1": results.get("response_prompt1", ""),
