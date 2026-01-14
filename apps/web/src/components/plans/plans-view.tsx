@@ -11,6 +11,11 @@ import { PlanViewer } from "./plan-viewer"
 
 type PlanStatusType = "draft" | "generating_structure" | "generating_intro" | "deepening_blocks" | "generating_summary" | "completed" | "error"
 
+interface PlanListResponse {
+  plans: Plan[]
+  total: number
+}
+
 interface Plan {
   id: string
   owner_id: string
@@ -58,8 +63,8 @@ export function PlansView() {
 
     setIsLoading(true)
     try {
-      const data = await apiGet<Plan[]>("/plans")
-      setPlans(data || [])
+      const response = await apiGet<PlanListResponse>("/plans")
+      setPlans(response?.plans || [])
     } catch {
       console.error("Erro ao carregar planos")
       setPlans([])
