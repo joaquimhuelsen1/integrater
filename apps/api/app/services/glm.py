@@ -11,7 +11,9 @@ Usa o SDK zhipuai com retry e exponential backoff.
 
 import asyncio
 import json
+import logging
 import re
+import uuid
 from typing import Any
 from zhipuai import ZhipuAI
 from zhipuai._client import NotGiven, NOT_GIVEN
@@ -19,6 +21,7 @@ from ..config import get_settings
 
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 # System prompt fixo do Ethan Heyes
@@ -291,8 +294,13 @@ class GLMService:
         # Converter None para NOT_GIVEN (compativel com tipo do SDK)
         max_tokens_param: int | NotGiven = max_tokens if max_tokens is not None else NOT_GIVEN
 
+        # Gerar request_id unico para evitar dedupe pela API
+        request_id = str(uuid.uuid4())
+
         for attempt in range(self.max_retries):
             try:
+                logger.info(f"GLM API Request: model={self.model}, request_id={request_id}, temp={temperature}, attempt={attempt + 1}/{self.max_retries}")
+
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=[
@@ -300,8 +308,11 @@ class GLMService:
                     ],
                     temperature=temperature,
                     max_tokens=max_tokens_param,
-                    stream=False  # Garante retorno Completion, nao StreamResponse
+                    stream=False,  # Garante retorno Completion, nao StreamResponse
+                    request_id=request_id  # ID unico para evitar dedupe
                 )
+
+                logger.info(f"GLM API Response: request_id={request_id}, status=success")
                 # content e Optional[str], garantir retorno de str
                 content = response.choices[0].message.content
                 if content is None:
@@ -310,11 +321,29 @@ class GLMService:
 
             except Exception as e:
                 last_error = e
+
+                # Logging detalhado do erro
+                logger.error(
+                    f"GLM API Error (attempt {attempt + 1}/{self.max_retries}): "
+                    f"type={type(e).__name__}, "
+                    f"error={str(e)}, "
+                    f"model={self.model}, "
+                    f"request_id={request_id}"
+                )
+
+                # Tentar extrair detalhes do erro se for APIError
+                if hasattr(e, 'status_code'):
+                    logger.error(f"GLM API status_code={e.status_code}")
+                if hasattr(e, 'body'):
+                    logger.error(f"GLM API error_body={e.body}")
+
                 if attempt < self.max_retries - 1:
                     # Exponential backoff: 2^attempt seconds
                     wait_time = 2 ** attempt
+                    logger.warning(f"GLM API retrying in {wait_time}s...")
                     time.sleep(wait_time)
                     continue
+
                 raise RuntimeError(f"GLM service failed after {self.max_retries} attempts: {e}") from e
 
         # Esta linha nunca deve ser alcancada, mas mypy precisa do return
@@ -499,15 +528,24 @@ class GLMService:
         last_error = None
         max_tokens_param: int | NotGiven = max_tokens if max_tokens is not None else NOT_GIVEN
 
+        # Gerar request_id unico para evitar dedupe pela API
+        request_id = str(uuid.uuid4())
+
         for attempt in range(self.max_retries):
             try:
+                logger.info(f"GLM API Request (history): model={self.model}, request_id={request_id}, temp={temperature}, attempt={attempt + 1}/{self.max_retries}")
+
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens_param,
-                    stream=False
+                    stream=False,
+                    request_id=request_id  # ID unico para evitar dedupe
                 )
+
+                logger.info(f"GLM API Response (history): request_id={request_id}, status=success")
+
                 content = response.choices[0].message.content
                 if content is None:
                     raise ValueError("GLM retornou resposta vazia (content=None)")
@@ -515,10 +553,28 @@ class GLMService:
 
             except Exception as e:
                 last_error = e
+
+                # Logging detalhado do erro
+                logger.error(
+                    f"GLM API Error (history, attempt {attempt + 1}/{self.max_retries}): "
+                    f"type={type(e).__name__}, "
+                    f"error={str(e)}, "
+                    f"model={self.model}, "
+                    f"request_id={request_id}"
+                )
+
+                # Tentar extrair detalhes do erro se for APIError
+                if hasattr(e, 'status_code'):
+                    logger.error(f"GLM API status_code={e.status_code}")
+                if hasattr(e, 'body'):
+                    logger.error(f"GLM API error_body={e.body}")
+
                 if attempt < self.max_retries - 1:
                     wait_time = 2 ** attempt
+                    logger.warning(f"GLM API retrying in {wait_time}s...")
                     time.sleep(wait_time)
                     continue
+
                 raise RuntimeError(f"GLM service failed after {self.max_retries} attempts: {e}") from e
 
         raise RuntimeError("Unexpected state in _generate_with_history")
