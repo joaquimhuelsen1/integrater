@@ -13,6 +13,7 @@ Endpoints:
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -85,14 +86,50 @@ async def _run_generation_async(
     owner_id: str,
     workspace_id: str,
 ):
-    """Executa geracao em background."""
+    """Executa geracao em background usando fluxo conversacional."""
     from app.deps import get_supabase
+    from app.services.conversation_flow import ConversationFlowGenerator
+
     db = get_supabase()
-    generator = get_plan_generator(db, owner_id, workspace_id)
+    generator = ConversationFlowGenerator()
+
     try:
-        await generator.generate_full_plan(plan_id, form_data, conversation_context)
+        # Atualizar status para generating
+        db.table("relationship_plans").update({
+            "status": "generating_structure",
+            "generation_started_at": datetime.now(timezone.utc).isoformat()
+        }).eq("id", plan_id).execute()
+
+        # Gerar plano via fluxo conversacional
+        results = await generator.generate_full_plan_conversational(
+            form_data=form_data,
+            conversation_context=conversation_context or ""
+        )
+
+        # Salvar resultado
+        db.table("relationship_plans").update({
+            "status": "completed",
+            "generation_completed_at": datetime.now(timezone.utc).isoformat(),
+            "introduction": results.get("introducao", ""),
+            "deepened_blocks": results.get("blocos", []),
+            "summary": results.get("conclusao", ""),
+            "faq": results.get("faq", ""),
+            "structure": {
+                "markdown_content": results.get("plano_completo_markdown", ""),
+                "response_prompt1": results.get("response_prompt1", ""),
+                "response_conversa": results.get("response_conversa", ""),
+                "blocos_info": results.get("blocos_info", "")
+            }
+        }).eq("id", plan_id).execute()
+
+        logger.info(f"Plan {plan_id}: geracao conversacional concluida")
+
     except Exception as e:
         logger.error(f"Erro na geracao do plano {plan_id}: {e}")
+        db.table("relationship_plans").update({
+            "status": "error",
+            "error_message": str(e)
+        }).eq("id", plan_id).execute()
 
 
 # ============================================================

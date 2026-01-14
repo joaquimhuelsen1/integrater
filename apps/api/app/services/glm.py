@@ -21,133 +21,221 @@ from ..config import get_settings
 settings = get_settings()
 
 
-# Prompts padrão para geração de planos de vendas
+# System prompt fixo do Ethan Heyes
+ETHAN_HEYES_SYSTEM_PROMPT = """
+## 1. Persona
+
+Meu público-alvo são homens com mais de 30 anos. Eles estão em um estado emocional delicado e ansiosos para reconquistar suas ex-mulheres, e procuram soluções claras, práticas e personalizadas.
+
+---
+
+## 2. Tarefa
+Como um especialista em psicologia e terapia de relacionamentos com +15 anos de atuação em recuperação de relacionamentos, especificamente reconquista masculina, onde o homem quer reconquistar sua ex mulher, você é Ethan Heyes, um plano baseado nas informações fornecidas, para ajudar o paciente a reconquistar sua ex-mulher.
+
+Utilize uma abordagem que equilibre empatia com orientação, não precisa ter orientações práticas como exemplos de mensagens, mas pode citar de forma mais generica, usando uma linguagem casual e próxima, como a de um amigo.
+
+Seu objetivo é desenvovler um plano que faça sentido para o paciente, ele ainda não pensou e nem tentou desse jeito, isso é realmente importante, porque o paciente precisa ter esse senso de novo, e tambem deixar um gostinho de quero mais, para o paciente querer saber mais afundo do plano.
+
+Vou anexar uma analise do publico-alvo na sua base de dados, leia com atenção.
+
+---
+
+## Etapas para a Resposta
+
+### Leitura e Análise do Caso
+
+- Vou enviar a conversa com meu paciente.
+- Leia com atenção e destrinche cada detalhe para entender profundamente o cenário emocional, psicológico e prático do paciente.
+
+## Como deve ser a resposta.
+
+Seja inovador, não reforçar o que ele já está fazendo, falar somente o que ele precisa fazer, o paciente não quer escutar mais do mesmo, ele quer escutar ideias novas, mas sempre pense com base nos principios de reconquista.
+
+Evite usar termos técnicos como "plano de ação" ou "Com base na nossa metodologia".
+
+Imagine que você está conversando com o paciente.
+
+A resposta deve ser totalmente personalizada ao contexto do paciente, evitando generalizações.
+
+Mostre sempre o lado positivo, mesmo nas piores situações, e ofereça soluções viáveis baseadas na metodologia da sua base de dados.
+"""
+
+
+# Prompts padrão para geração de planos de relacionamento
 DEFAULT_PLAN_PROMPTS = {
-    "structure": """You are an expert sales consultant. Generate a comprehensive sales plan structure for the following context.
+    "structure": """{system_prompt}
 
-Context:
-{context}
+## Informações do Paciente
 
-Rules:
-- Output ONLY valid JSON, no markdown, no explanations
-- Structure must include: phases, milestones, deliverables, timeline
-- Each phase should have: title, description, duration_weeks, key_activities
-- Timeline should be realistic and achievable
+Formulário:
+{form_data}
+
+Conversa:
+{conversation_context}
+
+## Tarefa
+
+Com base nas informações acima, gere a ESTRUTURA do plano de reconquista em formato JSON.
+
+Regras:
+- Output SOMENTE JSON válido, sem markdown, sem explicações
+- Seja inovador, não sugira o que ele já está fazendo
+- A estrutura deve ter: fases, objetivos, psychological_shifts (mudanças psicológicas)
+- Cada fase deve ter: titulo, descricao, duracao_semanas, mudancas_psicologicas, acoes_chave
 
 JSON format:
 {{
-  "title": "Sales Plan Title",
-  "description": "Brief description",
-  "total_duration_weeks": 12,
-  "phases": [
+  "titulo": "Título do Plano",
+  "descricao": "Descrição breve e personalizada",
+  "duracao_total_semanas": 12,
+  "fases": [
     {{
-      "title": "Phase 1",
-      "description": "Description",
-      "duration_weeks": 4,
-      "key_activities": ["activity 1", "activity 2"]
+      "titulo": "Fase 1",
+      "descricao": "Descrição personalizada",
+      "duracao_semanas": 4,
+      "mudancas_psicologicas": ["mudança 1", "mudança 2"],
+      "acoes_chave": ["ação 1", "ação 2"]
     }}
   ]
 }}
 
-Generate the structure:""",
+Gere a estrutura:""",
 
-    "introduction": """You are an expert sales consultant. Write a compelling introduction for the following sales plan.
+    "introduction": """{system_prompt}
 
-Plan structure:
+## Informações do Paciente
+
+Formulário:
+{form_data}
+
+Conversa:
+{conversation_context}
+
+## Estrutura do Plano
 {plan_structure}
 
-Context:
-{context}
+## Tarefa
 
-Rules:
-- Output ONLY valid JSON, no markdown, no explanations
-- Introduction should be: professional, motivating, clear
-- Include: executive_summary, objectives, expected_outcomes
+Escreva uma INTRODUÇÃO personalizada para este plano de reconquista.
+
+Regras:
+- Output SOMENTE JSON válido, sem markdown
+- Use linguagem casual, como um amigo conversando
+- Seja empático mas direto
+- Inclua: resumo_executivo, objetivos, resultados_esperados
 
 JSON format:
 {{
-  "executive_summary": "2-3 sentences overview",
-  "objectives": ["objective 1", "objective 2"],
-  "expected_outcomes": ["outcome 1", "outcome 2"]
+  "resumo_executivo": "2-3 frases de overview em linguagem casual",
+  "objetivos": ["objetivo 1", "objetivo 2"],
+  "resultados_esperados": ["resultado 1", "resultado 2"]
 }}
 
-Generate the introduction:""",
+Gere a introdução:""",
 
-    "deepen_block": """You are an expert sales consultant. Expand on a specific block of the sales plan with more detail.
+    "deepen_block": """{system_prompt}
 
-Plan structure:
+## Informações do Paciente
+
+Formulário:
+{form_data}
+
+Conversa:
+{conversation_context}
+
+## Estrutura do Plano
 {plan_structure}
 
-Block to deepen:
+## Bloco para Aprofundar
 {block_data}
 
-Context:
-{context}
+## Tarefa
 
-Rules:
-- Output ONLY valid JSON, no markdown, no explanations
-- Add actionable details, resources needed, potential risks
-- Include: detailed_steps, resources, risks, mitigation_strategies
+Aprofunde este bloco específico com mais detalhes práticos e psicológicos.
+
+Regras:
+- Output SOMENTE JSON válido, sem markdown
+- Adicione detalhes acionáveis, mudanças internas necessárias
+- Inclua: passos_detalhados, mudancas_internas, sinais_de_progresso
 
 JSON format:
 {{
-  "detailed_steps": ["step 1", "step 2"],
-  "resources": ["resource 1", "resource 2"],
-  "risks": ["risk 1"],
-  "mitigation_strategies": ["strategy 1"]
+  "passos_detalhados": ["passo 1", "passo 2"],
+  "mudancas_internas": ["mudança psicológica 1", "mudança 2"],
+  "sinais_de_progresso": ["sinal 1", "sinal 2"],
+  "riscos": ["risco 1"],
+  "estrategias": ["estratégia 1"]
 }}
 
-Expand the block:""",
+Aprofunde o bloco:""",
 
-    "summary": """You are an expert sales consultant. Create a concise summary of the sales plan.
+    "summary": """{system_prompt}
 
-Plan structure:
+## Informações do Paciente
+
+Formulário:
+{form_data}
+
+Conversa:
+{conversation_context}
+
+## Estrutura do Plano
 {plan_structure}
 
-Introduction:
+## Introdução
 {introduction}
 
-Context:
-{context}
+## Tarefa
 
-Rules:
-- Output ONLY valid JSON, no markdown, no explanations
-- Summary should be: clear, concise, executive-friendly
-- Include: key_highlights, investment_summary, roi_projection
+Crie um RESUMO executivo do plano de reconquista.
+
+Regras:
+- Output SOMENTE JSON válido, sem markdown
+- Seja claro, conciso, motivador
+- Inclua: destaques_principais, mudanca_necessaria, proximos_passos
 
 JSON format:
 {{
-  "key_highlights": ["highlight 1", "highlight 2"],
-  "investment_summary": "brief investment overview",
-  "roi_projection": "expected ROI description"
+  "destaques_principais": ["destaque 1", "destaque 2"],
+  "mudanca_necessaria": "descrição da transformação necessária",
+  "proximos_passos": ["passo 1", "passo 2"]
 }}
 
-Generate the summary:""",
+Gere o resumo:""",
 
-    "faq": """You are an expert sales consultant. Generate a FAQ for the sales plan.
+    "faq": """{system_prompt}
 
-Plan structure:
+## Informações do Paciente
+
+Formulário:
+{form_data}
+
+Conversa:
+{conversation_context}
+
+## Estrutura do Plano
 {plan_structure}
 
-Context:
-{context}
+## Tarefa
 
-Rules:
-- Output ONLY valid JSON, no markdown, no explanations
-- FAQ should address: common questions, objections, clarifications
-- Include: question, answer pairs
+Gere um FAQ personalizado para este plano de reconquista.
+
+Regras:
+- Output SOMENTE JSON válido, sem markdown
+- FAQ deve abordar: dúvidas comuns, medos, objeções internas
+- Inclua pares de pergunta e resposta
 
 JSON format:
 {{
   "faqs": [
     {{
-      "question": "Common question?",
-      "answer": "Clear and concise answer"
+      "pergunta": "Pergunta comum?",
+      "resposta": "Resposta clara e empática"
     }}
   ]
 }}
 
-Generate the FAQ:"""
+Gere o FAQ:"""
 }
 
 
@@ -248,15 +336,21 @@ class GLMService:
 
     async def generate_plan_structure(
         self,
-        context: str,
+        form_data: dict[str, Any],
+        conversation_context: str,
         custom_prompt: str | None = None
     ) -> dict[str, Any]:
         """
-        Passo 1: Gerar estrutura do plano de vendas.
-        Retorna dict com title, description, total_duration_weeks, phases.
+        Passo 1: Gerar estrutura do plano de reconquista.
+        Retorna dict com titulo, descricao, duracao_total_semanas, fases.
         """
         template = custom_prompt or DEFAULT_PLAN_PROMPTS["structure"]
-        prompt = template.format(context=context)
+        form_data_str = json.dumps(form_data, ensure_ascii=False)
+        prompt = template.format(
+            system_prompt=ETHAN_HEYES_SYSTEM_PROMPT,
+            form_data=form_data_str,
+            conversation_context=conversation_context or "Nenhuma conversa adicional."
+        )
 
         try:
             result = await self._generate(prompt, temperature=0.7)
@@ -267,17 +361,24 @@ class GLMService:
 
     async def generate_plan_introduction(
         self,
+        form_data: dict[str, Any],
+        conversation_context: str,
         plan_structure: dict[str, Any],
-        context: str,
         custom_prompt: str | None = None
     ) -> dict[str, Any]:
         """
         Passo 2: Gerar introdução do plano.
-        Retorna dict com executive_summary, objectives, expected_outcomes.
+        Retorna dict com resumo_executivo, objetivos, resultados_esperados.
         """
         template = custom_prompt or DEFAULT_PLAN_PROMPTS["introduction"]
+        form_data_str = json.dumps(form_data, ensure_ascii=False)
         plan_json = json.dumps(plan_structure, ensure_ascii=False)
-        prompt = template.format(plan_structure=plan_json, context=context)
+        prompt = template.format(
+            system_prompt=ETHAN_HEYES_SYSTEM_PROMPT,
+            form_data=form_data_str,
+            conversation_context=conversation_context or "Nenhuma conversa adicional.",
+            plan_structure=plan_json
+        )
 
         try:
             result = await self._generate(prompt, temperature=0.8)
@@ -288,22 +389,26 @@ class GLMService:
 
     async def deepen_plan_block(
         self,
+        form_data: dict[str, Any],
+        conversation_context: str,
         plan_structure: dict[str, Any],
         block_data: dict[str, Any],
-        context: str,
         custom_prompt: str | None = None
     ) -> dict[str, Any]:
         """
         Passo 3: Aprofundar um bloco específico do plano.
-        Retorna dict com detailed_steps, resources, risks, mitigation_strategies.
+        Retorna dict com passos_detalhados, mudancas_internas, sinais_de_progresso.
         """
         template = custom_prompt or DEFAULT_PLAN_PROMPTS["deepen_block"]
+        form_data_str = json.dumps(form_data, ensure_ascii=False)
         plan_json = json.dumps(plan_structure, ensure_ascii=False)
         block_json = json.dumps(block_data, ensure_ascii=False)
         prompt = template.format(
+            system_prompt=ETHAN_HEYES_SYSTEM_PROMPT,
+            form_data=form_data_str,
+            conversation_context=conversation_context or "Nenhuma conversa adicional.",
             plan_structure=plan_json,
-            block_data=block_json,
-            context=context
+            block_data=block_json
         )
 
         try:
@@ -315,22 +420,26 @@ class GLMService:
 
     async def generate_plan_summary(
         self,
+        form_data: dict[str, Any],
+        conversation_context: str,
         plan_structure: dict[str, Any],
         introduction: dict[str, Any],
-        context: str,
         custom_prompt: str | None = None
     ) -> dict[str, Any]:
         """
         Passo 4: Gerar resumo executivo do plano.
-        Retorna dict com key_highlights, investment_summary, roi_projection.
+        Retorna dict com destaques_principais, mudanca_necessaria, proximos_passos.
         """
         template = custom_prompt or DEFAULT_PLAN_PROMPTS["summary"]
+        form_data_str = json.dumps(form_data, ensure_ascii=False)
         plan_json = json.dumps(plan_structure, ensure_ascii=False)
         intro_json = json.dumps(introduction, ensure_ascii=False)
         prompt = template.format(
+            system_prompt=ETHAN_HEYES_SYSTEM_PROMPT,
+            form_data=form_data_str,
+            conversation_context=conversation_context or "Nenhuma conversa adicional.",
             plan_structure=plan_json,
-            introduction=intro_json,
-            context=context
+            introduction=intro_json
         )
 
         try:
@@ -342,17 +451,24 @@ class GLMService:
 
     async def generate_plan_faq(
         self,
+        form_data: dict[str, Any],
+        conversation_context: str,
         plan_structure: dict[str, Any],
-        context: str,
         custom_prompt: str | None = None
     ) -> dict[str, Any]:
         """
         Passo 5: Gerar FAQ do plano.
-        Retorna dict com faqs (lista de {question, answer}).
+        Retorna dict com faqs (lista de {pergunta, resposta}).
         """
         template = custom_prompt or DEFAULT_PLAN_PROMPTS["faq"]
+        form_data_str = json.dumps(form_data, ensure_ascii=False)
         plan_json = json.dumps(plan_structure, ensure_ascii=False)
-        prompt = template.format(plan_structure=plan_json, context=context)
+        prompt = template.format(
+            system_prompt=ETHAN_HEYES_SYSTEM_PROMPT,
+            form_data=form_data_str,
+            conversation_context=conversation_context or "Nenhuma conversa adicional.",
+            plan_structure=plan_json
+        )
 
         try:
             result = await self._generate(prompt, temperature=0.6)

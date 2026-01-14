@@ -95,19 +95,20 @@ class PlanGenerator:
 
             # 2. Gerar estrutura
             await self._update_status(plan_id, PLAN_STATUS["GENERATING_STRUCTURE"])
-            context = self._build_context(form_data, conversation_context)
 
             # Salvar mensagem inicial (user com contexto)
+            context_msg = self._build_context_message(form_data, conversation_context)
             self._save_conversation_message(
                 plan_id,
                 "user",
-                f"Generate a sales plan with this context:\n{context}",
+                context_msg,
                 step="structure",
             )
 
             structure = await self._retry_generate(
                 self.glm.generate_plan_structure,
-                context,
+                form_data,
+                conversation_context or "",
                 custom_prompts.get("structure"),
             )
 
@@ -127,7 +128,7 @@ class PlanGenerator:
             await self._update_status(plan_id, PLAN_STATUS["GENERATING_INTRO"])
 
             # Salvar prompt da introducao
-            intro_prompt = f"Generate an introduction for this plan:\n{json.dumps(structure, ensure_ascii=False)}\n\nContext:\n{context}"
+            intro_prompt = f"Generate an introduction for this plan:\n{json.dumps(structure, ensure_ascii=False)}"
             self._save_conversation_message(
                 plan_id,
                 "user",
@@ -137,8 +138,9 @@ class PlanGenerator:
 
             introduction = await self._retry_generate(
                 self.glm.generate_plan_introduction,
+                form_data,
+                conversation_context or "",
                 structure,
-                context,
                 custom_prompts.get("introduction"),
             )
 
@@ -156,17 +158,17 @@ class PlanGenerator:
 
             # 4. Aprofundar blocos (loop)
             await self._update_status(plan_id, PLAN_STATUS["DEEPENING_BLOCKS"])
-            phases = structure.get("phases", [])
+            fases = structure.get("fases", [])  # "fases" em vez de "phases"
             deepened_blocks = {}
 
-            for idx, phase in enumerate(phases):
+            for idx, fase in enumerate(fases):
                 block_id = f"phase_{idx}"
                 step_name = f"block_{idx}"
-                block_data = {"title": phase.get("title", ""), "phase": phase}
+                block_data = {"titulo": fase.get("titulo", ""), "fase": fase}
 
                 try:
                     # Salvar prompt do bloco
-                    block_prompt = f"Expand this block:\n{json.dumps(block_data, ensure_ascii=False)}\n\nContext:\n{context}"
+                    block_prompt = f"Expand this block:\n{json.dumps(block_data, ensure_ascii=False)}"
                     self._save_conversation_message(
                         plan_id,
                         "user",
@@ -177,9 +179,10 @@ class PlanGenerator:
 
                     deepened = await self._retry_generate(
                         self.glm.deepen_plan_block,
+                        form_data,
+                        conversation_context or "",
                         structure,
                         block_data,
-                        context,
                         custom_prompts.get("deepen_block"),
                     )
 
@@ -194,8 +197,8 @@ class PlanGenerator:
                     )
 
                     deepened_blocks[block_id] = {
-                        "phase": phase,
-                        "details": deepened,
+                        "fase": fase,
+                        "detalhes": deepened,
                     }
                     # Salva parcialmente a cada bloco
                     await self._save_blocks_partial(plan_id, deepened_blocks)
@@ -208,7 +211,7 @@ class PlanGenerator:
                     logger.error(f"Plan {plan_id}: erro ao aprofundar bloco {block_id}: {e}")
                     # Continua com proximo bloco, salva o que conseguiu
                     deepened_blocks[block_id] = {
-                        "phase": phase,
+                        "fase": fase,
                         "error": str(e),
                     }
                     await self._save_blocks_partial(plan_id, deepened_blocks)
@@ -227,9 +230,10 @@ class PlanGenerator:
 
             summary = await self._retry_generate(
                 self.glm.generate_plan_summary,
+                form_data,
+                conversation_context or "",
                 structure,
                 introduction,
-                context,
                 custom_prompts.get("summary"),
             )
 
@@ -257,8 +261,9 @@ class PlanGenerator:
 
             faq = await self._retry_generate(
                 self.glm.generate_plan_faq,
+                form_data,
+                conversation_context or "",
                 structure,
-                context,
                 custom_prompts.get("faq"),
             )
 
@@ -336,6 +341,14 @@ class PlanGenerator:
             logger.warning(f"Erro ao buscar prompts customizados: {e}")
 
         return prompts
+
+    def _build_context_message(
+        self, form_data: dict[str, Any], conversation_context: str | None
+    ) -> str:
+        """
+        Constroi a mensagem de contexto para salvar no historico.
+        """
+        return self._build_context(form_data, conversation_context)
 
     def _build_context(
         self, form_data: dict[str, Any], conversation_context: str | None
