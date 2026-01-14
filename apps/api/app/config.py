@@ -33,7 +33,7 @@ class Settings(BaseSettings):
 
     # Zhipu AI (GLM)
     zhipu_api_key: str = ""
-    zhipu_model: str = "glm-4.7"
+    zhipu_model: str = "glm-4.5-flash"  # MODELO 100% GRATUITO
     zhipu_timeout: float = 60.0
     zhipu_max_retries: int = 3
 
