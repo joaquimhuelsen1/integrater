@@ -9,18 +9,12 @@ interface PlanFormProps {
 }
 
 interface FormData {
-  situacao: string
-  objetivos: string
-  publico: string
-  recursos: string
+  formulario: string
 }
 
 export function PlanForm({ onSubmit, onCancel }: PlanFormProps) {
   const [formData, setFormData] = useState<FormData>({
-    situacao: "",
-    objetivos: "",
-    publico: "",
-    recursos: "",
+    formulario: "",
   })
   const [conversationContext, setConversationContext] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -29,10 +23,7 @@ export function PlanForm({ onSubmit, onCancel }: PlanFormProps) {
     e.preventDefault()
 
     const data: Record<string, unknown> = {
-      situacao: formData.situacao,
-      objetivos: formData.objetivos,
-      publico: formData.publico,
-      recursos: formData.recursos,
+      formulario: formData.formulario,
     }
 
     setIsSubmitting(true)
@@ -41,10 +32,6 @@ export function PlanForm({ onSubmit, onCancel }: PlanFormProps) {
     } finally {
       setIsSubmitting(false)
     }
-  }
-
-  const updateField = (field: keyof FormData, value: string) => {
-    setFormData((prev) => ({ ...prev, [field]: value }))
   }
 
   return (
@@ -63,74 +50,32 @@ export function PlanForm({ onSubmit, onCancel }: PlanFormProps) {
 
         <form onSubmit={handleSubmit} className="max-h-[70vh] overflow-y-auto px-6 py-4">
           <div className="space-y-4">
-            {/* Situação */}
+            {/* Formulário */}
             <div>
               <label className="mb-1.5 block text-sm font-medium">
-                Situação Atual <span className="text-red-500">*</span>
+                Formulário do Aluno <span className="text-red-500">*</span>
               </label>
               <textarea
-                value={formData.situacao}
-                onChange={(e) => updateField("situacao", e.target.value)}
-                placeholder="Descreva a situação atual do relacionamento ou negócio..."
+                value={formData.formulario}
+                onChange={(e) => setFormData({ formulario: e.target.value })}
+                placeholder="Cole aqui as respostas do formulário preenchido pelo aluno..."
                 required
-                rows={3}
+                rows={8}
                 className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800"
               />
             </div>
 
-            {/* Objetivos */}
+            {/* Conversa */}
             <div>
               <label className="mb-1.5 block text-sm font-medium">
-                Objetivos <span className="text-red-500">*</span>
-              </label>
-              <textarea
-                value={formData.objetivos}
-                onChange={(e) => updateField("objetivos", e.target.value)}
-                placeholder="Quais são os objetivos que você deseja alcançar?"
-                required
-                rows={3}
-                className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800"
-              />
-            </div>
-
-            {/* Público */}
-            <div>
-              <label className="mb-1.5 block text-sm font-medium">
-                Público-Alvo
-              </label>
-              <textarea
-                value={formData.publico}
-                onChange={(e) => updateField("publico", e.target.value)}
-                placeholder="Quem é o público-alvo deste plano?"
-                rows={2}
-                className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800"
-              />
-            </div>
-
-            {/* Recursos */}
-            <div>
-              <label className="mb-1.5 block text-sm font-medium">
-                Recursos Disponíveis
-              </label>
-              <textarea
-                value={formData.recursos}
-                onChange={(e) => updateField("recursos", e.target.value)}
-                placeholder="Quais recursos você tem disponíveis (tempo, orçamento, equipe, etc)?"
-                rows={2}
-                className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800"
-              />
-            </div>
-
-            {/* Contexto Adicional */}
-            <div>
-              <label className="mb-1.5 block text-sm font-medium">
-                Contexto Adicional (opcional)
+                Conversa <span className="text-red-500">*</span>
               </label>
               <textarea
                 value={conversationContext}
                 onChange={(e) => setConversationContext(e.target.value)}
-                placeholder="Adicione qualquer contexto adicional que possa ajudar na criação do plano..."
-                rows={3}
+                placeholder="Cole aqui a conversa com o aluno..."
+                required
+                rows={8}
                 className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800"
               />
             </div>
@@ -149,7 +94,7 @@ export function PlanForm({ onSubmit, onCancel }: PlanFormProps) {
           <button
             type="submit"
             onClick={handleSubmit}
-            disabled={isSubmitting || !formData.situacao || !formData.objetivos}
+            disabled={isSubmitting || !formData.formulario || !conversationContext}
             className="flex items-center gap-2 rounded-md bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-50"
           >
             {isSubmitting ? (

@@ -253,8 +253,7 @@ export function PlansView() {
                 </div>
               ) : (
                 (plans || []).map((plan) => {
-                  const title = plan.form_data?.situacao as string || "Plano sem título"
-                  const objetivos = plan.form_data?.objetivos as string || ""
+                  const formulario = plan.form_data?.formulario as string || "Plano sem título"
 
                   return (
                     <div
@@ -264,10 +263,9 @@ export function PlansView() {
                     >
                       <div className="mb-3 flex items-start justify-between">
                         <div className="flex-1">
-                          <h3 className="font-medium">{title}</h3>
-                          {objetivos && (
-                            <p className="mt-1 text-xs text-zinc-500 line-clamp-2">{objetivos}</p>
-                          )}
+                          <p className="text-sm text-zinc-700 dark:text-zinc-300 line-clamp-3">
+                            {formulario}
+                          </p>
                         </div>
                         <button
                           onClick={(e) => {

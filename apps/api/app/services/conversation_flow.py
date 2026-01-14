@@ -12,7 +12,6 @@ Fluxo:
 6. Gerar PDF markdown: Introducao, Blocos, Conclusao + FAQ
 """
 
-import json
 import logging
 from typing import Any
 
@@ -26,9 +25,7 @@ PROMPT_1 = """Vou enviar a seguir o nome + as respostas do formulario que o alun
 ---
 
 Formulário:
-{form_data}
-
-Nome do aluno: {nome_aluno}"""
+{formulario}"""
 
 PROMPT_CONVERSA = """
 ---
@@ -82,10 +79,8 @@ class ConversationFlowGenerator:
         }
 
         # 1. Enviar Prompt 1 + Formulario
-        prompt1 = PROMPT_1.format(
-            form_data=json.dumps(form_data, ensure_ascii=False),
-            nome_aluno=form_data.get("nome", "Aluno")
-        )
+        formulario = form_data.get("formulario", "")
+        prompt1 = PROMPT_1.format(formulario=formulario)
 
         response1 = await self.glm._generate(prompt1, temperature=0.7)
         results["response_prompt1"] = response1
