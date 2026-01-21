@@ -97,7 +97,7 @@ class EmailWorker:
         while self.running:
             try:
                 await self._check_all_accounts()
-                await asyncio.sleep(600)  # 10 min - meta <5k queries/dia
+                await asyncio.sleep(30)  # 30s - email precisa ser tempo real
             except Exception as e:
                 print(f"Erro no idle loop: {e}")
                 await asyncio.sleep(10)
