@@ -10,7 +10,7 @@ class Heartbeat:
         owner_id: UUID,
         integration_account_id: UUID,
         worker_type: str,
-        interval: int = 30,
+        interval: int = 120,  # 2 min (era 30s) - heartbeat não precisa ser frequente
     ):
         self.owner_id = str(owner_id)
         self.integration_account_id = str(integration_account_id)

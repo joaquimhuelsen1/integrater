@@ -1213,7 +1213,7 @@ I'll be waiting.`
           }
           realtimeDebounceRef.current = setTimeout(() => {
             loadConversationsRef.current(searchQueryRef.current)
-          }, 1000) // 1s debounce
+          }, 3000) // 3s debounce (era 1s) - reduz queries em rajada
         }
       )
       .subscribe()

@@ -92,11 +92,12 @@ async def list_logs(
         if source and source != src:
             continue
 
-        # Verifica se heartbeat está atrasado (> 2 min)
+        # Verifica se heartbeat está atrasado (> 4 min)
+        # Nota: heartbeat interval é 120s, então 4 min dá margem para jitter de rede
         try:
             last_hb = datetime.fromisoformat(hb["last_heartbeat_at"].replace("Z", "+00:00"))
             now = datetime.now(last_hb.tzinfo) if last_hb.tzinfo else datetime.utcnow()
-            is_stale = (now - last_hb) > timedelta(minutes=2)
+            is_stale = (now - last_hb) > timedelta(minutes=4)
         except:
             is_stale = True
 

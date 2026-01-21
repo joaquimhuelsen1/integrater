@@ -87,7 +87,7 @@ class EmailWorker:
         while self.running:
             try:
                 await self._sync_accounts()
-                await asyncio.sleep(60)
+                await asyncio.sleep(300)  # 5 min (era 60s) - contas não mudam frequentemente
             except Exception as e:
                 print(f"Erro no sync loop: {e}")
                 await asyncio.sleep(10)
@@ -97,7 +97,7 @@ class EmailWorker:
         while self.running:
             try:
                 await self._check_all_accounts()
-                await asyncio.sleep(30)  # Poll a cada 30s como fallback
+                await asyncio.sleep(120)  # 2 min (era 30s) - email não precisa ser tempo real
             except Exception as e:
                 print(f"Erro no idle loop: {e}")
                 await asyncio.sleep(10)
@@ -106,7 +106,7 @@ class EmailWorker:
         """Loop de NOOP keepalive para manter conexoes IMAP ativas."""
         while self.running:
             try:
-                await asyncio.sleep(240)  # 4 minutos
+                await asyncio.sleep(600)  # 10 min (era 4 min) - polling já mantém conexão
                 for acc_id, client in list(self.clients.items()):
                     try:
                         client.noop()
