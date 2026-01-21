@@ -87,7 +87,7 @@ class EmailWorker:
         while self.running:
             try:
                 await self._sync_accounts()
-                await asyncio.sleep(300)  # 5 min (era 60s) - contas não mudam frequentemente
+                await asyncio.sleep(1800)  # 30 min - meta <5k queries/dia
             except Exception as e:
                 print(f"Erro no sync loop: {e}")
                 await asyncio.sleep(10)
@@ -97,7 +97,7 @@ class EmailWorker:
         while self.running:
             try:
                 await self._check_all_accounts()
-                await asyncio.sleep(120)  # 2 min (era 30s) - email não precisa ser tempo real
+                await asyncio.sleep(600)  # 10 min - meta <5k queries/dia
             except Exception as e:
                 print(f"Erro no idle loop: {e}")
                 await asyncio.sleep(10)

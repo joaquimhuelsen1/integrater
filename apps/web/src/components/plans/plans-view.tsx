@@ -120,7 +120,7 @@ export function PlansView() {
       if (!stillPolling) {
         setPollingIds(new Set())
       }
-    }, 5000) // 5s (era 2s) - reduz queries durante geração
+    }, 30000) // 30s - meta <5k queries/dia
 
     return () => clearInterval(interval)
   }, [pollingIds, loadPlan])

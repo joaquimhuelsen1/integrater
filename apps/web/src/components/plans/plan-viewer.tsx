@@ -132,7 +132,7 @@ export function PlanViewer({ plan, onRefresh, onClose }: PlanViewerProps) {
   // Auto-refresh when loading
   useEffect(() => {
     if (isLoading) {
-      const interval = setInterval(onRefresh, 10000) // 10s (era 3s) - reduz queries durante geração
+      const interval = setInterval(onRefresh, 60000) // 60s - meta <5k queries/dia
       return () => clearInterval(interval)
     }
   }, [isLoading, onRefresh])

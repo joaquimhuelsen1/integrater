@@ -261,7 +261,7 @@ class TelegramWorker:
             try:
                 self.watchdog.ping("sync")
                 await self._sync_accounts()
-                await asyncio.sleep(300)  # 5 min (era 60s) - contas não mudam frequentemente
+                await asyncio.sleep(1800)  # 30 min - meta <5k queries/dia
             except Exception as e:
                 print(f"Erro no sync loop: {e}")
                 await asyncio.sleep(10)
@@ -1239,11 +1239,11 @@ class TelegramWorker:
             try:
                 self.watchdog.ping("history")
                 if not self.clients:
-                    await asyncio.sleep(60)  # 60s (era 5s) quando sem clientes
+                    await asyncio.sleep(600)  # 10 min quando sem clientes
                     continue
 
                 await self._process_history_sync_jobs()
-                await asyncio.sleep(60)  # 60s (era 5s) - sync histórico não é urgente
+                await asyncio.sleep(600)  # 10 min - meta <5k queries/dia
             except Exception as e:
                 print(f"Erro no history sync loop: {e}")
                 await asyncio.sleep(10)
@@ -1502,11 +1502,11 @@ class TelegramWorker:
             try:
                 self.watchdog.ping("jobs")
                 if not self.clients:
-                    await asyncio.sleep(30)  # 30s (era 2s) quando sem clientes
+                    await asyncio.sleep(300)  # 5 min quando sem clientes
                     continue
 
                 await self._process_message_jobs()
-                await asyncio.sleep(30)  # 30s (era 2s) - edit/delete não são urgentes
+                await asyncio.sleep(300)  # 5 min - meta <5k queries/dia
             except Exception as e:
                 print(f"Erro no message jobs loop: {e}")
                 await asyncio.sleep(10)
