@@ -172,6 +172,22 @@ Configurar no painel OpenPhone:
 - `message.received` → `https://api.thereconquestmap.com/openphone/webhook/inbound`
 - `message.delivered` → `https://api.thereconquestmap.com/openphone/webhook/status`
 
+## Arquitetura de Ownership
+
+O projeto utiliza modelo **WORKSPACE-CENTRIC** desde janeiro/2026:
+
+- **Tier 1**: Workspaces (dono do workspace, RESTRICT deletes)
+- **Tier 2**: Dados primários (conversations, deals, contacts) - FK workspace_id CASCADE
+- **Tier 3**: Dados derivados (messages, attachments, tags) - FK workspace_id CASCADE
+- **Tier 4**: Logs e heartbeats (app_logs, worker_heartbeats) - FK owner_id CASCADE
+
+**Garantias**:
+- Deletar usuário é BLOQUEADO se possui workspaces/dados (RESTRICT)
+- Deletar workspace deleta TODOS seus dados em cascata (CASCADE)
+- RLS policies garantem isolamento single-user por workspace
+
+Ver `docs/CHANGELOG.md` para detalhes da migração (2026-01-23).
+
 ## Status
 
 **Projeto completo.** Todos os 9 milestones foram concluídos (44/44 critérios).
