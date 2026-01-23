@@ -1,5 +1,8 @@
 """
 Router CRM Analytics - Métricas e estatísticas do CRM.
+
+OTIMIZAÇÃO: Endpoints com cache TTL para reduzir queries ao banco.
+Stats de CRM não precisam ser real-time - 30-60s de cache é aceitável.
 """
 import logging
 from fastapi import APIRouter, Depends, Query
@@ -10,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from app.deps import get_supabase, get_current_user_id
+from app.services.cache import get_cached, set_cached, TTL_SHORT, TTL_MEDIUM
 
 from app.models.crm import PipelineStats, StageStats, FunnelData, StageConversionResponse, StageConversionItem
 
@@ -25,11 +29,24 @@ async def get_crm_stats(
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
-    """Retorna estatísticas gerais do CRM."""
-    date_from = datetime.now(timezone.utc) - timedelta(days=days)
+    """
+    Retorna estatísticas gerais do CRM.
 
-    # Base query for deals
-    query = db.table("deals").select("*").eq("owner_id", str(owner_id))
+    OTIMIZAÇÃO: Cache de 30s + SELECT apenas colunas necessárias.
+    """
+    # Cache key baseada nos parâmetros
+    cache_key = f"crm_stats:{owner_id}:{pipeline_id}:{days}"
+    cached_result, hit = get_cached(cache_key)
+    if hit:
+        return cached_result
+
+    date_from = datetime.now(timezone.utc) - timedelta(days=days)
+    date_from_str = date_from.isoformat()
+
+    # OTIMIZAÇÃO: SELECT apenas colunas necessárias (não SELECT *)
+    query = db.table("deals").select(
+        "value, won_at, lost_at, probability, created_at"
+    ).eq("owner_id", str(owner_id))
 
     if pipeline_id:
         query = query.eq("pipeline_id", str(pipeline_id))
@@ -83,7 +100,7 @@ async def get_crm_stats(
     won_in_period_count = len(won_in_period)
     won_in_period_value = sum(Decimal(str(d["value"])) for d in won_in_period)
 
-    return {
+    response = {
         "total_deals": total_deals,
         "total_value": float(total_value),
         "open_deals": open_count,
@@ -100,6 +117,10 @@ async def get_crm_stats(
         "won_value_period": float(won_in_period_value),
     }
 
+    # Cache por 30 segundos
+    set_cached(cache_key, response, TTL_SHORT)
+    return response
+
 
 @router.get("/funnel/{pipeline_id}")
 async def get_funnel_data(
@@ -107,16 +128,30 @@ async def get_funnel_data(
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
-    """Retorna dados do funil de vendas."""
-    # Get stages
-    stages_result = db.table("stages").select("*").eq(
+    """
+    Retorna dados do funil de vendas.
+
+    OTIMIZAÇÃO: Cache de 30s + SELECT apenas colunas necessárias.
+    """
+    # Cache key
+    cache_key = f"crm_funnel:{owner_id}:{pipeline_id}"
+    cached_result, hit = get_cached(cache_key)
+    if hit:
+        return cached_result
+
+    # Get stages - SELECT apenas colunas necessárias
+    stages_result = db.table("stages").select(
+        "id, name, color, position, is_win, is_loss"
+    ).eq(
         "pipeline_id", str(pipeline_id)
     ).eq("owner_id", str(owner_id)).order("position").execute()
 
     stages = stages_result.data or []
 
-    # Get deals (não arquivados, não fechados)
-    deals_result = db.table("deals").select("*").eq(
+    # Get deals - SELECT apenas colunas necessárias
+    deals_result = db.table("deals").select(
+        "stage_id, value"
+    ).eq(
         "pipeline_id", str(pipeline_id)
     ).eq("owner_id", str(owner_id)).is_(
         "archived_at", "null"
@@ -125,7 +160,7 @@ async def get_funnel_data(
     deals = deals_result.data or []
 
     # Group by stage
-    deals_by_stage = {}
+    deals_by_stage: dict[str, list] = {}
     for deal in deals:
         stage_id = deal["stage_id"]
         if stage_id not in deals_by_stage:
@@ -149,7 +184,9 @@ async def get_funnel_data(
             "total_value": float(stage_value),
         })
 
-    return {"stages": funnel}
+    response = {"stages": funnel}
+    set_cached(cache_key, response, TTL_SHORT)
+    return response
 
 
 @router.get("/performance/{pipeline_id}")
@@ -159,18 +196,30 @@ async def get_performance_data(
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
-    """Retorna dados de performance ao longo do tempo."""
+    """
+    Retorna dados de performance ao longo do tempo.
+
+    OTIMIZAÇÃO: Cache de 60s + SELECT apenas colunas necessárias.
+    """
+    # Cache key
+    cache_key = f"crm_performance:{owner_id}:{pipeline_id}:{days}"
+    cached_result, hit = get_cached(cache_key)
+    if hit:
+        return cached_result
+
     date_from = datetime.now(timezone.utc) - timedelta(days=days)
 
-    # Get all deals from pipeline
-    result = db.table("deals").select("*").eq(
+    # OTIMIZAÇÃO: SELECT apenas colunas necessárias
+    result = db.table("deals").select(
+        "created_at, won_at, lost_at, value"
+    ).eq(
         "pipeline_id", str(pipeline_id)
     ).eq("owner_id", str(owner_id)).is_("archived_at", "null").execute()
 
     deals = result.data or []
 
     # Group by date (created, won, lost)
-    daily_data = {}
+    daily_data: dict[str, dict] = {}
 
     for deal in deals:
         # Created
@@ -216,7 +265,9 @@ async def get_performance_data(
         if date >= date_from_str
     ]
 
-    return {"trend": performance}
+    response = {"trend": performance}
+    set_cached(cache_key, response, TTL_MEDIUM)
+    return response
 
 
 @router.get("/top-deals")
@@ -324,7 +375,17 @@ async def get_win_rate_by_stage(
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
-    """Retorna win rate por stage (conversão entre stages)."""
+    """
+    Retorna win rate por stage (conversão entre stages).
+
+    OTIMIZAÇÃO: Cache de 60s.
+    """
+    # Cache key
+    cache_key = f"crm_winrate:{owner_id}:{pipeline_id}:{days}"
+    cached_result, hit = get_cached(cache_key)
+    if hit:
+        return cached_result
+
     date_from = datetime.now(timezone.utc) - timedelta(days=days)
 
     # Buscar stages do pipeline
@@ -393,7 +454,9 @@ async def get_win_rate_by_stage(
             stats["win_rate"] = round(stats["deals_to_won"] / total_exits * 100, 1)
         result_stages.append(stats)
 
-    return {"stages": result_stages, "period_days": days}
+    response = {"stages": result_stages, "period_days": days}
+    set_cached(cache_key, response, TTL_MEDIUM)
+    return response
 
 
 @router.get("/stage-conversion/{pipeline_id}", response_model=StageConversionResponse)
@@ -403,7 +466,19 @@ async def get_stage_conversion(
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
-    """Retorna conversao CUMULATIVA entre stages."""
+    """
+    Retorna conversao CUMULATIVA entre stages.
+
+    OTIMIZAÇÃO: Cache de 60s.
+    """
+    # Cache key
+    cache_key = f"crm_stageconv:{owner_id}:{pipeline_id}:{days}"
+    cached_result, hit = get_cached(cache_key)
+    if hit:
+        # Retorna como StageConversionResponse se no cache
+        if isinstance(cached_result, dict):
+            return StageConversionResponse(**cached_result)
+        return cached_result
 
     # Busca stages ordenados por position
     stages_result = db.table("stages").select("id, name, position, color").eq(
@@ -503,10 +578,11 @@ async def get_stage_conversion(
 
     # Log do resultado final
     logger.info(f"[stage-conversion] Retornando {len(result_stages)} stages")
-    for rs in result_stages:
-        logger.info(f"[stage-conversion]   - {rs.stage_name}: {rs.deals_entered} deals")
 
-    return StageConversionResponse(stages=result_stages, period_days=days)
+    response = StageConversionResponse(stages=result_stages, period_days=days)
+    # Cache como dict para serialização
+    set_cached(cache_key, {"stages": [s.model_dump() for s in result_stages], "period_days": days}, TTL_MEDIUM)
+    return response
 
 
 @router.get("/loss-reasons-stats")
@@ -581,7 +657,17 @@ async def get_channel_performance(
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
-    """Retorna performance por canal de comunicação."""
+    """
+    Retorna performance por canal de comunicação.
+
+    OTIMIZAÇÃO: Cache de 60s (endpoint pesado - 4 queries).
+    """
+    # Cache key
+    cache_key = f"crm_channel:{owner_id}:{pipeline_id}:{days}"
+    cached_result, hit = get_cached(cache_key)
+    if hit:
+        return cached_result
+
     date_from = datetime.now(timezone.utc) - timedelta(days=days)
 
     # Buscar conversations por canal
@@ -663,7 +749,9 @@ async def get_channel_performance(
     # Ordenar por messages_count
     channels_list.sort(key=lambda x: x["messages_count"], reverse=True)
 
-    return {"channels": channels_list, "period_days": days}
+    response = {"channels": channels_list, "period_days": days}
+    set_cached(cache_key, response, TTL_MEDIUM)
+    return response
 
 
 @router.get("/comparison")
@@ -673,7 +761,17 @@ async def get_comparison(
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
-    """Retorna comparativo entre período atual e anterior."""
+    """
+    Retorna comparativo entre período atual e anterior.
+
+    OTIMIZAÇÃO: Cache de 60s.
+    """
+    # Cache key
+    cache_key = f"crm_comparison:{owner_id}:{pipeline_id}:{days}"
+    cached_result, hit = get_cached(cache_key)
+    if hit:
+        return cached_result
+
     now = datetime.now(timezone.utc)
     current_start = now - timedelta(days=days)
     previous_start = current_start - timedelta(days=days)
@@ -744,7 +842,7 @@ async def get_comparison(
         "won_value_pct": calc_variation(float(current_period["won_value"]), float(previous_period["won_value"])),
     }
 
-    return {
+    response = {
         "current_period": {
             "new_deals": current_period["new_deals"],
             "won_deals": current_period["won_deals"],
@@ -760,3 +858,5 @@ async def get_comparison(
         "variations": variations,
         "period_days": days,
     }
+    set_cached(cache_key, response, TTL_MEDIUM)
+    return response

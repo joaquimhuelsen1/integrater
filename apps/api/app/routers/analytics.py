@@ -1,5 +1,7 @@
 """
 Router Analytics - Dashboard cross-workspace.
+
+OTIMIZAÇÃO: Cache TTL para reduzir queries ao banco.
 """
 from fastapi import APIRouter, Depends, Query
 from supabase import Client
@@ -9,6 +11,7 @@ from datetime import date
 
 from app.deps import get_supabase, get_current_user_id
 from app.models.workspace import AnalyticsSummary, WorkspaceSummary
+from app.services.cache import get_cached, set_cached, TTL_SHORT, TTL_MEDIUM
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -24,7 +27,17 @@ async def get_summary(
     """
     Retorna resumo geral de todos ou alguns workspaces.
     Se workspace_ids vazio/null, retorna todos do owner.
+
+    OTIMIZAÇÃO: Cache de 30s (endpoint muito pesado - múltiplos loops).
     """
+    # Cache key
+    cache_key = f"analytics_summary:{owner_id}:{workspace_ids}:{date_from}:{date_to}"
+    cached_result, hit = get_cached(cache_key)
+    if hit:
+        if isinstance(cached_result, dict):
+            return AnalyticsSummary(**cached_result)
+        return cached_result
+
     # Busca workspaces do owner
     ws_query = db.table("workspaces").select("id, name, color").eq(
         "owner_id", str(owner_id)
@@ -125,10 +138,16 @@ async def get_summary(
         totals["conversations_count"] += conversations_count
         totals["unread_count"] += unread_count
 
-    return AnalyticsSummary(
+    response = AnalyticsSummary(
         workspaces=workspace_summaries,
         totals=totals,
     )
+    # Cache como dict para serialização
+    set_cached(cache_key, {
+        "workspaces": [w.model_dump() for w in workspace_summaries],
+        "totals": totals
+    }, TTL_SHORT)
+    return response
 
 
 @router.get("/deals")
@@ -139,7 +158,17 @@ async def get_deals_analytics(
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
-    """Retorna analytics detalhados de deals por workspace."""
+    """
+    Retorna analytics detalhados de deals por workspace.
+
+    OTIMIZAÇÃO: Cache de 60s (endpoint MUITO pesado - 4 níveis de loop).
+    """
+    # Cache key
+    cache_key = f"analytics_deals:{owner_id}:{workspace_ids}:{date_from}:{date_to}"
+    cached_result, hit = get_cached(cache_key)
+    if hit:
+        return cached_result
+
     # Busca workspaces
     ws_query = db.table("workspaces").select("id, name, color").eq(
         "owner_id", str(owner_id)
@@ -203,6 +232,7 @@ async def get_deals_analytics(
             "pipelines": pipeline_data,
         })
 
+    set_cached(cache_key, result, TTL_MEDIUM)
     return result
 
 
@@ -214,7 +244,17 @@ async def get_conversations_analytics(
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
-    """Retorna analytics de conversas por workspace."""
+    """
+    Retorna analytics de conversas por workspace.
+
+    OTIMIZAÇÃO: Cache de 60s.
+    """
+    # Cache key
+    cache_key = f"analytics_convs:{owner_id}:{workspace_ids}:{date_from}:{date_to}"
+    cached_result, hit = get_cached(cache_key)
+    if hit:
+        return cached_result
+
     ws_query = db.table("workspaces").select("id, name, color").eq(
         "owner_id", str(owner_id)
     )
@@ -264,4 +304,5 @@ async def get_conversations_analytics(
             "total_unread": sum(a["unread_count"] for a in account_data),
         })
 
+    set_cached(cache_key, result, TTL_MEDIUM)
     return result

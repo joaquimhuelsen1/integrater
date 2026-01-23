@@ -1,5 +1,7 @@
 """
 Router Deals - CRUD de deals, produtos e atividades (CRM).
+
+OTIMIZAÇÃO: Cache para listagens frequentes.
 """
 import os
 import re
@@ -13,6 +15,7 @@ from pydantic import BaseModel, field_validator, model_validator
 import httpx
 
 from app.deps import get_supabase, get_current_user_id
+from app.services.cache import get_cached, set_cached, invalidate_cache, TTL_SHORT
 from app.models.enums import AutomationTriggerType
 from app.services.automation_executor import AutomationExecutor
 from app.routers.openphone import create_openphone_contact
@@ -122,9 +125,21 @@ async def list_deals_by_pipeline(
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
-    """Lista deals agrupados por stage (para Kanban)."""
-    # Busca stages
-    stages_result = db.table("stages").select("*").eq(
+    """
+    Lista deals agrupados por stage (para Kanban).
+
+    OTIMIZAÇÃO: Cache de 15s para Kanban + SELECT apenas colunas necessárias.
+    """
+    # Cache key - TTL curto (15s) pois Kanban precisa ser responsivo
+    cache_key = f"deals_pipeline:{owner_id}:{pipeline_id}"
+    cached_result, hit = get_cached(cache_key)
+    if hit:
+        return cached_result
+
+    # Busca stages - SELECT apenas colunas necessárias
+    stages_result = db.table("stages").select(
+        "id, name, color, position, is_win, is_loss"
+    ).eq(
         "pipeline_id", str(pipeline_id)
     ).eq("owner_id", str(owner_id)).order("position").execute()
 
@@ -166,6 +181,8 @@ async def list_deals_by_pipeline(
         stage["deals"] = deals_by_stage.get(stage["id"], [])
         result.append(stage)
 
+    # Cache por 15 segundos (Kanban precisa ser responsivo)
+    set_cached(cache_key, result, 15)
     return result
 
 
@@ -211,6 +228,9 @@ async def create_deal(
         "activity_type": "created",
         "content": f"Deal criado: {data.title}",
     }).execute()
+
+    # Invalida cache do Kanban
+    invalidate_cache(f"deals_pipeline:{owner_id}")
 
     return deal
 
@@ -334,6 +354,9 @@ async def update_deal(
             "to_stage_id": payload["stage_id"],
         }).execute()
 
+    # Invalida cache do Kanban
+    invalidate_cache(f"deals_pipeline:{owner_id}")
+
     return result.data[0]
 
 
@@ -351,6 +374,9 @@ async def archive_deal(
     if not result.data:
         raise HTTPException(status_code=404, detail="Deal não encontrado")
 
+    # Invalida cache do Kanban
+    invalidate_cache(f"deals_pipeline:{owner_id}")
+
 
 @router.delete("/{deal_id}", status_code=204)
 async def delete_deal(
@@ -365,6 +391,9 @@ async def delete_deal(
 
     if not result.data:
         raise HTTPException(status_code=404, detail="Deal não encontrado")
+
+    # Invalida cache do Kanban
+    invalidate_cache(f"deals_pipeline:{owner_id}")
 
 
 @router.post("/{deal_id}/move", response_model=Deal)
@@ -413,6 +442,9 @@ async def move_deal(
         "to_stage_id": new_stage_id,
     }).execute()
 
+    # Invalida cache do Kanban
+    invalidate_cache(f"deals_pipeline:{owner_id}")
+
     return result.data[0]
 
 
@@ -439,6 +471,10 @@ async def win_deal(
         "activity_type": "note",
         "content": "Deal marcado como GANHO",
     }).execute()
+
+    # Invalida cache do Kanban e stats
+    invalidate_cache(f"deals_pipeline:{owner_id}")
+    invalidate_cache(f"crm_")  # Stats de CRM dependem de won_at
 
     return result.data[0]
 
@@ -492,6 +528,10 @@ async def lose_deal(
         "activity_type": "note",
         "content": content,
     }).execute()
+
+    # Invalida cache do Kanban e stats
+    invalidate_cache(f"deals_pipeline:{owner_id}")
+    invalidate_cache(f"crm_")  # Stats de CRM dependem de lost_at
 
     return result.data[0]
 
