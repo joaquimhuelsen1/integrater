@@ -97,7 +97,7 @@ class EmailWorker:
         while self.running:
             try:
                 await self._check_all_accounts()
-                await asyncio.sleep(30)  # 30s - email precisa ser tempo real
+                await asyncio.sleep(300)  # 5 min - otimização (email não precisa tempo real)
             except Exception as e:
                 print(f"Erro no idle loop: {e}")
                 await asyncio.sleep(10)
@@ -170,16 +170,19 @@ class EmailWorker:
             client.login(email_address, password)
             client.select_folder("INBOX")
 
-            # Inicia heartbeat
-            hb = Heartbeat(
-                owner_id=UUID(owner_id),
-                integration_account_id=UUID(acc_id),
-                worker_type="email",
-            )
-            await hb.start()
+            # Inicia heartbeat (apenas se não existir)
+            if acc_id not in self.heartbeats:
+                hb = Heartbeat(
+                    owner_id=UUID(owner_id),
+                    integration_account_id=UUID(acc_id),
+                    worker_type="email",
+                )
+                await hb.start()
+                self.heartbeats[acc_id] = hb
+            else:
+                print(f"[HEARTBEAT] Já existe para {acc_id[:8]}, não recriando")
 
             self.clients[acc_id] = client
-            self.heartbeats[acc_id] = hb
             self.account_info[acc_id] = {
                 "owner_id": owner_id,
                 "workspace_id": workspace_id,

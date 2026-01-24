@@ -336,16 +336,19 @@ class TelegramWorker:
             async def handler_user_update(event, _acc_id=acc_id, _owner_id=owner_id):
                 await self._handle_user_update(_acc_id, _owner_id, event)
 
-            # Inicia heartbeat
-            hb = Heartbeat(
-                owner_id=UUID(owner_id),
-                integration_account_id=UUID(acc_id),
-                worker_type="telegram",
-            )
-            await hb.start()
+            # Inicia heartbeat (apenas se não existir)
+            if acc_id not in self.heartbeats:
+                hb = Heartbeat(
+                    owner_id=UUID(owner_id),
+                    integration_account_id=UUID(acc_id),
+                    worker_type="telegram",
+                )
+                await hb.start()
+                self.heartbeats[acc_id] = hb
+            else:
+                print(f"[HEARTBEAT] Já existe para {acc_id[:8]}, não recriando")
 
             self.clients[acc_id] = client
-            self.heartbeats[acc_id] = hb
             self.account_info[acc_id] = {
                 "owner_id": owner_id,
                 "config": account.get("config", {}),
@@ -1243,7 +1246,7 @@ class TelegramWorker:
                     continue
 
                 await self._process_history_sync_jobs()
-                await asyncio.sleep(600)  # 10 min - meta <5k queries/dia
+                await asyncio.sleep(1800)  # 30 min - otimização agressiva
             except Exception as e:
                 print(f"Erro no history sync loop: {e}")
                 await asyncio.sleep(10)
@@ -1271,6 +1274,18 @@ class TelegramWorker:
         workspace_id = job.get("workspace_id")
         conversation_id = job.get("conversation_id")
 
+        # CRÍTICO: Verifica conexão ANTES de qualquer operação
+        if acc_id not in self.clients:
+            print(f"[SYNC] Cliente não encontrado para {acc_id[:8]}, pulando job")
+            return
+
+        client = self.clients[acc_id]
+
+        # Verifica se cliente está conectado (evita queries inúteis)
+        if not client.is_connected():
+            print(f"[SYNC] Cliente desconectado para {acc_id[:8]}, adiando job {job_id}")
+            return  # Não muda status, será reprocessado na próxima iteração
+
         print(f"[SYNC] Processando job {job_id}")
 
         db.table("sync_history_jobs").update({
@@ -1278,10 +1293,6 @@ class TelegramWorker:
         }).eq("id", job_id).execute()
 
         try:
-            if acc_id not in self.clients:
-                raise Exception(f"Conta {acc_id} não conectada")
-
-            client = self.clients[acc_id]
             telegram_user_id = None
             entity = None
             is_group = False
@@ -1506,7 +1517,7 @@ class TelegramWorker:
                     continue
 
                 await self._process_message_jobs()
-                await asyncio.sleep(300)  # 5 min - meta <5k queries/dia
+                await asyncio.sleep(600)  # 10 min - otimização agressiva
             except Exception as e:
                 print(f"Erro no message jobs loop: {e}")
                 await asyncio.sleep(10)

@@ -10,7 +10,7 @@ class Heartbeat:
         owner_id: UUID,
         integration_account_id: UUID,
         worker_type: str,
-        interval: int = 600,  # 10 min - meta <5k queries/dia
+        interval: int = 1800,  # 30 min - otimização agressiva (economia 66%)
     ):
         self.owner_id = str(owner_id)
         self.integration_account_id = str(integration_account_id)
