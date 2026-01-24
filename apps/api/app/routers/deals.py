@@ -38,6 +38,13 @@ from app.models.crm import (
 
 router = APIRouter(prefix="/deals", tags=["deals"])
 
+# Colunas para SELECT específico (evita metadata/custom_fields grandes em listas)
+DEAL_LIST_COLUMNS = """
+    id, owner_id, pipeline_id, stage_id, contact_id, conversation_id,
+    title, value, probability, expected_close_date, position,
+    won_at, lost_at, lost_reason, archived_at, created_at, updated_at
+""".replace("\n", "").replace("  ", "")
+
 
 def replace_placeholders(text: str, deal: dict, contact: dict | None = None) -> str:
     """Substitui placeholders na mensagem pelos valores reais."""
@@ -92,7 +99,8 @@ async def list_deals(
     owner_id: UUID = Depends(get_current_user_id),
 ):
     """Lista deals com filtros."""
-    query = db.table("deals").select("*").eq("owner_id", str(owner_id))
+    # SELECT específico (evita metadata/custom_fields grandes)
+    query = db.table("deals").select(DEAL_LIST_COLUMNS).eq("owner_id", str(owner_id))
 
     if pipeline_id:
         query = query.eq("pipeline_id", str(pipeline_id))

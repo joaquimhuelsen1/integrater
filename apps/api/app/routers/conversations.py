@@ -14,8 +14,24 @@ from app.models import (
     ConversationStatus,
     AddTagRequest,
 )
+from app.services.cache import get_cached, set_cached, invalidate_cache, TTL_REALTIME
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
+
+# Colunas para SELECT específico (evita retornar metadata/raw_payload grandes)
+CONVERSATION_LIST_COLUMNS = """
+    id, owner_id, workspace_id, contact_id, primary_identity_id,
+    assigned_to_profile_id, last_message_at, last_inbound_at, last_outbound_at,
+    last_channel, last_message_preview, archived_at, status, is_pinned,
+    created_at, updated_at
+""".replace("\n", "").replace("  ", "")
+
+MESSAGE_LIST_COLUMNS = """
+    id, owner_id, conversation_id, integration_account_id, identity_id,
+    channel, direction, external_message_id, external_chat_id,
+    external_reply_to_message_id, from_address, to_address, subject,
+    text, html, sent_at, created_at, edited_at, deleted_at
+""".replace("\n", "").replace("  ", "")
 
 
 @router.get("", response_model=list[Conversation])
@@ -32,7 +48,14 @@ async def list_conversations(
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
-    query = db.table("conversations").select("*").eq(
+    # Cache key baseada nos filtros (5s TTL para não afetar UX)
+    cache_key = f"conversations:{owner_id}:{workspace_id}:{channel}:{status}:{cursor}:{limit}"
+    cached, hit = get_cached(cache_key)
+    if hit:
+        return cached
+
+    # SELECT específico (evita metadata/raw_payload grandes)
+    query = db.table("conversations").select(CONVERSATION_LIST_COLUMNS).eq(
         "owner_id", str(owner_id)
     ).eq("workspace_id", str(workspace_id))
 
@@ -52,6 +75,9 @@ async def list_conversations(
         query = query.lt("id", str(cursor))
 
     result = query.order("last_message_at", desc=True).limit(limit).execute()
+
+    # Cache resultado por 5 segundos
+    set_cached(cache_key, result.data, TTL_REALTIME)
     return result.data
 
 
@@ -79,14 +105,24 @@ async def list_messages(
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
+    # Cache key (5s TTL - realtime cuida de atualizações)
+    cache_key = f"messages:{conversation_id}:{cursor}:{limit}"
+    cached, hit = get_cached(cache_key)
+    if hit:
+        return cached
+
+    # SELECT específico (evita raw_payload grande)
     query = db.table("messages").select(
-        "*, attachments(*)"
+        f"{MESSAGE_LIST_COLUMNS}, attachments(*)"
     ).eq("conversation_id", str(conversation_id)).eq("owner_id", str(owner_id)).is_("deleted_at", "null")
 
     if cursor:
         query = query.lt("id", str(cursor))
 
     result = query.order("sent_at", desc=True).limit(limit).execute()
+
+    # Cache resultado por 5 segundos
+    set_cached(cache_key, result.data, TTL_REALTIME)
     return result.data
 
 
@@ -105,6 +141,8 @@ async def update_conversation(
     if not result.data:
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
 
+    # Invalida cache de conversas deste usuário
+    invalidate_cache(f"conversations:{owner_id}")
     return result.data[0]
 
 
@@ -153,6 +191,10 @@ async def merge_conversations(
         "id", str(data.merge_with_id)
     ).eq("owner_id", str(owner_id)).execute()
 
+    # Invalida cache de conversas e mensagens
+    invalidate_cache(f"conversations:{owner_id}")
+    invalidate_cache(f"messages:{conversation_id}")
+    invalidate_cache(f"messages:{data.merge_with_id}")
     return {"success": True}
 
 
@@ -260,6 +302,9 @@ async def delete_conversation(
         "id", str(conversation_id)
     ).eq("owner_id", str(owner_id)).execute()
 
+    # Invalida cache de conversas e mensagens
+    invalidate_cache(f"conversations:{owner_id}")
+    invalidate_cache(f"messages:{conversation_id}")
     return {"success": True}
 
 
@@ -277,6 +322,8 @@ async def archive_conversation(
     if not result.data:
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
 
+    # Invalida cache de conversas
+    invalidate_cache(f"conversations:{owner_id}")
     return {"success": True}
 
 
@@ -294,4 +341,6 @@ async def unarchive_conversation(
     if not result.data:
         raise HTTPException(status_code=404, detail="Conversa não encontrada")
 
+    # Invalida cache de conversas
+    invalidate_cache(f"conversations:{owner_id}")
     return {"success": True}

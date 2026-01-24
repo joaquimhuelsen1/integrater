@@ -350,10 +350,14 @@ export function InboxView({ userEmail, workspaceId }: InboxViewProps) {
   }, [selectedId])
 
   // Busca com debounce no banco de dados
+  // Otimização: 500ms debounce + mínimo 3 caracteres para reduzir queries
   useEffect(() => {
     const timer = setTimeout(() => {
-      loadConversations(searchQuery)
-    }, 300) // 300ms debounce
+      // Só busca se query vazia (reset) ou >= 3 caracteres
+      if (searchQuery === "" || searchQuery.length >= 3) {
+        loadConversations(searchQuery)
+      }
+    }, 500) // 500ms debounce (era 300ms)
 
     return () => clearTimeout(timer)
   }, [searchQuery, loadConversations])

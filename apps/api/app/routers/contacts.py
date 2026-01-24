@@ -16,6 +16,7 @@ from app.models import (
     LinkByEmailResponse,
 )
 from app.services.contact_service import get_contact_service
+from app.services.cache import get_cached, set_cached, invalidate_cache, TTL_REALTIME
 
 
 class ContactHistoryResponse(BaseModel):
@@ -27,6 +28,9 @@ class ContactHistoryResponse(BaseModel):
 
 router = APIRouter(prefix="/contacts", tags=["contacts"])
 
+# Colunas para SELECT específico (evita metadata grande)
+CONTACT_LIST_COLUMNS = "id, owner_id, workspace_id, display_name, lead_stage, created_at, updated_at"
+
 
 @router.get("", response_model=list[Contact])
 async def list_contacts(
@@ -37,7 +41,14 @@ async def list_contacts(
     db: Client = Depends(get_supabase),
     owner_id: UUID = Depends(get_current_user_id),
 ):
-    query = db.table("contacts").select("*").eq(
+    # Cache key (5s TTL para não afetar UX)
+    cache_key = f"contacts:{owner_id}:{workspace_id}:{search}:{cursor}:{limit}"
+    cached, hit = get_cached(cache_key)
+    if hit:
+        return cached
+
+    # SELECT específico (evita metadata grande)
+    query = db.table("contacts").select(CONTACT_LIST_COLUMNS).eq(
         "owner_id", str(owner_id)
     ).eq("workspace_id", str(workspace_id)).is_("deleted_at", "null")
 
@@ -48,6 +59,9 @@ async def list_contacts(
         query = query.lt("id", str(cursor))
 
     result = query.order("created_at", desc=True).limit(limit).execute()
+
+    # Cache resultado por 5 segundos
+    set_cached(cache_key, result.data, TTL_REALTIME)
     return result.data
 
 
@@ -62,6 +76,9 @@ async def create_contact(
     payload["owner_id"] = str(owner_id)
     payload["workspace_id"] = str(workspace_id)
     result = db.table("contacts").insert(payload).execute()
+
+    # Invalida cache de contatos deste usuário/workspace
+    invalidate_cache(f"contacts:{owner_id}:{workspace_id}")
     return result.data[0]
 
 
@@ -96,6 +113,8 @@ async def update_contact(
     if not result.data:
         raise HTTPException(status_code=404, detail="Contato não encontrado")
 
+    # Invalida cache de contatos deste usuário
+    invalidate_cache(f"contacts:{owner_id}")
     return result.data[0]
 
 
@@ -111,6 +130,9 @@ async def delete_contact(
 
     if not result.data:
         raise HTTPException(status_code=404, detail="Contato não encontrado")
+
+    # Invalida cache de contatos
+    invalidate_cache(f"contacts:{owner_id}")
 
 
 @router.post("/{contact_id}/link-identity", status_code=204)
@@ -202,6 +224,10 @@ async def link_contact_by_email(
             contact_id=result["contact"]["id"]
         )
         conversation_linked = True
+
+    # Invalida cache de contatos (pode ter criado novo)
+    if result.get("is_new"):
+        invalidate_cache(f"contacts:{owner_id}:{workspace_id}")
 
     return LinkByEmailResponse(
         contact=result["contact"],

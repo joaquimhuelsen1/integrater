@@ -15,8 +15,9 @@ logger = logging.getLogger(__name__)
 _cache: dict[str, tuple[Any, float]] = {}
 
 # TTLs padrão (em segundos)
-TTL_SHORT = 30    # Stats que mudam frequentemente
-TTL_MEDIUM = 60   # Stats gerais
+TTL_REALTIME = 5  # Listas de inbox (conversas, mensagens) - curto para não afetar UX
+TTL_SHORT = 10    # Stats que mudam frequentemente
+TTL_MEDIUM = 30   # Stats gerais
 TTL_LONG = 300    # Dados que raramente mudam (stages, pipelines)
 
 

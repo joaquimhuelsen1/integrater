@@ -1,19 +1,18 @@
-import { createClient } from "./supabase"
+import { getCachedSession } from "./supabase"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
 /**
  * Fetch autenticado para API.
- * Inclui token JWT do Supabase no header Authorization.
+ * Usa session cacheada para evitar queries extras ao Supabase.
+ * O cache é atualizado automaticamente via onAuthStateChange.
  */
 export async function apiFetch(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<Response> {
-  const supabase = createClient()
-
-  // Pega sessão atual do Supabase
-  const { data: { session } } = await supabase.auth.getSession()
+  // Usa session cacheada (sem query ao Supabase)
+  const session = await getCachedSession()
 
   // Monta headers com token
   const headers: Record<string, string> = {
