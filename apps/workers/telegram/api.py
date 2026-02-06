@@ -42,7 +42,8 @@ def get_worker() -> "TelegramWorker":
 class SendRequest(BaseModel):
     """Request para enviar mensagem."""
     account_id: str
-    telegram_user_id: int
+    telegram_user_id: int | None = None  # Para mensagens 1:1
+    channel_id: str | None = None  # Para broadcast em canais (ex: "-1001234567890")
     text: str | None = None
     attachments: list[str] = []  # URLs do Supabase Storage
     reply_to_msg_id: int | None = None
@@ -165,23 +166,41 @@ async def send_message(req: SendRequest):
         )
     
     client = worker.clients[req.account_id]
-    
+
     try:
-        # Resolve entity do destinatário
-        entity = await _resolve_entity(worker, client, req.telegram_user_id)
-        
-        if not entity:
+        # Determina entity: canal/grupo ou usuario
+        is_broadcast = bool(req.channel_id)
+
+        if is_broadcast:
+            # Broadcast para canal/grupo
+            entity = await client.get_entity(int(req.channel_id))
+            if not entity:
+                return SendResponse(
+                    success=False,
+                    error=f"Não foi possível encontrar canal {req.channel_id}"
+                )
+            print(f"[API] Broadcast para canal: {req.channel_id}")
+        elif req.telegram_user_id:
+            # Mensagem 1:1 (fluxo existente)
+            entity = await _resolve_entity(worker, client, req.telegram_user_id)
+            if not entity:
+                return SendResponse(
+                    success=False,
+                    error=f"Não foi possível encontrar usuário {req.telegram_user_id}"
+                )
+        else:
             return SendResponse(
                 success=False,
-                error=f"Não foi possível encontrar usuário {req.telegram_user_id}"
+                error="telegram_user_id ou channel_id obrigatório"
             )
-        
-        # Marca pending ANTES de enviar (evita race condition com handler Raw)
-        worker._mark_pending_send(req.telegram_user_id)
-        
+
+        # Marca pending ANTES de enviar - apenas para 1:1 (não broadcast)
+        if req.telegram_user_id and not is_broadcast:
+            worker._mark_pending_send(req.telegram_user_id)
+
         # Envia mensagem
         sent = None
-        
+
         if req.attachments:
             # Envia com mídia
             sent = await _send_with_attachments(
@@ -199,32 +218,40 @@ async def send_message(req: SendRequest):
                 success=False,
                 error="Mensagem deve ter texto ou attachments"
             )
-        
+
         if sent:
-            print(f"[API] Mensagem enviada: {sent.id} para {req.telegram_user_id}")
-            # Marca no cache para o handler Raw ignorar (evita duplicata)
-            worker._mark_sent_via_api(sent.id, req.telegram_user_id)
-            
-            # Busca dados do destinatário (nome, foto)
-            recipient_data = await worker._get_sender_data(client, req.telegram_user_id)
-            
-            return SendResponse(
-                success=True,
-                telegram_msg_id=sent.id,
-                recipient=RecipientData(
-                    telegram_user_id=req.telegram_user_id,
-                    first_name=recipient_data.get("first_name"),
-                    last_name=recipient_data.get("last_name"),
-                    username=recipient_data.get("username"),
-                    photo_url=recipient_data.get("photo_url"),
+            if is_broadcast:
+                print(f"[API] Broadcast enviado: {sent.id} para canal {req.channel_id}")
+                return SendResponse(
+                    success=True,
+                    telegram_msg_id=sent.id,
+                    recipient=None,
                 )
-            )
+            else:
+                print(f"[API] Mensagem enviada: {sent.id} para {req.telegram_user_id}")
+                # Marca no cache para o handler Raw ignorar (evita duplicata)
+                worker._mark_sent_via_api(sent.id, req.telegram_user_id)
+
+                # Busca dados do destinatário (nome, foto)
+                recipient_data = await worker._get_sender_data(client, req.telegram_user_id)
+
+                return SendResponse(
+                    success=True,
+                    telegram_msg_id=sent.id,
+                    recipient=RecipientData(
+                        telegram_user_id=req.telegram_user_id,
+                        first_name=recipient_data.get("first_name"),
+                        last_name=recipient_data.get("last_name"),
+                        username=recipient_data.get("username"),
+                        photo_url=recipient_data.get("photo_url"),
+                    )
+                )
         else:
             return SendResponse(
                 success=False,
                 error="Falha ao enviar mensagem"
             )
-            
+
     except Exception as e:
         print(f"[API] Erro ao enviar mensagem: {e}")
         import traceback

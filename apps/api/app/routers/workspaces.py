@@ -257,3 +257,49 @@ async def create_or_regenerate_workspace_api_key(
         }).execute()
 
     return result.data[0]
+
+
+@router.get("/{workspace_id}/api-keys")
+async def list_workspace_api_keys(
+    workspace_id: UUID,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Lista todas as API keys ativas do workspace."""
+    workspace = db.table("workspaces").select("id").eq(
+        "id", str(workspace_id)
+    ).eq("owner_id", str(owner_id)).single().execute()
+
+    if not workspace.data:
+        raise HTTPException(status_code=404, detail="Workspace não encontrado")
+
+    result = db.table("workspace_api_keys").select("*").eq(
+        "workspace_id", str(workspace_id)
+    ).eq("is_active", True).order("created_at").execute()
+
+    return result.data
+
+
+@router.delete("/{workspace_id}/api-keys/{key_id}", status_code=204)
+async def revoke_workspace_api_key(
+    workspace_id: UUID,
+    key_id: UUID,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Revoga (desativa) uma API key do workspace."""
+    workspace = db.table("workspaces").select("id").eq(
+        "id", str(workspace_id)
+    ).eq("owner_id", str(owner_id)).single().execute()
+
+    if not workspace.data:
+        raise HTTPException(status_code=404, detail="Workspace não encontrado")
+
+    result = db.table("workspace_api_keys").update({
+        "is_active": False
+    }).eq("id", str(key_id)).eq(
+        "workspace_id", str(workspace_id)
+    ).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="API key não encontrada")

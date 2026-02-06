@@ -30,6 +30,7 @@ from .purchases import router as purchases_router
 from .preferences import router as preferences_router
 from .plans import router as plans_router
 from .plan_prompts import router as plan_prompts_router
+from .broadcast import router as broadcast_router
 
 __all__ = [
     "health_router",
@@ -64,4 +65,5 @@ __all__ = [
     "preferences_router",
     "plans_router",
     "plan_prompts_router",
+    "broadcast_router",
 ]

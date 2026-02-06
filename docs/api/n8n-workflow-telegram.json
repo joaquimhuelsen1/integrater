@@ -453,6 +453,108 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [1440, 1000]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.body.broadcast === true }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "is-broadcast",
+      "name": "Is Broadcast?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [380, 900]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.thereconquestmap.com/worker/send",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "account_id",
+              "value": "={{ $('Webhook Send').item.json.body.account_id }}"
+            },
+            {
+              "name": "channel_id",
+              "value": "={{ $('Webhook Send').item.json.body.channel_id }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $('Webhook Send').item.json.body.text }}"
+            },
+            {
+              "name": "attachments",
+              "value": "={{ $('Webhook Send').item.json.body.attachments || [] }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "call-worker-broadcast",
+      "name": "Call Worker /send (Broadcast)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [600, 1200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "WORKER_API_KEY_CREDENTIAL_ID",
+          "name": "Worker API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.success }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "broadcast-success",
+      "name": "Broadcast Success?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [840, 1200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'ok', broadcast: true, telegram_msg_id: $('Call Worker /send (Broadcast)').item.json.telegram_msg_id }) }}"
+      },
+      "id": "respond-broadcast-success",
+      "name": "Respond Success (Broadcast)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1080, 1100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'error', broadcast: true, error: $('Call Worker /send (Broadcast)').item.json.error || 'Broadcast falhou' }) }}",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "id": "respond-broadcast-error",
+      "name": "Respond Error (Broadcast)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1080, 1300]
     }
   ],
   "connections": {
@@ -639,7 +741,54 @@
       "main": [
         [
           {
+            "node": "Is Broadcast?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Broadcast?": {
+      "main": [
+        [
+          {
+            "node": "Call Worker /send (Broadcast)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "Get Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Worker /send (Broadcast)": {
+      "main": [
+        [
+          {
+            "node": "Broadcast Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Broadcast Success?": {
+      "main": [
+        [
+          {
+            "node": "Respond Success (Broadcast)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Error (Broadcast)",
             "type": "main",
             "index": 0
           }

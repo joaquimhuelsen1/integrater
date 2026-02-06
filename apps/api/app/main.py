@@ -40,6 +40,7 @@ from app.routers import (
     preferences_router,
     plans_router,
     plan_prompts_router,
+    broadcast_router,
 )
 
 settings = get_settings()
@@ -126,3 +127,4 @@ app.include_router(purchases_router)
 app.include_router(preferences_router)
 app.include_router(plans_router)
 app.include_router(plan_prompts_router)
+app.include_router(broadcast_router)
