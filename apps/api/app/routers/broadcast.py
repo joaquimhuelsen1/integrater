@@ -28,11 +28,14 @@ class TelegramChannelBroadcastRequest(BaseModel):
     channel_id: str  # Chat ID do canal (ex: -1001234567890)
     message: str
     image_url: str | None = None
+    pin_message: bool = True  # Fixar mensagem no canal (default: sim)
+    notify: bool = True  # Notificar membros do canal (default: sim)
 
 
 class TelegramChannelBroadcastResponse(BaseModel):
     success: bool
     telegram_msg_id: int | None = None
+    pinned: bool = False
     error: str | None = None
 
 
@@ -79,6 +82,8 @@ async def broadcast_telegram_channel(
             "channel_id": data.channel_id,
             "text": data.message,
             "attachments": [data.image_url] if data.image_url else [],
+            "pin_message": data.pin_message,
+            "silent": not data.notify,
         }
 
         async with httpx.AsyncClient(timeout=60) as client:
@@ -95,6 +100,7 @@ async def broadcast_telegram_channel(
 
         if response.status_code == 200 and resp_data.get("success"):
             telegram_msg_id = resp_data.get("telegram_msg_id")
+            pinned = resp_data.get("pinned", False)
 
             # Salva broadcast no Supabase
             db.table("broadcast_messages").insert({
@@ -105,12 +111,14 @@ async def broadcast_telegram_channel(
                 "image_url": data.image_url,
                 "telegram_msg_id": telegram_msg_id,
                 "status": "sent",
+                "pinned": pinned,
             }).execute()
 
-            logger.info(f"Broadcast enviado: channel={data.channel_id} msg_id={telegram_msg_id}")
+            logger.info(f"Broadcast enviado: channel={data.channel_id} msg_id={telegram_msg_id} pinned={pinned}")
             return TelegramChannelBroadcastResponse(
                 success=True,
                 telegram_msg_id=telegram_msg_id,
+                pinned=pinned,
             )
         else:
             error_msg = resp_data.get("error", f"Worker error: {response.status_code}")

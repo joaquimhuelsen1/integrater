@@ -47,6 +47,8 @@ class SendRequest(BaseModel):
     text: str | None = None
     attachments: list[str] = []  # URLs do Supabase Storage
     reply_to_msg_id: int | None = None
+    pin_message: bool = False  # Fixar mensagem no canal (broadcast only). Quando True, força envio silencioso para evitar dupla notificação — notificação vem apenas do pin.
+    silent: bool = False  # Enviar sem notificação
 
 
 class RecipientData(BaseModel):
@@ -64,6 +66,7 @@ class SendResponse(BaseModel):
     telegram_msg_id: int | None = None
     error: str | None = None
     recipient: RecipientData | None = None
+    pinned: bool = False
 
 
 class EditRequest(BaseModel):
@@ -201,17 +204,23 @@ async def send_message(req: SendRequest):
         # Envia mensagem
         sent = None
 
+        # Se vai fixar, envia silencioso para evitar dupla notificação
+        # (notificação vem do pin, não do envio)
+        send_silent = True if (req.pin_message and is_broadcast) else req.silent
+
         if req.attachments:
             # Envia com mídia
             sent = await _send_with_attachments(
-                client, entity, req.text, req.attachments, req.reply_to_msg_id
+                client, entity, req.text, req.attachments, req.reply_to_msg_id,
+                silent=send_silent
             )
         elif req.text:
             # Envia apenas texto
             sent = await client.send_message(
                 entity,
                 req.text,
-                reply_to=req.reply_to_msg_id
+                reply_to=req.reply_to_msg_id,
+                silent=send_silent
             )
         else:
             return SendResponse(
@@ -222,10 +231,25 @@ async def send_message(req: SendRequest):
         if sent:
             if is_broadcast:
                 print(f"[API] Broadcast enviado: {sent.id} para canal {req.channel_id}")
+
+                # Fixa mensagem no canal se solicitado
+                pinned = False
+                pin_error = None
+                if req.pin_message:
+                    try:
+                        await client.pin_message(entity, sent.id, notify=not req.silent)
+                        pinned = True
+                        print(f"[API] Mensagem {sent.id} fixada no canal {req.channel_id}")
+                    except Exception as e:
+                        pin_error = f"Mensagem enviada mas pin falhou: {e}"
+                        print(f"[API] {pin_error}")
+
                 return SendResponse(
                     success=True,
                     telegram_msg_id=sent.id,
                     recipient=None,
+                    pinned=pinned,
+                    error=pin_error,
                 )
             else:
                 print(f"[API] Mensagem enviada: {sent.id} para {req.telegram_user_id}")
@@ -389,13 +413,13 @@ async def delete_message(req: DeleteRequest):
         return DeleteResponse(success=False, error=str(e))
 
 
-async def _send_with_attachments(client, entity, text: str | None, attachments: list[str], reply_to: int | None):
+async def _send_with_attachments(client, entity, text: str | None, attachments: list[str], reply_to: int | None, silent: bool = False):
     """Envia mensagem com attachments (URLs do Supabase)."""
     import httpx
     import io
-    
+
     sent = None
-    
+
     for i, url in enumerate(attachments):
         try:
             # Baixa arquivo da URL
@@ -404,24 +428,24 @@ async def _send_with_attachments(client, entity, text: str | None, attachments: 
                 if response.status_code != 200:
                     print(f"[API] Erro ao baixar attachment: {response.status_code}")
                     continue
-                
+
                 file_bytes = response.content
-            
+
             # Extrai nome do arquivo da URL
             file_name = url.split("/")[-1].split("?")[0]
-            
+
             # Detecta tipo
             content_type = response.headers.get("content-type", "application/octet-stream")
             is_image = content_type.startswith("image/")
             is_audio = content_type.startswith("audio/")
-            
+
             # Prepara arquivo
             file_like = io.BytesIO(file_bytes)
             file_like.name = file_name
-            
+
             # Caption só no primeiro arquivo
             caption = text if i == 0 and text else None
-            
+
             # Envia
             if is_audio:
                 sent = await client.send_file(
@@ -430,6 +454,7 @@ async def _send_with_attachments(client, entity, text: str | None, attachments: 
                     caption=caption,
                     voice_note=True,
                     reply_to=reply_to if i == 0 else None,
+                    silent=silent,
                 )
             elif is_image:
                 sent = await client.send_file(
@@ -438,6 +463,7 @@ async def _send_with_attachments(client, entity, text: str | None, attachments: 
                     caption=caption,
                     force_document=False,
                     reply_to=reply_to if i == 0 else None,
+                    silent=silent,
                 )
             else:
                 sent = await client.send_file(
@@ -446,6 +472,7 @@ async def _send_with_attachments(client, entity, text: str | None, attachments: 
                     caption=caption,
                     force_document=True,
                     reply_to=reply_to if i == 0 else None,
+                    silent=silent,
                 )
             
             print(f"[API] Attachment enviado: {file_name}")
@@ -455,6 +482,6 @@ async def _send_with_attachments(client, entity, text: str | None, attachments: 
     
     # Se tinha texto mas não enviou com mídia, envia só texto
     if not sent and text:
-        sent = await client.send_message(entity, text, reply_to=reply_to)
+        sent = await client.send_message(entity, text, reply_to=reply_to, silent=silent)
     
     return sent

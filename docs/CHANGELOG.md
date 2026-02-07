@@ -2,6 +2,73 @@
 
 Registro de mudanças estruturais, milestones completados e bugs corrigidos no projeto Integrate X.
 
+## [2026-02-06] - M1 Pin + Notificação no Broadcast Telegram
+
+### Milestone: M1 - Pin + Notificação no Broadcast Telegram
+
+**Status**: Completado
+
+**Mudança Estrutural**: NÃO (modificação de 2 arquivos existentes + 1 coluna nova)
+
+**Arquivos Modificados**:
+- apps/workers/telegram/api.py - Adicionado pin_message e silent ao SendRequest, lógica de pin após envio broadcast, error handling específico, silent override para evitar dupla notificação
+- apps/api/app/routers/broadcast.py - Adicionado pin_message e notify ao request model, repassar ao worker, salvar pinned no histórico
+- Migration Supabase: ALTER TABLE broadcast_messages ADD COLUMN pinned BOOLEAN DEFAULT FALSE
+
+**Detalhes Técnicos**:
+- Defaults: pin_message=True, notify=True (ideal para blog posts)
+- Anti-spam: quando pin_message=True, envio é silencioso (silent=True) — notificação vem apenas do pin
+- Pin é try/catch: se falhar (permissões, rate limit), mensagem já foi enviada com sucesso
+- Telethon client.pin_message() usado nativamente
+- Nova coluna `pinned` (BOOLEAN DEFAULT FALSE) em broadcast_messages para auditoria
+
+**Bugs Encontrados e Corrigidos**:
+- Nenhum bug. Tech-lead sugeriu melhorias de error handling que foram aplicadas.
+
+**Notas para o Futuro**:
+- Implementação robusta: pin é opcional e nunca bloqueia o envio broadcast
+- Mensagens importantes podem ser pinadas para maior visibilidade no canal
+- Suporta toggle de notificação para grupos: pin = silencioso, usuários veem no topo do canal
+
+---
+
+## [2026-02-06] - Espelho Framework Claude -> Codex
+
+### Milestone: nenhum
+
+**Status**: Completado
+
+**Mudança Estrutural**: NÃO (mudança operacional de framework)
+
+**Arquivos Modificados**:
+- AGENT.md - novo espelho local de `~/.claude/CLAUDE.md`
+- README.md - seção Documentação atualizada com AGENT.md
+- tasks/TASKS-GERAL.md - task `[GERAL-004]` criada e concluída
+- docs/api/anotacao-framework-codex-2026-02-06.md - anotação estratégica da migração
+
+**Detalhes Técnicos**:
+- `~/.claude/CLAUDE.md` copiado para:
+  - `AGENT.md` (projeto)
+  - `C:\\Users\\Joaquim Huelsen\\.codex\\AGENT.md`
+- Espelho de assets Claude em `C:\\Users\\Joaquim Huelsen\\.codex`:
+  - `agents/`
+  - `commands/`
+  - `context-pills/`
+  - `hooks/`
+  - `claude-mirror/` (snapshot bruto)
+- Skills custom adicionadas em `C:\\Users\\Joaquim Huelsen\\.codex\\skills`:
+  - `design-principles`
+  - `agent-creator-cc`
+  - `skill-creator-cc`
+
+**Bugs Encontrados e Corrigidos**:
+- Nenhum
+
+**Notas para o Futuro**:
+- O espelho de comandos/agents/context-pills no Codex é documental/operacional; execução automática depende de suporte nativo do runtime.
+
+---
+
 ## [2026-01-23] - SELECT Específico (Remover SELECT *)
 
 ### Milestone: M3 - SELECT Específico (remover SELECT *)
@@ -123,6 +190,43 @@ Registro de mudanças estruturais, milestones completados e bugs corrigidos no p
 - Tech-lead identificou 13 outras chamadas diretas a `getSession()` espalhadas no codebase
 - Possível próximo passo: Migrar todas as chamadas para usar cache centralizado
 - Impacto potencial adicional: ~15-20k requisições/dia (segunda onda de otimização)
+
+---
+
+## [2026-02-05] - Atualizar Workflow n8n "SARAH | Form" para CRM da Sarah
+
+### Milestone: M1 - Atualizar workflow n8n "SARAH | Form" para CRM da Sarah
+
+**Status**: Completado
+
+**Mudança Estrutural**: NÃO (integração externa apenas)
+
+**Arquivos Modificados**:
+- Nenhum arquivo local modificado
+- Workflow n8n `p1b6f4LE5OJaa28v` atualizado via MCP n8n API
+
+**Detalhes Técnicos**:
+- Workflow "SARAH | Form" tinha 3 nodes HTTP Request enviando deals para workspace errado
+- Atualizados os 3 nodes:
+  1. **Criar Deal SMS** - Node HTTP Request
+  2. **Telegram** - Node HTTP Request
+  3. **Email** - Node HTTP Request
+- Novos valores configurados em cada node:
+  - URL base do CRM da Sarah
+  - X-API-Key (credencial corrigida)
+  - X-Pipeline-Id (novo pipeline)
+  - X-Stage-Id (novo stage)
+- Workspace alvo agora correto: `b25019d9-6b4d-48ec-8b02-2a9571884d85` (CRM da Sarah)
+- Workflow permanece ativo após atualização (versionCounter = 9)
+
+**Bugs Encontrados e Corrigidos**:
+- Nenhum
+
+**Notas para o Futuro**:
+- Recomendado teste end-to-end para validar fluxo completo de deals
+- Monitorar webhook responses de forma contínua
+- Sem necessidade de commit/push/deploy (mudança puramente no n8n cloud)
+- Workflow aponta para APIs locais (localhost:8000) e n8n (via MCP)
 
 ---
 
