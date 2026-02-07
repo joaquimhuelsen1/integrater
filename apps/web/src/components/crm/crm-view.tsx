@@ -45,6 +45,7 @@ interface Deal {
   contact_id: string | null
   contact?: { id: string; display_name: string | null } | null
   tags?: { id: string; name: string; color: string }[]
+  score?: { score: number; recommendation?: string } | null
   won_at: string | null
   lost_at: string | null
   created_at: string
