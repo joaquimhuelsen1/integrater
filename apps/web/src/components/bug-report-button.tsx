@@ -5,6 +5,7 @@ import { Bug } from "lucide-react"
 import { BugReportModal } from "./bug-report-modal"
 import { useWorkspace } from "@/contexts/workspace-context"
 import { createClient } from "@/lib/supabase"
+import type { AuthChangeEvent, Session } from "@supabase/supabase-js"
 
 export function BugReportButton() {
   const [isOpen, setIsOpen] = useState(false)
@@ -23,7 +24,7 @@ export function BugReportButton() {
     checkAuth()
 
     // Escuta mudancas de auth
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
       setIsAuthenticated(!!session)
     })
 
