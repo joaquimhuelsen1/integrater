@@ -22,6 +22,10 @@ import {
   MoreVertical,
   Archive,
   Send,
+  Flame,
+  Zap,
+  Snowflake,
+  ThermometerSun,
 } from "lucide-react"
 import { ContactSelector } from "./contact-selector"
 import { DealTimeline } from "./deal-timeline"
@@ -70,6 +74,20 @@ interface DealFile {
   file_url: string
   file_size: number | null
   mime_type: string | null
+  created_at: string
+}
+
+interface DealScore {
+  id: string
+  score: number
+  factors: {
+    financial_capacity?: { score: number; reason: string }
+    motivation?: { score: number; reason: string }
+    case_viability?: { score: number; reason: string }
+    engagement?: { score: number; reason: string }
+  } | null
+  recommendation: string | null
+  model: string | null
   created_at: string
 }
 
@@ -133,6 +151,10 @@ export function DealModal({
   const [files, setFiles] = useState<DealFile[]>([])
   const [isUploadingFile, setIsUploadingFile] = useState(false)
 
+  // Lead Score
+  const [dealScore, setDealScore] = useState<DealScore | null>(null)
+  const [showScoreTooltip, setShowScoreTooltip] = useState(false)
+
   // Notes
   const [noteContent, setNoteContent] = useState("")
   const [isSavingNote, setIsSavingNote] = useState(false)
@@ -164,11 +186,12 @@ export function DealModal({
 
     setIsLoading(true)
     try {
-      const [dealRes, tagsRes, filesRes, allTagsRes] = await Promise.all([
+      const [dealRes, tagsRes, filesRes, allTagsRes, scoreRes] = await Promise.all([
         apiFetch(`/deals/${dealId}`),
         apiFetch(`/deals/${dealId}/tags`),
         apiFetch(`/deals/${dealId}/files`),
         apiFetch(`/deal-tags`),
+        apiFetch(`/deals/${dealId}/score`),
       ])
 
       if (dealRes.ok) {
@@ -194,6 +217,11 @@ export function DealModal({
 
       if (allTagsRes.ok) {
         setAllTags(await allTagsRes.json())
+      }
+
+      if (scoreRes.ok) {
+        const scoreData = await scoreRes.json()
+        setDealScore(scoreData || null)
       }
     } catch (error) {
       console.error("Erro ao carregar deal:", error)
@@ -491,6 +519,28 @@ export function DealModal({
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
 
+  // Lead score helpers
+  const getScoreLabel = (score: number) => {
+    if (score >= 80) return "HOT"
+    if (score >= 60) return "WARM"
+    if (score >= 40) return "COOL"
+    return "COLD"
+  }
+
+  const getScoreStyles = (score: number) => {
+    if (score >= 80) return { bg: "bg-red-100 dark:bg-red-900/40", text: "text-red-700 dark:text-red-400", border: "border-red-300 dark:border-red-700" }
+    if (score >= 60) return { bg: "bg-orange-100 dark:bg-orange-900/40", text: "text-orange-700 dark:text-orange-400", border: "border-orange-300 dark:border-orange-700" }
+    if (score >= 40) return { bg: "bg-yellow-100 dark:bg-yellow-900/40", text: "text-yellow-700 dark:text-yellow-400", border: "border-yellow-300 dark:border-yellow-700" }
+    return { bg: "bg-blue-100 dark:bg-blue-900/40", text: "text-blue-700 dark:text-blue-400", border: "border-blue-300 dark:border-blue-700" }
+  }
+
+  const getScoreIcon = (score: number) => {
+    if (score >= 80) return Flame
+    if (score >= 60) return ThermometerSun
+    if (score >= 40) return Zap
+    return Snowflake
+  }
+
   // Modal classes based on fullscreen state (mobile always fullscreen)
   const modalClasses = isFullscreen
     ? "fixed inset-0 z-50 flex flex-col bg-white dark:bg-zinc-900"
@@ -757,6 +807,70 @@ export function DealModal({
                         Perdido
                       </span>
                     )}
+                  </div>
+                )}
+
+                {/* Lead Score Badge */}
+                {dealScore && (
+                  <div className="mb-4 relative">
+                    {(() => {
+                      const styles = getScoreStyles(dealScore.score)
+                      const ScoreIcon = getScoreIcon(dealScore.score)
+                      const label = getScoreLabel(dealScore.score)
+                      return (
+                        <div>
+                          <button
+                            onClick={() => setShowScoreTooltip(!showScoreTooltip)}
+                            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-semibold ${styles.bg} ${styles.text} ${styles.border}`}
+                          >
+                            <ScoreIcon className="h-4 w-4" />
+                            {label} {dealScore.score}
+                          </button>
+
+                          {showScoreTooltip && (
+                            <>
+                              <div
+                                className="fixed inset-0 z-10"
+                                onClick={() => setShowScoreTooltip(false)}
+                              />
+                              <div className="absolute left-0 top-full z-20 mt-2 w-72 rounded-lg border border-zinc-200 bg-white p-3 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+                                <div className="mb-2 text-xs font-medium uppercase text-zinc-500">Lead Score Analysis</div>
+
+                                {dealScore.factors && (
+                                  <div className="space-y-2 mb-3">
+                                    {Object.entries(dealScore.factors).map(([key, val]) => {
+                                      if (!val) return null
+                                      return (
+                                        <div key={key}>
+                                          <div className="flex items-center justify-between text-xs">
+                                            <span className="capitalize text-zinc-600 dark:text-zinc-400">{key.replace(/_/g, ' ')}</span>
+                                            <span className="font-semibold">{val.score}/25</span>
+                                          </div>
+                                          <div className="mt-0.5 h-1.5 rounded-full bg-zinc-200 dark:bg-zinc-700">
+                                            <div
+                                              className="h-1.5 rounded-full bg-blue-500"
+                                              style={{ width: `${(val.score / 25) * 100}%` }}
+                                            />
+                                          </div>
+                                          <p className="mt-0.5 text-[11px] text-zinc-500">{val.reason}</p>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                )}
+
+                                {dealScore.recommendation && (
+                                  <div className="border-t border-zinc-200 pt-2 dark:border-zinc-700">
+                                    <div className="text-xs font-medium text-zinc-500 mb-1">Recommendation</div>
+                                    <p className="text-xs text-zinc-700 dark:text-zinc-300">{dealScore.recommendation}</p>
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )
+                    })()}
                   </div>
                 )}
 

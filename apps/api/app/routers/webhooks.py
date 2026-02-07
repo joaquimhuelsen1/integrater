@@ -6,8 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Header, Path
 from supabase import Client
 from pydantic import BaseModel
 from typing import Any
+import asyncio
+import os
 import random
 import logging
+import httpx
 
 from app.deps import get_supabase
 from app.services.contact_service import get_contact_service
@@ -261,6 +264,31 @@ async def create_deal_via_workspace_webhook(
                 logger.info(f"Deal {deal['id']} linked to contact {contact_linked}")
             except Exception as e:
                 logger.warning(f"Failed to auto-link contact for deal {deal['id']}: {e}")
+
+    # Fire-and-forget: trigger n8n para calcular lead score via IA
+    n8n_lead_score_url = os.environ.get("N8N_LEAD_SCORE_WEBHOOK_URL")
+    if n8n_lead_score_url:
+        async def _trigger_lead_score():
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        n8n_lead_score_url,
+                        json={
+                            "deal_id": deal["id"],
+                            "workspace_id": workspace_id,
+                            "owner_id": owner_id,
+                            "custom_fields": merged_custom_fields,
+                            "title": data.title,
+                            "value": data.value,
+                            "tags": tags_added,
+                            "contact_linked": contact_linked,
+                        },
+                        timeout=10.0,
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to trigger lead score for deal {deal['id']}: {e}")
+
+        asyncio.create_task(_trigger_lead_score())
 
     return {
         "success": True,

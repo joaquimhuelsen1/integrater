@@ -174,10 +174,23 @@ async def list_deals_by_pipeline(
                     deal_tags_map[deal_id] = []
                 deal_tags_map[deal_id].append(tag)
 
-    # Agrupa por stage e adiciona tags
+    # Busca lead scores dos deals deste pipeline
+    deal_scores_map = {}
+    if deal_ids:
+        scores_result = db.table("deal_scores").select(
+            "deal_id, score, factors, recommendation"
+        ).in_("deal_id", deal_ids).order("created_at", desc=True).execute()
+
+        for score_row in (scores_result.data or []):
+            d_id = score_row["deal_id"]
+            if d_id not in deal_scores_map:
+                deal_scores_map[d_id] = score_row
+
+    # Agrupa por stage e adiciona tags + scores
     deals_by_stage = {}
     for deal in deals_result.data or []:
         deal["tags"] = deal_tags_map.get(deal["id"], [])
+        deal["score"] = deal_scores_map.get(deal["id"])
         stage_id = deal["stage_id"]
         if stage_id not in deals_by_stage:
             deals_by_stage[stage_id] = []
@@ -540,6 +553,34 @@ async def lose_deal(
     # Invalida cache do Kanban e stats
     invalidate_cache(f"deals_pipeline:{owner_id}")
     invalidate_cache(f"crm_")  # Stats de CRM dependem de lost_at
+
+    return result.data[0]
+
+
+# ============================================
+# Lead Score
+# ============================================
+@router.get("/{deal_id}/score")
+async def get_deal_score(
+    deal_id: UUID,
+    db: Client = Depends(get_supabase),
+    owner_id: UUID = Depends(get_current_user_id),
+):
+    """Retorna o lead score mais recente do deal."""
+    # Verifica se deal pertence ao owner
+    deal = db.table("deals").select("id").eq(
+        "id", str(deal_id)
+    ).eq("owner_id", str(owner_id)).single().execute()
+
+    if not deal.data:
+        raise HTTPException(status_code=404, detail="Deal nao encontrado")
+
+    result = db.table("deal_scores").select("*").eq(
+        "deal_id", str(deal_id)
+    ).order("created_at", desc=True).limit(1).execute()
+
+    if not result.data:
+        return None
 
     return result.data[0]
 

@@ -2,7 +2,7 @@
 
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { Trophy, XCircle, MoreVertical, Trash2, Archive, MessageSquare, Mail, Phone } from "lucide-react"
+import { Trophy, XCircle, MoreVertical, Trash2, Archive, MessageSquare, Mail, Phone, Flame, ThermometerSun, Zap, Snowflake } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,6 +35,7 @@ interface Deal {
   contact?: { id: string; display_name: string | null } | null
   tags?: DealTag[]
   custom_fields?: CustomFields | null
+  score?: { score: number; recommendation?: string } | null
   won_at: string | null
   lost_at: string | null
   created_at: string
@@ -112,6 +113,13 @@ export function DealCard({ deal, onClick, isDragging, onArchive, onDelete, onSen
   const isWon = !!deal.won_at
   const isLost = !!deal.lost_at
   const isClosed = isWon || isLost
+
+  const getScoreBadge = (score: number) => {
+    if (score >= 80) return { label: "HOT", bg: "bg-red-100 dark:bg-red-900/40", text: "text-red-600 dark:text-red-400", Icon: Flame }
+    if (score >= 60) return { label: "WARM", bg: "bg-orange-100 dark:bg-orange-900/40", text: "text-orange-600 dark:text-orange-400", Icon: ThermometerSun }
+    if (score >= 40) return { label: "COOL", bg: "bg-yellow-100 dark:bg-yellow-900/40", text: "text-yellow-600 dark:text-yellow-400", Icon: Zap }
+    return { label: "COLD", bg: "bg-blue-100 dark:bg-blue-900/40", text: "text-blue-600 dark:text-blue-400", Icon: Snowflake }
+  }
 
   const handleArchive = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -216,6 +224,24 @@ export function DealCard({ deal, onClick, isDragging, onArchive, onDelete, onSen
               +{deal.tags.length - 3}
             </span>
           )}
+        </div>
+      )}
+
+      {/* Lead Score Mini Badge */}
+      {deal.score && (
+        <div className="mb-2">
+          {(() => {
+            const badge = getScoreBadge(deal.score.score)
+            return (
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${badge.bg} ${badge.text}`}
+                title={deal.score.recommendation || undefined}
+              >
+                <badge.Icon className="h-3 w-3" />
+                {badge.label} {deal.score.score}
+              </span>
+            )
+          })()}
         </div>
       )}
 
