@@ -1,5 +1,5 @@
-import { createBrowserClient, type SupabaseClient } from '@supabase/ssr'
-import type { Session } from '@supabase/supabase-js'
+import { createBrowserClient } from '@supabase/ssr'
+import type { SupabaseClient, Session } from '@supabase/supabase-js'
 
 // Singleton do cliente Supabase (evita criar novo cliente a cada chamada)
 let supabaseClient: SupabaseClient | null = null
