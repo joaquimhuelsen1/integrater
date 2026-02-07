@@ -175,7 +175,51 @@ async def create_deal_via_workspace_webhook(
     if data.nome_completo:
         merged_custom_fields["nome_completo"] = data.nome_completo
 
-    # Cria o deal
+    # Resolver contato ANTES de criar deal (deduplicacao)
+    contact_id = data.contact_id
+    contact_linked = None
+    if not contact_id:
+        email_compra = merged_custom_fields.get("email_compra")
+
+        if email_compra and isinstance(email_compra, str) and "@" in email_compra:
+            try:
+                service = get_contact_service(db, owner_id, workspace_id)
+                nome_completo = merged_custom_fields.get("nome_completo")
+
+                contact_result = await service.get_or_create_by_email(
+                    email=email_compra,
+                    display_name=nome_completo,
+                    metadata={"source": "crm_webhook", "deal_title": data.title}
+                )
+
+                contact_id = contact_result["contact"]["id"]
+                contact_linked = contact_id
+                logger.info(f"Contact resolved: {contact_id} for {email_compra}")
+            except Exception as e:
+                logger.warning(f"Failed to resolve contact: {e}")
+
+    # Check de duplicidade: contato ja tem deal ativo?
+    if contact_id:
+        existing = db.table("deals").select("id").eq(
+            "owner_id", owner_id
+        ).eq("contact_id", contact_id).is_(
+            "archived_at", "null"
+        ).is_("won_at", "null").is_("lost_at", "null").limit(1).execute()
+
+        if existing.data:
+            logger.info(f"Duplicate deal detected for contact {contact_id}, returning existing deal {existing.data[0]['id']}")
+            return {
+                "success": True,
+                "deal_id": existing.data[0]["id"],
+                "pipeline_id": pipeline_id,
+                "stage_id": stage_id,
+                "tags_added": [],
+                "contact_linked": contact_id,
+                "duplicate": True,
+                "message": "Deal já existe para este contato"
+            }
+
+    # Cria o deal (com contact_id ja resolvido)
     deal_payload = {
         "owner_id": owner_id,
         "pipeline_id": pipeline_id,
@@ -186,8 +230,8 @@ async def create_deal_via_workspace_webhook(
         "custom_fields": merged_custom_fields,
     }
 
-    if data.contact_id:
-        deal_payload["contact_id"] = data.contact_id
+    if contact_id:
+        deal_payload["contact_id"] = contact_id
 
     result = db.table("deals").insert(deal_payload).execute()
 
@@ -236,34 +280,6 @@ async def create_deal_via_workspace_webhook(
             tags_added.append(tag_name)
         except Exception:
             pass  # Já existe
-
-    # Auto-vincular contato se email_compra estiver presente e deal nao tiver contact_id
-    contact_linked = None
-    if not data.contact_id:
-        email_compra = merged_custom_fields.get("email_compra")
-
-        if email_compra and isinstance(email_compra, str) and "@" in email_compra:
-            try:
-                service = get_contact_service(db, owner_id, workspace_id)
-
-                # Buscar nome do custom_fields se existir
-                nome_completo = merged_custom_fields.get("nome_completo")
-
-                contact_result = await service.get_or_create_by_email(
-                    email=email_compra,
-                    display_name=nome_completo,
-                    metadata={"source": "crm_webhook", "deal_title": data.title}
-                )
-
-                # Atualizar deal com contact_id
-                db.table("deals").update({
-                    "contact_id": contact_result["contact"]["id"]
-                }).eq("id", deal["id"]).execute()
-
-                contact_linked = contact_result["contact"]["id"]
-                logger.info(f"Deal {deal['id']} linked to contact {contact_linked}")
-            except Exception as e:
-                logger.warning(f"Failed to auto-link contact for deal {deal['id']}: {e}")
 
     # Fire-and-forget: trigger n8n para calcular lead score via IA
     n8n_lead_score_url = os.environ.get("N8N_LEAD_SCORE_WEBHOOK_URL")

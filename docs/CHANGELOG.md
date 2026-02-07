@@ -2,6 +2,75 @@
 
 Registro de mudanças estruturais, milestones completados e bugs corrigidos no projeto Integrate X.
 
+## [2026-02-07] - M1 Fix Duplicação de Leads no Webhook CRM
+
+### Milestone: M1 - Fix Duplicação de Leads no Webhook CRM
+
+**Status**: Completado
+
+**Mudança Estrutural**: NÃO (correção de lógica em fluxo existente)
+
+**Arquivos Modificados**:
+- apps/api/app/routers/webhooks.py - Reestruturado fluxo de criação de deals via webhook
+
+**Detalhes Técnicos**:
+- Webhook POST /webhooks/{workspace_id}/deals estava criando deals duplicados
+- Problema: Não verificava se o contato já tinha deal ativo antes de criar novo
+- Solução implementada:
+  1. Movido `get_or_create_by_email()` para ANTES da criação do deal
+  2. Adicionado check de duplicidade (1 deal ativo por contato) — mesma lógica do endpoint POST /deals
+  3. Se duplicata detectada, retorna deal existente com flag `"duplicate": true` (idempotente)
+  4. Eliminado update separado de contact_id (deal já nasce com contact_id correto)
+- Deduplicação é condicional no código (não usa índice único no banco), implementada em lógica Python
+
+**Bugs Encontrados e Corrigidos**:
+- Bug CRÍTICO: Webhook criava deals sem verificação de duplicidade, causando leads duplicados no CRM
+- Corrigido: Adicionado check ANTES do INSERT, retorna deal existente quando duplicata
+
+**Notas para o Futuro**:
+- Tech-lead aprovou sem issues críticas
+- Sugestão de longo prazo: Adicionar partial unique index no banco para garantir deduplicação sob race condition (UNIQUE INDEX on contact_id WHERE stage != 'won' AND stage != 'lost')
+- Fluxo de webhook agora é idempotente: múltiplas chamadas com mesmo payload retornam mesmo deal
+- Sem necessidade de commit/push/deploy neste momento (será feito ao finalizar tarefa inteira)
+
+---
+
+## [2026-02-07] - M1 Lead Score v2 - Workflow n8n refatorado
+
+### Milestone: M1 - Lead Score v2 - Workflow n8n refatorado
+
+**Status**: Completado
+
+**Mudança Estrutural**: NÃO (refactoring de workflow n8n existente)
+
+**Arquivos Modificados**:
+- Nenhum arquivo local modificado
+- Workflow n8n `WK7PXM5mNFJeXLKF` atualizado via MCP n8n API
+
+**Detalhes Técnicos**:
+- Workflow "Lead Score v2 - GLM 4.7 Thinking" completamente refatorado
+- Supabase nodes substituídos por PostgreSQL nodes (para queries com JOINs complexos)
+- Node "Get Won Conversations" adicionado para capturar contexto de alunos que compraram mentoria
+- Build Prompt atualizado para usar TODOS os 21 campos do formulário (antes usava apenas 9 campos):
+  - Dados pessoais, formação, experiência, motivação, objetivos, restrições financeiras, contexto de negócio
+- GLM agora usa thinking mode (reasoning profundo antes de gerar score)
+- HTTP Request node para GLM configurado com predefinedCredentialType e typeVersion 4.3
+- Save Score via PostgreSQL INSERT direto
+- Workflow ativado e pronto para receber webhooks
+- Sistema de lead score com 4 fatores (financial_capacity, motivation, case_viability, engagement) escala 0-25 cada
+
+**Bugs Encontrados e Corrigidos**:
+- Nenhum
+
+**Notas para o Futuro**:
+- Campo _meta enviado junto com body da API GLM (pode ser ignorado pela API)
+- SQL injection via templates n8n (risco baixo, owner_id vem da API interna)
+- Frontend já está preparado para exibir scores com 4 fatores
+- Tarefa não envolveu mudanças em código do projeto, apenas configuração do workflow n8n
+- Sem necessidade de commit/push/deploy (mudança puramente no n8n cloud)
+
+---
+
 ## [2026-02-06] - M1 Pin + Notificação no Broadcast Telegram
 
 ### Milestone: M1 - Pin + Notificação no Broadcast Telegram
