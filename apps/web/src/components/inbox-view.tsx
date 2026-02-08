@@ -116,7 +116,7 @@ export function InboxView({ userEmail, workspaceId }: InboxViewProps) {
   const [suggestions, setSuggestions] = useState<Record<string, AISuggestion | null>>({})
   const [summaries, setSummaries] = useState<Record<string, string | null>>({})
   // Instructions data per conversation
-  const [instructionsData, setInstructionsData] = useState<Record<string, { id: string; instructions: string | null; status: string; form_data: string; error_message?: string | null; created_at: string } | null>>({})
+  const [instructionsData, setInstructionsData] = useState<Record<string, { id: string; instructions: string | null; instructions_translated?: string | null; status: string; form_data: string; error_message?: string | null; created_at: string } | null>>({})
   const instructionPollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   // Canais disponíveis do contato selecionado e canal escolhido para envio
   const [contactChannels, setContactChannels] = useState<ContactChannel[]>([])
@@ -1871,6 +1871,7 @@ return (
             onTyping={handleTyping}
             instructionData={selectedId ? instructionsData[selectedId] || null : null}
             onGenerateInstructions={selectedId ? (formData: string) => generateInstructions(selectedId, formData) : undefined}
+            onRefreshInstructions={selectedId ? () => fetchInstructions(selectedId) : undefined}
           />
         </div>
       </div>

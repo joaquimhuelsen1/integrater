@@ -441,3 +441,71 @@ async def get_instructions(
         return {"instruction": None}
 
     return {"instruction": result.data[0]}
+
+
+@router.post("/conversations/{conversation_id}/translate")
+async def translate_instructions(
+    conversation_id: UUID,
+    db: Client = Depends(get_supabase),
+    owner_id: str = Depends(get_owner_id),
+):
+    """
+    Traduz instrucoes PT→EN via n8n (sincrono).
+    Se ja tem traducao salva, retorna do cache.
+    """
+    # Buscar instrucao mais recente (completed)
+    result = db.table("conversation_instructions").select(
+        "id, instructions, instructions_translated, status"
+    ).eq(
+        "conversation_id", str(conversation_id)
+    ).eq("owner_id", owner_id).eq(
+        "status", "completed"
+    ).order("created_at", desc=True).limit(1).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Nenhuma instrucao completada encontrada")
+
+    instruction = result.data[0]
+
+    # Se ja tem traducao, retornar cache
+    if instruction.get("instructions_translated"):
+        return {"translated_text": instruction["instructions_translated"], "cached": True}
+
+    if not instruction.get("instructions"):
+        raise HTTPException(status_code=400, detail="Instrucao sem conteudo")
+
+    # Chamar n8n webhook de traducao (sincrono)
+    n8n_translate_url = os.environ.get(
+        "N8N_TRANSLATE_WEBHOOK_URL",
+        "https://n8nbackend.thereconquestmap.com/webhook/translate"
+    )
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                n8n_translate_url,
+                json={
+                    "text": instruction["instructions"],
+                    "source_lang": "pt",
+                    "target_lang": "en",
+                },
+                timeout=300.0,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:
+        logger.error(f"Translation failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Erro na traducao: {str(e)}")
+
+    translated_text = data.get("translated_text")
+    if not translated_text:
+        raise HTTPException(status_code=502, detail="Traducao retornou vazio")
+
+    # Salvar traducao no DB (cache)
+    db.table("conversation_instructions").update({
+        "instructions_translated": translated_text,
+    }).eq("id", instruction["id"]).execute()
+
+    logger.info(f"Translation saved for instruction {instruction['id']}: {len(translated_text)} chars")
+
+    return {"translated_text": translated_text, "cached": False}

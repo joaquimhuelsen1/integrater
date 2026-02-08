@@ -2,6 +2,69 @@
 
 Registro de mudanças estruturais, milestones completados e bugs corrigidos no projeto Integrate X.
 
+## [2026-02-08] - M1 Workflow Genérico de Tradução n8n + Botão Traduzir Instruções
+
+### Milestone: M1 - Workflow genérico de tradução n8n + botão traduzir instruções
+
+**Status**: Completado
+
+**Mudança Estrutural**: NÃO (extensão de feature existente)
+
+**Sub-milestones**:
+- M1.1: Migration DB - coluna instructions_translated na tabela conversation_instructions
+- M1.2: Criar workflow n8n genérico de tradução (id: s0ujAqlv2An04BoP, URL: /webhook/translate)
+- M1.3: Endpoint API POST /instructions/conversations/{id}/translate (sincrono, com cache)
+- M1.4: Frontend - botão traduzir (Languages icon) + toggle PT/EN no popover de instruções
+
+**Arquivos Modificados**:
+- apps/api/app/routers/instructions.py - Novo endpoint POST /instructions/conversations/{id}/translate (sincrono com cache)
+- apps/web/src/components/inbox/composer.tsx - Botão traduzir (Languages icon), tabs PT/EN no popover, estado showTranslated
+- apps/web/src/components/inbox/chat-view.tsx - Handler para chamada ao endpoint translate, callback onRefreshInstructions
+- apps/web/src/components/inbox-view.tsx - Tipo instructionsData atualizado, callback propagado
+- Migration Supabase: ALTER TABLE conversation_instructions ADD COLUMN instructions_translated TEXT
+- Workflow n8n criado: "Integrater - Translate Generic" (id: s0ujAqlv2An04BoP)
+
+**Detalhes Técnicos**:
+
+**M1.1 - Database**:
+- Nova coluna instructions_translated em conversation_instructions (TEXT, nullable)
+- Armazena tradução em PT (quando tradução solicitada)
+- Segunda chamada retorna do cache (sem chamar n8n novamente)
+
+**M1.2 - Workflow n8n**:
+- Workflow genérico que recebe: text, source_lang, target_lang
+- Usa GLM 4.7 com thinking mode habilitado (mesmas configs do workflow de instruções)
+- System prompt forcado para português brasileiro
+- Retorna tradução via webhook callback
+
+**M1.3 - API Backend**:
+- Novo endpoint: POST /instructions/conversations/{conversation_id}/translate
+- Body: { "source_lang": "en", "target_lang": "pt-br" }
+- Comportamento sincrono (espera resposta do n8n antes de retornar)
+- Cache: Se instructions_translated já existe, retorna do banco sem chamar n8n
+- Usa mesma chamada HTTP como M2 (fire-and-forget via MCP n8n)
+
+**M1.4 - Frontend**:
+- Botão "Traduzir" (Languages icon) no popover de instruções
+- Toggling entre PT/EN via tabs quando tradução existe
+- Estado showTranslated reset ao mudar de conversa
+- Copy respeita modo atual (PT vs EN)
+- Loading state enquanto tradução está sendo processada
+
+**Bugs Encontrados e Corrigidos**:
+- Tech-lead encontrou mutação direta de prop (instructionData) → corrigido com callback onRefreshInstructions
+- Reset de showTranslated ao mudar conversa (evita exibição incorreta)
+- Tabs PT/EN sempre visíveis quando tradução existe (UX melhorada)
+- Copy respeita modo atual em vez de sempre copiar PT
+
+**Notas para o Futuro**:
+- Workflow de tradução é genérico e pode ser reutilizado em outras partes do sistema
+- Padrão sincrono com cache reduz calls desnecessárias ao n8n
+- Tech-lead aprovado sem issues críticas
+- Sugestão: Expandir para traduzir títulos de deals, tags, etc.
+
+---
+
 ## [2026-02-08] - M1/M2/M3 Feature Instruções (Sugestões de Resposta com Contexto)
 
 ### Milestone: M1 (Database) + M2 (API Backend) + M3 (Frontend) - Feature Instruções

@@ -160,8 +160,9 @@ interface ChatViewProps {
   // Mobile: callback para voltar à lista de conversas
   onBackToList?: () => void
   // Instrucoes IA
-  instructionData?: { id: string; instructions: string | null; status: string; form_data: string; error_message?: string | null; created_at: string } | null
+  instructionData?: { id: string; instructions: string | null; instructions_translated?: string | null; status: string; form_data: string; error_message?: string | null; created_at: string } | null
   onGenerateInstructions?: (formData: string) => Promise<void>
+  onRefreshInstructions?: () => void
 }
 
 export function ChatView({
@@ -208,6 +209,7 @@ onMessageDelete,
   onBackToList,
   instructionData = null,
   onGenerateInstructions,
+  onRefreshInstructions,
 }: ChatViewProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -926,6 +928,28 @@ const handleUnpin = useCallback(async (messageId: string) => {
     })
   }, [instructionData])
 
+  // Traduzir instrucoes PT→EN via API
+  const handleTranslateInstructions = useCallback(async () => {
+    if (!conversationId) return
+    try {
+      const res = await apiFetch(`/instructions/conversations/${conversationId}/translate`, {
+        method: "POST",
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || "Erro na traducao")
+      }
+      const data = await res.json()
+      toast.success(data.cached ? "Traducao carregada do cache" : "Instrucoes traduzidas")
+      // Re-fetch para atualizar o state do parent com instructions_translated
+      onRefreshInstructions?.()
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Erro ao traduzir"
+      toast.error(msg)
+      throw e
+    }
+  }, [conversationId, onRefreshInstructions])
+
   if (!conversationId) {
     return (
       <div className="flex h-full items-center justify-center text-zinc-500">
@@ -1527,6 +1551,7 @@ const handleUnpin = useCallback(async (messageId: string) => {
           channelLabel={channel === "telegram" ? "Telegram" : channel === "email" ? "Email" : channel === "openphone_sms" ? "SMS" : null}
           instructionData={instructionData}
           onRegenerateInstructions={() => setShowInstructionsModal(true)}
+          onTranslateInstructions={handleTranslateInstructions}
         />
       </div>
     </div>

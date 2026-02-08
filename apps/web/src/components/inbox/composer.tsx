@@ -53,8 +53,9 @@ interface ComposerProps {
   contactName?: string | null
   channelLabel?: string | null
   // Instrucoes geradas por IA
-  instructionData?: { id: string; instructions: string | null; status: string; error_message?: string | null } | null
+  instructionData?: { id: string; instructions: string | null; instructions_translated?: string | null; status: string; error_message?: string | null } | null
   onRegenerateInstructions?: () => void
+  onTranslateInstructions?: () => Promise<void>
 }
 
 // Detecta tipo de arquivo pela extensão quando file.type está vazio
@@ -91,7 +92,7 @@ const EMOJI_CATEGORIES = [
   { name: "Objetos", emojis: ["💼", "📱", "💻", "📧", "📞", "💰", "💵", "📝", "✅", "❌", "⭐", "🌟", "💡", "🎯", "🚀", "⏰"] },
 ]
 
-export function Composer({ onSend, disabled, templates = [], initialText = "", onTextChange, externalFiles = [], onExternalFilesProcessed, apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000", availableChannels, selectedChannel, onChannelChange, replyTo, onCancelReply, onTyping, contactName, channelLabel, instructionData, onRegenerateInstructions }: ComposerProps) {
+export function Composer({ onSend, disabled, templates = [], initialText = "", onTextChange, externalFiles = [], onExternalFilesProcessed, apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000", availableChannels, selectedChannel, onChannelChange, replyTo, onCancelReply, onTyping, contactName, channelLabel, instructionData, onRegenerateInstructions, onTranslateInstructions }: ComposerProps) {
   const [text, setText] = useState(initialText)
   const [attachments, setAttachments] = useState<AttachmentPreview[]>([])
   const [showTemplates, setShowTemplates] = useState(false)
@@ -99,6 +100,18 @@ export function Composer({ onSend, disabled, templates = [], initialText = "", o
   const [isTranslating, setIsTranslating] = useState(false)
   const [showInstructions, setShowInstructions] = useState(false)
   const [copiedInstructions, setCopiedInstructions] = useState(false)
+  const [showTranslated, setShowTranslated] = useState(false)
+  const [isTranslatingInstructions, setIsTranslatingInstructions] = useState(false)
+  const prevInstructionIdRef = useRef(instructionData?.id)
+
+  // Reset showTranslated quando muda de conversa/instrucao
+  useEffect(() => {
+    if (instructionData?.id !== prevInstructionIdRef.current) {
+      setShowTranslated(false)
+      setIsTranslatingInstructions(false)
+      prevInstructionIdRef.current = instructionData?.id
+    }
+  }, [instructionData?.id])
   const [isRecording, setIsRecording] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
@@ -260,12 +273,15 @@ const insertTemplate = useCallback((template: Template) => {
   }, [text, isTranslating, apiUrl, updateText])
 
   const copyInstructions = useCallback(() => {
-    if (!instructionData?.instructions) return
-    navigator.clipboard.writeText(instructionData.instructions).then(() => {
+    const textToCopy = showTranslated && instructionData?.instructions_translated
+      ? instructionData.instructions_translated
+      : instructionData?.instructions
+    if (!textToCopy) return
+    navigator.clipboard.writeText(textToCopy).then(() => {
       setCopiedInstructions(true)
       setTimeout(() => setCopiedInstructions(false), 2000)
     })
-  }, [instructionData])
+  }, [instructionData, showTranslated])
 
   // Fechar dropdowns ao clicar fora
   useEffect(() => {
@@ -705,9 +721,31 @@ return (
                       >
                         {copiedInstructions ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
                       </button>
+                      {onTranslateInstructions && (
+                        <button
+                          onClick={async () => {
+                            if (instructionData?.instructions_translated) {
+                              setShowTranslated(!showTranslated)
+                            } else {
+                              setIsTranslatingInstructions(true)
+                              try {
+                                await onTranslateInstructions()
+                                setShowTranslated(true)
+                              } finally {
+                                setIsTranslatingInstructions(false)
+                              }
+                            }
+                          }}
+                          disabled={isTranslatingInstructions}
+                          className={`rounded p-1 hover:bg-zinc-100 dark:hover:bg-zinc-700 ${showTranslated ? "text-purple-500" : "text-zinc-500"}`}
+                          title={showTranslated ? "Ver original (PT)" : "Traduzir para ingles"}
+                        >
+                          {isTranslatingInstructions ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Languages className="h-3.5 w-3.5" />}
+                        </button>
+                      )}
                       {onRegenerateInstructions && (
                         <button
-                          onClick={() => { setShowInstructions(false); onRegenerateInstructions(); }}
+                          onClick={() => { setShowInstructions(false); setShowTranslated(false); onRegenerateInstructions(); }}
                           className="rounded p-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-700"
                           title="Regenerar instrucoes"
                         >
@@ -716,9 +754,25 @@ return (
                       )}
                     </div>
                   </div>
+                  {instructionData?.instructions_translated && (
+                    <div className="flex items-center gap-1 border-b border-zinc-200 px-3 py-1 dark:border-zinc-700">
+                      <button
+                        onClick={() => setShowTranslated(false)}
+                        className={`rounded px-2 py-0.5 text-xs font-medium ${!showTranslated ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" : "text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-700"}`}
+                      >
+                        PT
+                      </button>
+                      <button
+                        onClick={() => setShowTranslated(true)}
+                        className={`rounded px-2 py-0.5 text-xs font-medium ${showTranslated ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400" : "text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-700"}`}
+                      >
+                        EN
+                      </button>
+                    </div>
+                  )}
                   <div className="max-h-64 overflow-y-auto p-3">
                     <p className="whitespace-pre-wrap text-sm text-zinc-700 dark:text-zinc-300">
-                      {instructionData.instructions}
+                      {showTranslated && instructionData?.instructions_translated ? instructionData.instructions_translated : instructionData.instructions}
                     </p>
                   </div>
                 </div>
