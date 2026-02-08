@@ -256,16 +256,18 @@ export function InstructionConfigSettings() {
   }
 
   const handleKBFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (!files || files.length === 0) return
+    const fileList = e.target.files
+    if (!fileList || fileList.length === 0) return
+    // Copiar arquivos para array ANTES de resetar input (FileList e limpo ao resetar)
+    const fileArray = Array.from(fileList)
     e.target.value = "" // reset input
     setUploadingKB(true)
     setError(null)
     setUploadResults(null)
 
-    if (files.length === 1) {
+    if (fileArray.length === 1) {
       try {
-        await uploadFile(files[0] as File, "knowledge_base")
+        await uploadFile(fileArray[0]!, "knowledge_base")
         loadConfigs()
       } catch (err) {
         setError(err instanceof Error ? err.message : "Erro ao fazer upload")
@@ -277,7 +279,7 @@ export function InstructionConfigSettings() {
 
     // Batch upload
     const formData = new FormData()
-    for (const file of Array.from(files)) {
+    for (const file of fileArray) {
       formData.append("files", file)
     }
     formData.append("config_type", "knowledge_base")
@@ -289,7 +291,8 @@ export function InstructionConfigSettings() {
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: "Erro desconhecido" }))
-        throw new Error(err.detail || `Erro ${res.status}`)
+        const msg = Array.isArray(err.detail) ? err.detail.map((d: { msg?: string }) => d.msg || JSON.stringify(d)).join(", ") : (err.detail || `Erro ${res.status}`)
+        throw new Error(msg)
       }
       const data = await res.json()
       setUploadResults({
