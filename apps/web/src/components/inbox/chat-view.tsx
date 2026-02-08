@@ -1596,6 +1596,7 @@ const handleUnpin = useCallback(async (messageId: string) => {
           onTyping={onTyping}
           contactName={displayName}
           channelLabel={channel === "telegram" ? "Telegram" : channel === "email" ? "Email" : channel === "openphone_sms" ? "SMS" : null}
+          instructionData={instructionData}
         />
       </div>
     </div>

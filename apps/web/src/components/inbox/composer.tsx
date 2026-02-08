@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useCallback, useEffect } from "react"
-import { Send, Paperclip, X, FileText, Mic, Square, Play, Pause, Image as ImageIcon, FileAudio, File as FileIcon, Smile, Reply, Languages, Loader2, ChevronDown } from "lucide-react"
+import { Send, Paperclip, X, FileText, Mic, Square, Play, Pause, Image as ImageIcon, FileAudio, File as FileIcon, Smile, Reply, Languages, Loader2, ChevronDown, ScrollText, Copy, Check } from "lucide-react"
 import { apiFetch } from "@/lib/api"
 
 interface AttachmentPreview {
@@ -52,6 +52,8 @@ interface ComposerProps {
   // Para substituição de placeholders em templates
   contactName?: string | null
   channelLabel?: string | null
+  // Instrucoes geradas por IA
+  instructionData?: { id: string; instructions: string | null; status: string } | null
 }
 
 // Detecta tipo de arquivo pela extensão quando file.type está vazio
@@ -88,12 +90,14 @@ const EMOJI_CATEGORIES = [
   { name: "Objetos", emojis: ["💼", "📱", "💻", "📧", "📞", "💰", "💵", "📝", "✅", "❌", "⭐", "🌟", "💡", "🎯", "🚀", "⏰"] },
 ]
 
-export function Composer({ onSend, disabled, templates = [], initialText = "", onTextChange, externalFiles = [], onExternalFilesProcessed, apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000", availableChannels, selectedChannel, onChannelChange, replyTo, onCancelReply, onTyping, contactName, channelLabel }: ComposerProps) {
+export function Composer({ onSend, disabled, templates = [], initialText = "", onTextChange, externalFiles = [], onExternalFilesProcessed, apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000", availableChannels, selectedChannel, onChannelChange, replyTo, onCancelReply, onTyping, contactName, channelLabel, instructionData }: ComposerProps) {
   const [text, setText] = useState(initialText)
   const [attachments, setAttachments] = useState<AttachmentPreview[]>([])
   const [showTemplates, setShowTemplates] = useState(false)
   const [showEmojis, setShowEmojis] = useState(false)
   const [isTranslating, setIsTranslating] = useState(false)
+  const [showInstructions, setShowInstructions] = useState(false)
+  const [copiedInstructions, setCopiedInstructions] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
@@ -254,6 +258,14 @@ const insertTemplate = useCallback((template: Template) => {
     }
   }, [text, isTranslating, apiUrl, updateText])
 
+  const copyInstructions = useCallback(() => {
+    if (!instructionData?.instructions) return
+    navigator.clipboard.writeText(instructionData.instructions).then(() => {
+      setCopiedInstructions(true)
+      setTimeout(() => setCopiedInstructions(false), 2000)
+    })
+  }, [instructionData])
+
   // Fechar dropdowns ao clicar fora
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -263,6 +275,9 @@ const insertTemplate = useCallback((template: Template) => {
       }
       if (!target.closest("[data-emoji-picker]")) {
         setShowEmojis(false)
+      }
+      if (!target.closest("[data-instructions-dropdown]")) {
+        setShowInstructions(false)
       }
     }
 
@@ -651,6 +666,42 @@ return (
                       {t.shortcut && <span className="text-xs text-zinc-500">/{t.shortcut}</span>}
                     </button>
                   ))}
+                </div>
+              )}
+            </div>
+          )}
+
+{/* Instructions button - mostra quando há instrucoes prontas */}
+          {instructionData?.status === "completed" && instructionData.instructions && (
+            <div className="relative" data-instructions-dropdown>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setShowInstructions(!showInstructions) }}
+                className="flex h-10 w-10 md:h-11 md:w-11 flex-shrink-0 items-center justify-center rounded-full text-amber-500 hover:bg-amber-100 dark:hover:bg-amber-900/30"
+                title="Ver instrucoes"
+              >
+                <ScrollText className="h-5 w-5" />
+              </button>
+              {showInstructions && (
+                <div className="absolute bottom-14 right-0 z-50 w-80 rounded-lg border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+                  <div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2 dark:border-zinc-700">
+                    <div className="flex items-center gap-2">
+                      <ScrollText className="h-4 w-4 text-amber-500" />
+                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Instrucoes</span>
+                    </div>
+                    <button
+                      onClick={copyInstructions}
+                      className="rounded p-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                      title="Copiar"
+                    >
+                      {copiedInstructions ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto p-3">
+                    <p className="whitespace-pre-wrap text-sm text-zinc-700 dark:text-zinc-300">
+                      {instructionData.instructions}
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
