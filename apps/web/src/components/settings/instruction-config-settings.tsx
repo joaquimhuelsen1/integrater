@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Plus, Trash2, Loader2, Save, Edit2, X, ScrollText, FileText, ChevronDown, ChevronUp } from "lucide-react"
+import { Plus, Trash2, Loader2, Save, Edit2, X, ScrollText, FileText, ChevronDown, ChevronUp, Upload } from "lucide-react"
 import { apiFetch } from "@/lib/api"
 
 interface InstructionConfig {
@@ -39,6 +39,11 @@ export function InstructionConfigSettings() {
   const [savingKB, setSavingKB] = useState(false)
   const [expandedKB, setExpandedKB] = useState<string | null>(null)
   const [loadingContent, setLoadingContent] = useState<string | null>(null)
+
+  // Upload state
+  const [uploadingSP, setUploadingSP] = useState(false)
+  const [uploadingKB, setUploadingKB] = useState(false)
+  const [uploadResults, setUploadResults] = useState<{ success: number; failed: number; errors: string[] } | null>(null)
 
   const loadConfigs = useCallback(async () => {
     try {
@@ -214,6 +219,92 @@ export function InstructionConfigSettings() {
     setExpandedKB(docId)
   }
 
+  // === File Upload ===
+  const ACCEPTED_FORMATS = ".docx,.pdf,.txt,.md"
+
+  const uploadFile = async (file: File, configType: "system_prompt" | "knowledge_base", name?: string) => {
+    const formData = new FormData()
+    formData.append("file", file)
+    formData.append("config_type", configType)
+    if (name) formData.append("name", name)
+
+    const res = await apiFetch("/instructions/configs/upload", {
+      method: "POST",
+      body: formData,
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Erro desconhecido" }))
+      throw new Error(err.detail || `Erro ${res.status}`)
+    }
+    return res.json()
+  }
+
+  const handleSPFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = "" // reset input
+    setUploadingSP(true)
+    setError(null)
+    try {
+      await uploadFile(file, "system_prompt")
+      loadConfigs()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao fazer upload")
+    } finally {
+      setUploadingSP(false)
+    }
+  }
+
+  const handleKBFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+    e.target.value = "" // reset input
+    setUploadingKB(true)
+    setError(null)
+    setUploadResults(null)
+
+    if (files.length === 1) {
+      try {
+        await uploadFile(files[0] as File, "knowledge_base")
+        loadConfigs()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Erro ao fazer upload")
+      } finally {
+        setUploadingKB(false)
+      }
+      return
+    }
+
+    // Batch upload
+    const formData = new FormData()
+    for (const file of Array.from(files)) {
+      formData.append("files", file)
+    }
+    formData.append("config_type", "knowledge_base")
+
+    try {
+      const res = await apiFetch("/instructions/configs/upload-batch", {
+        method: "POST",
+        body: formData,
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: "Erro desconhecido" }))
+        throw new Error(err.detail || `Erro ${res.status}`)
+      }
+      const data = await res.json()
+      setUploadResults({
+        success: data.success || 0,
+        failed: data.failed || 0,
+        errors: (data.errors || []).map((e: { filename: string; error: string }) => `${e.filename}: ${e.error}`),
+      })
+      loadConfigs()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao fazer upload em lote")
+    } finally {
+      setUploadingKB(false)
+    }
+  }
+
   if (loading) {
     return (
       <section className="mt-6 rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
@@ -249,6 +340,31 @@ export function InstructionConfigSettings() {
           </div>
         )}
 
+        {uploadResults && (
+          <div className="rounded-lg bg-green-50 p-3 text-sm dark:bg-green-900/20">
+            <div className="flex items-center justify-between">
+              <span className="text-green-700 dark:text-green-400">
+                Upload: {uploadResults.success} arquivo{uploadResults.success !== 1 ? "s" : ""} enviado{uploadResults.success !== 1 ? "s" : ""}
+                {uploadResults.failed > 0 && (
+                  <span className="text-red-600 dark:text-red-400 ml-2">
+                    ({uploadResults.failed} erro{uploadResults.failed !== 1 ? "s" : ""})
+                  </span>
+                )}
+              </span>
+              <button onClick={() => setUploadResults(null)} className="text-zinc-500 hover:text-zinc-700">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {uploadResults.errors.length > 0 && (
+              <ul className="mt-2 text-xs text-red-600 dark:text-red-400 space-y-1">
+                {uploadResults.errors.map((e, i) => (
+                  <li key={i}>{e}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
         {/* === System Prompt === */}
         <div>
           <div className="flex items-center justify-between mb-3">
@@ -273,17 +389,34 @@ export function InstructionConfigSettings() {
                 </button>
               )}
               {!editingSP && (
-                <button
-                  onClick={startEditingSP}
-                  className="flex items-center gap-1 rounded-lg border border-amber-300 px-3 py-1.5 text-sm text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-900/20"
-                >
-                  {loadingContent && !editingSP ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Edit2 className="h-3.5 w-3.5" />
-                  )}
-                  {systemPrompt ? "Editar" : "Criar"}
-                </button>
+                <>
+                  <label className="flex items-center gap-1 rounded-lg border border-amber-300 px-3 py-1.5 text-sm text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-900/20 cursor-pointer">
+                    {uploadingSP ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Upload className="h-3.5 w-3.5" />
+                    )}
+                    Upload
+                    <input
+                      type="file"
+                      accept={ACCEPTED_FORMATS}
+                      onChange={handleSPFileUpload}
+                      className="hidden"
+                      disabled={uploadingSP}
+                    />
+                  </label>
+                  <button
+                    onClick={startEditingSP}
+                    className="flex items-center gap-1 rounded-lg border border-amber-300 px-3 py-1.5 text-sm text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-900/20"
+                  >
+                    {loadingContent && !editingSP ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Edit2 className="h-3.5 w-3.5" />
+                    )}
+                    {systemPrompt ? "Editar" : "Colar texto"}
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -375,19 +508,37 @@ export function InstructionConfigSettings() {
               <FileText className="h-4 w-4 text-amber-500" />
               Knowledge Base ({kbDocs.length} documento{kbDocs.length !== 1 ? "s" : ""})
             </h3>
-            <button
-              onClick={() => setShowAddKB(true)}
-              className="flex items-center gap-1 rounded-lg bg-amber-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-600"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Adicionar
-            </button>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1 rounded-lg bg-amber-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-600 cursor-pointer">
+                {uploadingKB ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Upload className="h-3.5 w-3.5" />
+                )}
+                Upload Arquivos
+                <input
+                  type="file"
+                  accept={ACCEPTED_FORMATS}
+                  multiple
+                  onChange={handleKBFileUpload}
+                  className="hidden"
+                  disabled={uploadingKB}
+                />
+              </label>
+              <button
+                onClick={() => setShowAddKB(true)}
+                className="flex items-center gap-1 rounded-lg border border-amber-300 px-3 py-1.5 text-sm text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-900/20"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Colar texto
+              </button>
+            </div>
           </div>
 
           {kbDocs.length === 0 && !showAddKB && (
             <div className="rounded-lg border border-dashed border-zinc-300 p-4 text-center dark:border-zinc-700">
               <p className="text-sm text-zinc-500">
-                Nenhum documento na knowledge base. Adicione os 11 arquivos .docx convertidos para texto.
+                Nenhum documento na knowledge base. Faca upload de arquivos .docx, .pdf, .txt ou .md.
               </p>
             </div>
           )}

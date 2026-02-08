@@ -15,8 +15,10 @@ export async function apiFetch(
   const session = await getCachedSession()
 
   // Monta headers com token
+  // Se body for FormData, nao setar Content-Type (browser seta automaticamente com boundary)
+  const isFormData = options.body instanceof FormData
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...(isFormData ? {} : { "Content-Type": "application/json" }),
     ...(options.headers as Record<string, string>),
   }
 

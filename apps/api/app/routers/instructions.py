@@ -8,11 +8,15 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+import io
 import httpx
-from fastapi import APIRouter, HTTPException, Depends
+from pathlib import Path
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from pydantic import BaseModel, Field
 from supabase import Client
 from uuid import UUID
+from docx import Document as DocxDocument
+from pypdf import PdfReader
 
 from ..deps import get_supabase, get_owner_id
 from .ai import _build_conversation_text
@@ -162,6 +166,153 @@ async def delete_config(
         raise HTTPException(status_code=404, detail="Config nao encontrada")
 
     return {"deleted": True}
+
+
+# === File Upload Helpers ===
+
+ALLOWED_EXTENSIONS = {".docx", ".pdf", ".txt", ".md"}
+
+
+def _extract_text_from_file(file_bytes: bytes, filename: str) -> str:
+    """Extrai texto de .docx, .pdf, .txt ou .md."""
+    ext = Path(filename).suffix.lower()
+
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Formato nao suportado: {ext}. Use: {', '.join(ALLOWED_EXTENSIONS)}"
+        )
+
+    if ext == ".docx":
+        doc = DocxDocument(io.BytesIO(file_bytes))
+        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+        content = "\n".join(paragraphs)
+
+    elif ext == ".pdf":
+        reader = PdfReader(io.BytesIO(file_bytes))
+        pages = [page.extract_text() or "" for page in reader.pages]
+        content = "\n\n".join(pages)
+
+    elif ext in (".txt", ".md"):
+        content = file_bytes.decode("utf-8", errors="replace")
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Formato nao suportado: {ext}")
+
+    content = content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail=f"Arquivo '{filename}' esta vazio ou sem texto extraivel")
+
+    return content
+
+
+# === Upload Endpoints ===
+
+@router.post("/configs/upload")
+async def upload_config_file(
+    file: UploadFile = File(...),
+    config_type: str = Form("knowledge_base"),
+    name: str = Form(None),
+    db: Client = Depends(get_supabase),
+    owner_id: str = Depends(get_owner_id),
+):
+    """Upload de arquivo (.docx, .pdf, .txt, .md) para criar config."""
+    if config_type not in ("system_prompt", "knowledge_base"):
+        raise HTTPException(status_code=400, detail="config_type deve ser system_prompt ou knowledge_base")
+
+    file_bytes = await file.read()
+    filename = file.filename or "unknown.txt"
+    content = _extract_text_from_file(file_bytes, filename)
+
+    # Nome: usa fornecido ou filename sem extensao
+    config_name = name or Path(filename).stem
+
+    # Se system_prompt, desativar anteriores
+    if config_type == "system_prompt":
+        db.table("instruction_configs").update(
+            {"is_active": False}
+        ).eq("owner_id", owner_id).eq(
+            "config_type", "system_prompt"
+        ).eq("is_active", True).execute()
+
+    insert_data = {
+        "owner_id": owner_id,
+        "workspace_id": owner_id,
+        "config_type": config_type,
+        "name": config_name,
+        "content": content,
+        "is_active": True,
+    }
+
+    result = db.table("instruction_configs").insert(insert_data).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=500, detail="Erro ao salvar config")
+
+    logger.info(f"Config uploaded: {config_name} ({len(content)} chars) from {filename}")
+
+    return {
+        "config": result.data[0],
+        "filename": filename,
+        "chars_extracted": len(content),
+    }
+
+
+@router.post("/configs/upload-batch")
+async def upload_config_files(
+    files: list[UploadFile] = File(...),
+    config_type: str = Form("knowledge_base"),
+    db: Client = Depends(get_supabase),
+    owner_id: str = Depends(get_owner_id),
+):
+    """Upload de multiplos arquivos de uma vez. Cada arquivo vira uma config separada."""
+    if config_type not in ("system_prompt", "knowledge_base"):
+        raise HTTPException(status_code=400, detail="config_type deve ser system_prompt ou knowledge_base")
+
+    results = []
+    errors = []
+
+    for file in files:
+        try:
+            file_bytes = await file.read()
+            filename = file.filename or "unknown.txt"
+            content = _extract_text_from_file(file_bytes, filename)
+            config_name = Path(filename).stem
+
+            insert_data = {
+                "owner_id": owner_id,
+                "workspace_id": owner_id,
+                "config_type": config_type,
+                "name": config_name,
+                "content": content,
+                "is_active": True,
+            }
+
+            result = db.table("instruction_configs").insert(insert_data).execute()
+
+            if result.data:
+                results.append({
+                    "config": result.data[0],
+                    "filename": filename,
+                    "chars_extracted": len(content),
+                })
+            else:
+                errors.append({"filename": filename, "error": "Erro ao salvar"})
+
+        except HTTPException as e:
+            errors.append({"filename": file.filename or "unknown", "error": e.detail})
+        except Exception as e:
+            errors.append({"filename": file.filename or "unknown", "error": str(e)})
+
+    logger.info(f"Batch upload: {len(results)} ok, {len(errors)} errors")
+
+    return {
+        "uploaded": results,
+        "errors": errors,
+        "total": len(files),
+        "success": len(results),
+        "failed": len(errors),
+    }
 
 
 # === Instruction Endpoints ===
