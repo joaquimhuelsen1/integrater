@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useCallback, useEffect } from "react"
-import { Send, Paperclip, X, FileText, Mic, Square, Play, Pause, Image as ImageIcon, FileAudio, File as FileIcon, Smile, Reply, Languages, Loader2, ChevronDown, ScrollText, Copy, Check } from "lucide-react"
+import { Send, Paperclip, X, FileText, Mic, Square, Play, Pause, Image as ImageIcon, FileAudio, File as FileIcon, Smile, Reply, Languages, Loader2, ChevronDown, ScrollText, Copy, Check, RefreshCw } from "lucide-react"
 import { apiFetch } from "@/lib/api"
 
 interface AttachmentPreview {
@@ -54,6 +54,7 @@ interface ComposerProps {
   channelLabel?: string | null
   // Instrucoes geradas por IA
   instructionData?: { id: string; instructions: string | null; status: string; error_message?: string | null } | null
+  onRegenerateInstructions?: () => void
 }
 
 // Detecta tipo de arquivo pela extensão quando file.type está vazio
@@ -90,7 +91,7 @@ const EMOJI_CATEGORIES = [
   { name: "Objetos", emojis: ["💼", "📱", "💻", "📧", "📞", "💰", "💵", "📝", "✅", "❌", "⭐", "🌟", "💡", "🎯", "🚀", "⏰"] },
 ]
 
-export function Composer({ onSend, disabled, templates = [], initialText = "", onTextChange, externalFiles = [], onExternalFilesProcessed, apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000", availableChannels, selectedChannel, onChannelChange, replyTo, onCancelReply, onTyping, contactName, channelLabel, instructionData }: ComposerProps) {
+export function Composer({ onSend, disabled, templates = [], initialText = "", onTextChange, externalFiles = [], onExternalFilesProcessed, apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000", availableChannels, selectedChannel, onChannelChange, replyTo, onCancelReply, onTyping, contactName, channelLabel, instructionData, onRegenerateInstructions }: ComposerProps) {
   const [text, setText] = useState(initialText)
   const [attachments, setAttachments] = useState<AttachmentPreview[]>([])
   const [showTemplates, setShowTemplates] = useState(false)
@@ -696,13 +697,24 @@ return (
                       <ScrollText className="h-4 w-4 text-amber-500" />
                       <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Instrucoes</span>
                     </div>
-                    <button
-                      onClick={copyInstructions}
-                      className="rounded p-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-700"
-                      title="Copiar"
-                    >
-                      {copiedInstructions ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={copyInstructions}
+                        className="rounded p-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                        title="Copiar"
+                      >
+                        {copiedInstructions ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                      </button>
+                      {onRegenerateInstructions && (
+                        <button
+                          onClick={() => { setShowInstructions(false); onRegenerateInstructions(); }}
+                          className="rounded p-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                          title="Regenerar instrucoes"
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="max-h-64 overflow-y-auto p-3">
                     <p className="whitespace-pre-wrap text-sm text-zinc-700 dark:text-zinc-300">
@@ -714,11 +726,16 @@ return (
             </div>
           )}
 
-{/* Instructions button - error */}
-          {instructionData?.status === "error" && (
-            <div className="flex h-10 w-10 md:h-11 md:w-11 flex-shrink-0 items-center justify-center rounded-full text-red-500" title={instructionData.error_message || "Erro ao gerar instrucoes"}>
-              <ScrollText className="h-5 w-5" />
-            </div>
+{/* Instructions button - error (clicavel para regenerar) */}
+          {instructionData?.status === "error" && onRegenerateInstructions && (
+            <button
+              type="button"
+              onClick={onRegenerateInstructions}
+              className="flex h-10 w-10 md:h-11 md:w-11 flex-shrink-0 items-center justify-center rounded-full text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30"
+              title="Erro - clique para regenerar"
+            >
+              <RefreshCw className="h-5 w-5" />
+            </button>
           )}
 
 {/* Translate button - visível em todos os tamanhos quando há texto */}

@@ -1250,7 +1250,7 @@ const handleUnpin = useCallback(async (messageId: string) => {
                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-700"
                 >
                   <ScrollText className="h-4 w-4 text-amber-500" />
-                  {instructionData?.status === "pending" || instructionData?.status === "generating" ? "Gerando instrucoes..." : "Gerar instrucoes"}
+                  {instructionData?.status === "pending" || instructionData?.status === "generating" ? "Gerando instrucoes..." : instructionData?.status === "completed" ? "Regenerar instrucoes" : "Gerar instrucoes"}
                 </button>
                 {/* Separador */}
                 <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
@@ -1526,6 +1526,7 @@ const handleUnpin = useCallback(async (messageId: string) => {
           contactName={displayName}
           channelLabel={channel === "telegram" ? "Telegram" : channel === "email" ? "Email" : channel === "openphone_sms" ? "SMS" : null}
           instructionData={instructionData}
+          onRegenerateInstructions={() => setShowInstructionsModal(true)}
         />
       </div>
     </div>
