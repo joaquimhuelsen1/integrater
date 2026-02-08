@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useEffect, useState, useCallback, useMemo } from "react"
-import { ArrowLeft, Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical, Unlink, MessageSquare, Phone, Briefcase, Users, Copy } from "lucide-react"
+import { ArrowLeft, Languages, Loader2, Sparkles, FileText, X, Check, Pencil, Upload, MailOpen, Mail, RefreshCw, MoreVertical, Unlink, MessageSquare, Phone, Briefcase, Users, Copy, ScrollText, ChevronDown, ChevronUp } from "lucide-react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase"
 import { apiFetch } from "@/lib/api"
@@ -159,6 +159,9 @@ interface ChatViewProps {
   onSyncContacts?: () => Promise<void>
   // Mobile: callback para voltar à lista de conversas
   onBackToList?: () => void
+  // Instrucoes IA
+  instructionData?: { id: string; instructions: string | null; status: string; form_data: string; error_message?: string | null; created_at: string } | null
+  onGenerateInstructions?: (formData: string) => Promise<void>
 }
 
 export function ChatView({
@@ -203,6 +206,8 @@ onMessageDelete,
   onTyping,
   onSyncContacts,
   onBackToList,
+  instructionData = null,
+  onGenerateInstructions,
 }: ChatViewProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -258,6 +263,12 @@ const [isSuggesting, setIsSuggesting] = useState(false)
     document.addEventListener("mousedown", handleClickOutside)
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
+
+  // Instructions states
+  const [showInstructionsModal, setShowInstructionsModal] = useState(false)
+  const [instructionsFormData, setInstructionsFormData] = useState("")
+  const [isGeneratingInstructions, setIsGeneratingInstructions] = useState(false)
+  const [isInstructionsExpanded, setIsInstructionsExpanded] = useState(true)
 
   // Drag and drop state
   const [isDragging, setIsDragging] = useState(false)
@@ -891,6 +902,30 @@ const handleUnpin = useCallback(async (messageId: string) => {
     })
   }, [messages])
 
+  // Gerar instrucoes via IA
+  const handleGenerateInstructions = useCallback(async () => {
+    if (!instructionsFormData.trim() || !onGenerateInstructions) return
+    setIsGeneratingInstructions(true)
+    try {
+      await onGenerateInstructions(instructionsFormData.trim())
+      setShowInstructionsModal(false)
+      setInstructionsFormData("")
+      toast.success("Geracao de instrucoes iniciada")
+    } catch {
+      toast.error("Erro ao iniciar geracao de instrucoes")
+    } finally {
+      setIsGeneratingInstructions(false)
+    }
+  }, [instructionsFormData, onGenerateInstructions])
+
+  // Copiar instrucoes para clipboard
+  const copyInstructions = useCallback(() => {
+    if (!instructionData?.instructions) return
+    navigator.clipboard.writeText(instructionData.instructions).then(() => {
+      toast.success("Instrucoes copiadas")
+    })
+  }, [instructionData])
+
   if (!conversationId) {
     return (
       <div className="flex h-full items-center justify-center text-zinc-500">
@@ -1208,6 +1243,15 @@ const handleUnpin = useCallback(async (messageId: string) => {
                   <Copy className="h-4 w-4 text-emerald-500" />
                   Copiar conversa
                 </button>
+                {/* Gerar Instrucoes */}
+                <button
+                  onClick={() => { setShowInstructionsModal(true); setShowMenu(false); }}
+                  disabled={messages.length === 0 || instructionData?.status === "pending" || instructionData?.status === "generating"}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                >
+                  <ScrollText className="h-4 w-4 text-amber-500" />
+                  {instructionData?.status === "pending" || instructionData?.status === "generating" ? "Gerando instrucoes..." : "Gerar instrucoes"}
+                </button>
                 {/* Separador */}
                 <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
                 {/* Tags */}
@@ -1331,6 +1375,131 @@ const handleUnpin = useCallback(async (messageId: string) => {
             </button>
           </div>
           <p className="text-sm text-blue-800 dark:text-blue-200">{summary}</p>
+        </div>
+      )}
+
+      {/* Instrucoes - Loading */}
+      {(instructionData?.status === "pending" || instructionData?.status === "generating") && (
+        <div className="mx-4 mt-3 flex-shrink-0 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin text-amber-600 dark:text-amber-400" />
+            <span className="text-sm font-medium text-amber-700 dark:text-amber-300">
+              Gerando instrucoes...
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Instrucoes - Completed */}
+      {instructionData?.status === "completed" && instructionData.instructions && (
+        <div className="mx-4 mt-3 flex-shrink-0 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20">
+          <div className="flex items-center justify-between p-3 pb-0">
+            <div className="flex items-center gap-2">
+              <ScrollText className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+              <span className="text-sm font-medium text-amber-700 dark:text-amber-300">
+                Instrucoes
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={copyInstructions}
+                className="rounded p-1 text-amber-600 hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-800/30"
+                title="Copiar instrucoes"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => setIsInstructionsExpanded(!isInstructionsExpanded)}
+                className="rounded p-1 text-amber-600 hover:bg-amber-100 dark:text-amber-400 dark:hover:bg-amber-800/30"
+                title={isInstructionsExpanded ? "Recolher" : "Expandir"}
+              >
+                {isInstructionsExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+          </div>
+          {isInstructionsExpanded && (
+            <div className="max-h-64 overflow-y-auto p-3">
+              <p className="whitespace-pre-wrap text-sm text-amber-800 dark:text-amber-200">
+                {instructionData.instructions}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Instrucoes - Error */}
+      {instructionData?.status === "error" && (
+        <div className="mx-4 mt-3 flex-shrink-0 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ScrollText className="h-4 w-4 text-red-600 dark:text-red-400" />
+              <span className="text-sm font-medium text-red-700 dark:text-red-300">
+                Erro ao gerar instrucoes
+              </span>
+            </div>
+            <button
+              onClick={() => setShowInstructionsModal(true)}
+              className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-900/30"
+            >
+              Tentar novamente
+            </button>
+          </div>
+          {instructionData.error_message && (
+            <p className="mt-1 text-xs text-red-600 dark:text-red-400">{instructionData.error_message}</p>
+          )}
+        </div>
+      )}
+
+      {/* Modal - Gerar Instrucoes */}
+      {showInstructionsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="mx-4 w-full max-w-lg rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-800">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ScrollText className="h-5 w-5 text-amber-500" />
+                <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                  Gerar Instrucoes
+                </h3>
+              </div>
+              <button
+                onClick={() => { setShowInstructionsModal(false); setInstructionsFormData(""); }}
+                className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="mb-3">
+              <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                Formulario do aluno
+              </label>
+              <textarea
+                value={instructionsFormData}
+                onChange={(e) => setInstructionsFormData(e.target.value)}
+                placeholder="Cole aqui os dados do formulario do aluno..."
+                className="h-40 w-full resize-none rounded-lg border border-zinc-300 bg-white p-3 text-sm text-zinc-900 placeholder-zinc-400 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-100 dark:placeholder-zinc-500"
+                autoFocus
+              />
+            </div>
+            <p className="mb-4 text-xs text-zinc-500 dark:text-zinc-400">
+              A conversa sera enviada automaticamente junto com o formulario.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setShowInstructionsModal(false); setInstructionsFormData(""); }}
+                className="rounded-lg px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-700"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleGenerateInstructions}
+                disabled={instructionsFormData.trim().length < 10 || isGeneratingInstructions}
+                className="flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white hover:bg-amber-600 disabled:opacity-50 dark:bg-amber-600 dark:hover:bg-amber-700"
+              >
+                {isGeneratingInstructions ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScrollText className="h-4 w-4" />}
+                {isGeneratingInstructions ? "Gerando..." : "Gerar"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

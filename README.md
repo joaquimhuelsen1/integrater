@@ -32,6 +32,7 @@ Ferramenta interna para centralizar atendimento comercial via Telegram, Email e 
 - Anexos (upload/download com signed URLs)
 - Tags e templates de resposta
 - Busca full-text
+- Instruções personalizadas por conversa (sugestões de resposta via IA)
 
 ### Canais
 - **Telegram:** Múltiplas contas, auth 2FA, sync histórico
@@ -65,7 +66,7 @@ Integrate X/
 │   │   ├── src/hooks/  # Realtime, Sound
 │   │   └── src/lib/    # API client, Supabase
 │   ├── api/            # Backend FastAPI
-│   │   ├── app/routers/     # 26 endpoints
+│   │   ├── app/routers/     # 27 endpoints (+ instructions router novo)
 │   │   ├── app/models/      # Pydantic schemas
 │   │   └── app/services/    # Gemini, Translator
 │   └── workers/        # Background processors
@@ -73,7 +74,7 @@ Integrate X/
 │       ├── email/      # IMAP/SMTP + SES
 │       └── shared/     # DB, Crypto, Heartbeat
 ├── supabase/
-│   └── migrations/     # 17+ SQL migrations
+│   └── migrations/     # 18+ SQL migrations (+ conversation_instructions)
 ├── tasks/              # Rastreamento de tarefas
 ├── docs/               # Anotações estratégicas
 └── plans/              # Planos de features
@@ -82,6 +83,7 @@ Integrate X/
 ## Documentação
 
 - `CLAUDE.md` - Manual do agente (convenções, fluxo)
+- `AGENT.md` - Espelho do `CLAUDE.md` para uso no Codex
 - `MILESTONES.md` - Histórico dos milestones (todos concluídos)
 
 ## Setup

@@ -12,6 +12,32 @@ Tarefas gerais: setup, docs, configs, migrations.
 
 ## Concluídas
 
+#### [GERAL-004] Replicar framework Claude no Codex (workflow + skills + comandos)
+**Contexto:** Espelhar estrutura operacional do Claude Code no ambiente Codex para manter o mesmo modo de trabalho
+**Arquivo:** `AGENT.md`
+**Milestone:** nenhum
+**Data conclusao:** 2026-02-06
+**Resumo:** Espelho aplicado com `C:/Users/Joaquim Huelsen/.claude/CLAUDE.md` copiado para `AGENT.md` (projeto e `~/.codex`), copia de `agents/commands/context-pills/hooks` para `~/.codex`, e instalacao das skills `design-principles`, `agent-creator-cc`, `skill-creator-cc`.
+
+Estimativa
+- Tamanho: Media
+- Complexidade: Media
+- Impacto: Alto
+- Risco: Medio
+
+#### [GERAL-003] Suprimir aviso experimental_windows_sandbox no Codex
+**Contexto:** Remover aviso recorrente de feature instavel no terminal do usuario
+**Arquivo:** `C:/Users/Joaquim Huelsen/.codex/config.toml`
+**Milestone:** nenhum
+**Data conclusao:** 2026-02-06
+**Resumo:** Chave `suppress_unstable_features_warning = true` adicionada no config global do Codex; aviso suprimido.
+
+Estimativa
+- Tamanho: Pequena
+- Complexidade: Baixa
+- Impacto: Baixo
+- Risco: Baixo
+
 #### [GERAL-002] Implementar Modo Professor no CLAUDE.md
 **Contexto:** Transformar agente em professor de programação nível zero
 **Arquivo:** `CLAUDE.md`

@@ -2,6 +2,67 @@
 
 Registro de mudanças estruturais, milestones completados e bugs corrigidos no projeto Integrate X.
 
+## [2026-02-08] - M1/M2/M3 Feature Instruções (Sugestões de Resposta com Contexto)
+
+### Milestone: M1 (Database) + M2 (API Backend) + M3 (Frontend) - Feature Instruções
+
+**Status**: Completado
+
+**Mudança Estrutural**: SIM
+
+**Arquivos Modificados**:
+- apps/api/app/routers/instructions.py - Novo router com 2 endpoints (POST e GET)
+- apps/api/app/routers/__init__.py - Import do instructions_router
+- apps/api/app/main.py - Incluir router no FastAPI
+- apps/api/.env.example - Adicionada variável N8N_INSTRUCTIONS_WEBHOOK_URL
+- apps/web/src/components/inbox/chat-view.tsx - Botão menu, modal de instruções, painel de instrução para resposta
+- apps/web/src/components/inbox-view.tsx - Estado para polling, props propagadas
+- Migration Supabase: Nova tabela conversation_instructions (id, conversation_id, content, created_at)
+
+**Detalhes Técnicos**:
+
+**M1 - Database**:
+- Nova tabela: conversation_instructions (workspace_id PK, conversation_id FK, content TEXT, created_at TIMESTAMP)
+- RLS ativo: SELECT/INSERT/DELETE apenas pelo owner_id do workspace
+- Índices: conversation_id (busca rápida de instruções por conversa)
+
+**M2 - API Backend**:
+- Novo router: /instructions
+  - POST /conversations/{conversation_id}/instructions - Envia instrução via webhook n8n e salva em BD
+  - GET /conversations/{conversation_id}/instructions - Retorna instrução da conversa
+- Segue padrão fire-and-forget: POST retorna imediatamente com status=pending, n8n dispara em background
+- Reutiliza _build_conversation_text() do ai.py para contexto da conversa
+- Query de conversations filtrada por owner_id (IDOR corrigido)
+- Error handling: N8N_INSTRUCTIONS_WEBHOOK_URL ausente → retorna 500 com mensagem descritiva
+
+**M3 - Frontend**:
+- Chat-view: Botão menu vertical (⋮) que abre modal de instruções
+- Modal: Campo de input para digitar instrução customizada + button "Enviar"
+- Painel de instrução: Exibe instrução atual da conversa em box destacado (before chat input)
+- Polling: Frontend poll a cada 3s para verificar se instrução foi processada (timeout 120s)
+- Estado Redux: conversation_instructions (Map de conversation_id → instruction)
+
+**Mudanças Estruturais**:
+- Nova tabela Supabase: conversation_instructions
+- Novo router API: POST/GET /instructions com webhooks n8n
+- Novos componentes UI: Modal de instruções, painel de exibição
+- Novo env var: N8N_INSTRUCTIONS_WEBHOOK_URL
+- Fluxo: User digita instrução → API envia para n8n → IA processa → retorna sugestão de resposta → Frontend exibe
+
+**Bugs Encontrados e Corrigidos**:
+- IDOR: Endpoint GET /conversations/{id} não filtrava por owner_id (corrigido em M2)
+- Queries redundantes: 2 queries para carregar conversations consolidadas em 1 select eficiente
+- N8N URL ausente: Não existia validação se N8N_INSTRUCTIONS_WEBHOOK_URL estava configurada (agora trata como error)
+
+**Notas para o Futuro**:
+- Workflow n8n para processar instruções ainda não foi criado (será M4)
+- Padrão fire-and-forget segue mesma arquitetura do lead scoring (webhooks.py)
+- Frontend polling é provisório até implementar WebSocket no n8n callback
+- Sugestão: Adicionar filtro de instruções antigas (cleanup automático >30 dias)
+- Tech-lead aprovado após correções de IDOR e query optimization
+
+---
+
 ## [2026-02-07] - M1 Fix Duplicação de Leads no Webhook CRM
 
 ### Milestone: M1 - Fix Duplicação de Leads no Webhook CRM

@@ -20,6 +20,7 @@ import { ArrowLeft, Search } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useWorkspace } from "@/contexts/workspace-context"
 import { useSoundContext } from "@/contexts/sound-context"
+import { apiFetch } from "@/lib/api"
 
 // Infere mime_type pela extensão quando file.type está vazio
 function inferMimeType(file: File): string {
@@ -114,6 +115,9 @@ export function InboxView({ userEmail, workspaceId }: InboxViewProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [suggestions, setSuggestions] = useState<Record<string, AISuggestion | null>>({})
   const [summaries, setSummaries] = useState<Record<string, string | null>>({})
+  // Instructions data per conversation
+  const [instructionsData, setInstructionsData] = useState<Record<string, { id: string; instructions: string | null; status: string; form_data: string; error_message?: string | null; created_at: string } | null>>({})
+  const instructionPollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   // Canais disponíveis do contato selecionado e canal escolhido para envio
   const [contactChannels, setContactChannels] = useState<ContactChannel[]>([])
   const [selectedSendChannel, setSelectedSendChannel] = useState<string | null>(null)
@@ -766,6 +770,94 @@ I'll be waiting.`
     loadMessages(conversationId)
     loadConversations(searchQuery)
   }, [supabase, loadMessages, loadConversations, searchQuery])
+
+  // === Instructions: fetch, generate, polling ===
+  const fetchInstructions = useCallback(async (conversationId: string) => {
+    try {
+      const response = await apiFetch(`/instructions/conversations/${conversationId}`)
+      if (response.ok) {
+        const data = await response.json()
+        if (data.instruction) {
+          setInstructionsData(prev => ({ ...prev, [conversationId]: data.instruction }))
+        }
+      }
+    } catch (err) {
+      console.error("Erro ao buscar instrucoes:", err)
+    }
+  }, [])
+
+  const generateInstructions = useCallback(async (conversationId: string, formData: string) => {
+    const response = await apiFetch(`/instructions/conversations/${conversationId}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ form_data: formData }),
+    })
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: "Erro desconhecido" }))
+      throw new Error(error.detail || "Erro ao gerar instrucoes")
+    }
+
+    const result = await response.json()
+    // Set pending state
+    setInstructionsData(prev => ({
+      ...prev,
+      [conversationId]: {
+        id: result.id,
+        instructions: null,
+        status: "pending",
+        form_data: formData,
+        created_at: new Date().toISOString(),
+      }
+    }))
+
+    // Start polling
+    if (instructionPollingRef.current) clearInterval(instructionPollingRef.current)
+    let pollCount = 0
+    instructionPollingRef.current = setInterval(async () => {
+      pollCount++
+      // Stop polling after 120s (40 polls * 3s)
+      if (pollCount > 40) {
+        if (instructionPollingRef.current) clearInterval(instructionPollingRef.current)
+        instructionPollingRef.current = null
+        return
+      }
+      try {
+        const pollResponse = await apiFetch(`/instructions/conversations/${conversationId}`)
+        if (pollResponse.ok) {
+          const pollData = await pollResponse.json()
+          if (pollData.instruction) {
+            setInstructionsData(prev => ({ ...prev, [conversationId]: pollData.instruction }))
+            if (pollData.instruction.status === "completed" || pollData.instruction.status === "error") {
+              if (instructionPollingRef.current) clearInterval(instructionPollingRef.current)
+              instructionPollingRef.current = null
+            }
+          }
+        }
+      } catch {
+        // Silently ignore polling errors
+      }
+    }, 3000)
+  }, [])
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (instructionPollingRef.current) clearInterval(instructionPollingRef.current)
+    }
+  }, [])
+
+  // Fetch instructions when selecting a conversation
+  useEffect(() => {
+    if (selectedId) {
+      // Stop any existing polling
+      if (instructionPollingRef.current) {
+        clearInterval(instructionPollingRef.current)
+        instructionPollingRef.current = null
+      }
+      fetchInstructions(selectedId)
+    }
+  }, [selectedId, fetchInstructions])
 
   // Sincronizar contatos OpenPhone (atualiza nomes)
   const syncOpenPhoneContacts = useCallback(async () => {
@@ -1777,6 +1869,8 @@ return (
               setMessages(prev => prev.filter(m => m.id !== messageId))
             }}
             onTyping={handleTyping}
+            instructionData={selectedId ? instructionsData[selectedId] || null : null}
+            onGenerateInstructions={selectedId ? (formData: string) => generateInstructions(selectedId, formData) : undefined}
           />
         </div>
       </div>
