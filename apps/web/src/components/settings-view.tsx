@@ -11,6 +11,7 @@ import { useSoundContext } from "@/contexts/sound-context"
 import { createClient } from "@/lib/supabase"
 import { apiFetch } from "@/lib/api"
 import { TemplatesSettings } from "./settings/templates-settings"
+import { InstructionConfigSettings } from "./settings/instruction-config-settings"
 
 interface SettingsViewProps {
   userEmail: string
@@ -1368,6 +1369,9 @@ export function SettingsView({ userEmail }: SettingsViewProps) {
             )}
           </div>
         </section>
+
+        {/* Instruction Config Section */}
+        <InstructionConfigSettings />
 
         {/* Prompts Section */}
         <section className="mt-6 rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
