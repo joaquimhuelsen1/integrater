@@ -816,8 +816,8 @@ I'll be waiting.`
     let pollCount = 0
     instructionPollingRef.current = setInterval(async () => {
       pollCount++
-      // Stop polling after 120s (40 polls * 3s)
-      if (pollCount > 40) {
+      // Stop polling after 300s (100 polls * 3s) - GLM thinking pode levar ate 5min
+      if (pollCount > 100) {
         if (instructionPollingRef.current) clearInterval(instructionPollingRef.current)
         instructionPollingRef.current = null
         return
