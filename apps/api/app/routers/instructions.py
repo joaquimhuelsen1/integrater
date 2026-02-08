@@ -42,7 +42,129 @@ class InstructionResponse(BaseModel):
     updated_at: str
 
 
-# === Endpoints ===
+class ConfigCreateRequest(BaseModel):
+    config_type: str = Field(..., pattern="^(system_prompt|knowledge_base)$")
+    name: str = Field(default="default", max_length=255)
+    content: str = Field(..., min_length=1)
+    is_active: bool = True
+
+
+class ConfigUpdateRequest(BaseModel):
+    name: str | None = None
+    content: str | None = None
+    is_active: bool | None = None
+
+
+# === Config Endpoints ===
+
+@router.get("/configs")
+async def list_configs(
+    config_type: str | None = None,
+    db: Client = Depends(get_supabase),
+    owner_id: str = Depends(get_owner_id),
+):
+    """Lista todas as configs de instrucoes (system_prompt e knowledge_base)."""
+    query = db.table("instruction_configs").select(
+        "id, config_type, name, is_active, created_at, updated_at"
+    ).eq("owner_id", owner_id)
+
+    if config_type:
+        query = query.eq("config_type", config_type)
+
+    result = query.order("config_type").order("name").execute()
+    return {"configs": result.data}
+
+
+@router.get("/configs/{config_id}")
+async def get_config(
+    config_id: UUID,
+    db: Client = Depends(get_supabase),
+    owner_id: str = Depends(get_owner_id),
+):
+    """Retorna uma config com conteudo completo."""
+    result = db.table("instruction_configs").select("*").eq(
+        "id", str(config_id)
+    ).eq("owner_id", owner_id).limit(1).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Config nao encontrada")
+
+    return {"config": result.data[0]}
+
+
+@router.post("/configs")
+async def create_config(
+    request: ConfigCreateRequest,
+    db: Client = Depends(get_supabase),
+    owner_id: str = Depends(get_owner_id),
+):
+    """Cria uma nova config. Para system_prompt, desativa anteriores automaticamente."""
+    # Se for system_prompt, desativar o anterior (so pode ter 1 ativo)
+    if request.config_type == "system_prompt":
+        db.table("instruction_configs").update(
+            {"is_active": False}
+        ).eq("owner_id", owner_id).eq(
+            "config_type", "system_prompt"
+        ).eq("is_active", True).execute()
+
+    insert_data = {
+        "owner_id": owner_id,
+        "workspace_id": owner_id,
+        "config_type": request.config_type,
+        "name": request.name,
+        "content": request.content,
+        "is_active": request.is_active,
+    }
+
+    result = db.table("instruction_configs").insert(insert_data).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=500, detail="Erro ao criar config")
+
+    return {"config": result.data[0]}
+
+
+@router.put("/configs/{config_id}")
+async def update_config(
+    config_id: UUID,
+    request: ConfigUpdateRequest,
+    db: Client = Depends(get_supabase),
+    owner_id: str = Depends(get_owner_id),
+):
+    """Atualiza uma config existente."""
+    update_data = {k: v for k, v in request.model_dump().items() if v is not None}
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="Nenhum campo para atualizar")
+
+    result = db.table("instruction_configs").update(update_data).eq(
+        "id", str(config_id)
+    ).eq("owner_id", owner_id).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Config nao encontrada")
+
+    return {"config": result.data[0]}
+
+
+@router.delete("/configs/{config_id}")
+async def delete_config(
+    config_id: UUID,
+    db: Client = Depends(get_supabase),
+    owner_id: str = Depends(get_owner_id),
+):
+    """Deleta uma config."""
+    result = db.table("instruction_configs").delete().eq(
+        "id", str(config_id)
+    ).eq("owner_id", owner_id).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Config nao encontrada")
+
+    return {"deleted": True}
+
+
+# === Instruction Endpoints ===
 
 @router.post("/conversations/{conversation_id}/generate")
 async def generate_instructions(
