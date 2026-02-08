@@ -53,7 +53,7 @@ interface ComposerProps {
   contactName?: string | null
   channelLabel?: string | null
   // Instrucoes geradas por IA
-  instructionData?: { id: string; instructions: string | null; status: string } | null
+  instructionData?: { id: string; instructions: string | null; status: string; error_message?: string | null } | null
 }
 
 // Detecta tipo de arquivo pela extensão quando file.type está vazio
@@ -671,7 +671,14 @@ return (
             </div>
           )}
 
-{/* Instructions button - mostra quando há instrucoes prontas */}
+{/* Instructions button - loading */}
+          {(instructionData?.status === "pending" || instructionData?.status === "generating") && (
+            <div className="flex h-10 w-10 md:h-11 md:w-11 flex-shrink-0 items-center justify-center rounded-full text-amber-500">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          )}
+
+{/* Instructions button - completed */}
           {instructionData?.status === "completed" && instructionData.instructions && (
             <div className="relative" data-instructions-dropdown>
               <button
@@ -704,6 +711,13 @@ return (
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+{/* Instructions button - error */}
+          {instructionData?.status === "error" && (
+            <div className="flex h-10 w-10 md:h-11 md:w-11 flex-shrink-0 items-center justify-center rounded-full text-red-500" title={instructionData.error_message || "Erro ao gerar instrucoes"}>
+              <ScrollText className="h-5 w-5" />
             </div>
           )}
 
