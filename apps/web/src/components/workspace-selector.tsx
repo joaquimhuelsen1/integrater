@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react"
 import { ChevronDown, Plus, Settings, BarChart3, Check, Briefcase } from "lucide-react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname } from "next/navigation"
 import { useWorkspace, Workspace } from "@/contexts/workspace-context"
 
 interface WorkspaceSelectorProps {
@@ -20,6 +20,13 @@ export function WorkspaceSelector({ compact = false }: WorkspaceSelectorProps) {
   } = useWorkspace()
 
   const router = useRouter()
+  const pathname = usePathname()
+
+  const getSubPath = () => {
+    if (!currentWorkspace || !pathname) return ""
+    const prefix = `/${currentWorkspace.id}`
+    return pathname.startsWith(prefix) ? pathname.slice(prefix.length) : ""
+  }
   const [isOpen, setIsOpen] = useState(false)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [newName, setNewName] = useState("")
@@ -110,8 +117,8 @@ export function WorkspaceSelector({ compact = false }: WorkspaceSelectorProps) {
                 onClick={() => {
                   setCurrentWorkspace(ws)
                   setIsOpen(false)
-                  // Navega para a URL do workspace (sem reload!)
-                  router.push(`/${ws.id}`)
+                  // Navega para a URL do workspace preservando a página atual
+                  router.push(`/${ws.id}${getSubPath()}`)
                 }}
                 className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-700 ${
                   ws.id === currentWorkspace.id ? "bg-zinc-100 dark:bg-zinc-700" : ""
